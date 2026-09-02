@@ -1,6 +1,13 @@
 [package]
 name = "magenta-desktop"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+[[bin]]
+name = "magenta"
+path = "src/main.rs"
 
 [dependencies]
+magenta-ui.workspace = true
+gpui.workspace = true
+gpui_platform.workspace = true
