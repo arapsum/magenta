@@ -1,3 +1,4 @@
 mod app;
+mod components;
 
-pub use self::app::Magenta;
+pub use self::app::MainView;

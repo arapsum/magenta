@@ -1,23 +1,30 @@
-use gpui::{Render, SharedString, Window, div, prelude::*, px, rgb, rgba};
+use gpui::{Render, SharedString, Window, div, prelude::*, rgb};
 
-pub struct Magenta {
+use crate::components::titlebar;
+
+pub struct MainView {
     pub text: SharedString,
 }
 
-impl Render for Magenta {
+impl Render for MainView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
-            .gap_3()
+            .flex_col()
+            .size_full()
             .bg(rgb(0x0A0B10))
-            .size(px(500.))
-            .justify_center()
-            .items_center()
-            .shadow_lg()
-            .border_1()
-            .border_color(rgba(0xFFFFFF12))
-            .text_xl()
-            .text_color(rgb(0xF5F5F7))
-            .child(format!("Hello, {}!", self.text))
+            .child(titlebar::render("Magenta"))
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .items_center()
+                    .justify_center()
+                    .text_xl()
+                    .text_color(rgb(0xF5F5F7))
+                    .child(format!("Hello, {}!", self.text)),
+            )
     }
 }
