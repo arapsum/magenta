@@ -7,7 +7,7 @@ mod linux {
         AnyElement, App, Context, Decorations, InteractiveElement, IntoElement, MouseButton,
         ParentElement, Pixels, Render, RenderOnce, StatefulInteractiveElement as _, Styled,
         Subscription, Window, WindowButton, WindowButtonLayout, div, prelude::FluentBuilder as _,
-        px, rgb, rgba,
+        px,
     };
     use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex};
 
@@ -105,12 +105,12 @@ mod linux {
                 .w_full()
                 .h(LINUX_TITLE_BAR_HEIGHT)
                 .flex_shrink_0()
-                .bg(rgb(0x0A0B10))
+                .bg(cx.theme().title_bar)
                 .border_b_1()
                 .border_color(if window.is_window_active() {
-                    rgba(0xFFFFFF0A)
+                    cx.theme().title_bar_border
                 } else {
-                    rgba(0xFFFFFF06)
+                    cx.theme().title_bar_border.opacity(0.6)
                 })
                 .when_some(left_controls, |this, controls| this.child(controls))
                 .child(drag_region)
