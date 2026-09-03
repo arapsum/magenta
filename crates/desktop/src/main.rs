@@ -10,7 +10,7 @@ fn main() {
     app.run(|cx: &mut App| {
         cx.set_app_identity("magenta-1", "Magenta");
         gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        magenta_ui::theme::init(cx);
 
         let bounds = Bounds::centered(None, size(px(500.0), px(500.)), cx);
         let mut window_options = gpui_component::TitleBar::window_options();
