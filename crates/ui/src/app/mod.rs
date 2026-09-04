@@ -7,8 +7,8 @@ use magenta_core::{Attachment, ConversationId, MessageRole, MessageStatus};
 
 use crate::components::{
     conversation::{
-        ConversationView, ConversationViewEvent, DemoCatalog, DemoThread, chat_model_for,
-        fake_response, summary_for,
+        ConversationView, ConversationViewEvent, DemoCatalog, DemoThread, fake_response,
+        summary_for,
     },
     prompt_input::{PromptComposer, PromptComposerEvent, PromptRequest},
     sidebar::{SidebarEvent, SidebarView},
@@ -119,10 +119,8 @@ impl MainView {
         };
         self.sync_active_thread(cx);
         self.active_conversation = Some(id);
-        let model = chat_model_for(&thread.conversation);
-        let effort = thread.conversation.effort;
         self.composer.update(cx, |composer, cx| {
-            composer.set_configuration(model, effort, cx);
+            composer.set_configuration(&thread.conversation.generation, cx);
         });
         self.conversation.update(cx, |conversation, cx| {
             conversation.load(thread, cx);
@@ -139,11 +137,9 @@ impl MainView {
                 .thread(id)
                 .map(|thread| thread.conversation.clone())
         } else {
-            let conversation = self.catalog.create_conversation(
-                request.prompt.as_ref(),
-                request.model,
-                request.effort,
-            );
+            let conversation = self
+                .catalog
+                .create_conversation(request.prompt.as_ref(), request.generation.clone());
             self.sidebar.update(cx, |sidebar, cx| {
                 sidebar.add_conversation(summary_for(&conversation), cx);
             });
@@ -196,8 +192,9 @@ impl MainView {
             view.start_generation(user, assistant, response, window, cx);
         });
         tracing::info!(
-            model = ?request.model,
-            effort = ?request.effort,
+            provider = %request.generation.provider.0,
+            model = %request.generation.model.0,
+            effort = ?request.generation.effort,
             attachment_count = request.attachments.len(),
             prompt_length = request.prompt.len(),
             operation = "prompt.submit",
@@ -237,7 +234,7 @@ impl MainView {
             Vec::new(),
         );
         self.composer.update(cx, |composer, cx| {
-            composer.set_configuration(chat_model_for(&conversation), conversation.effort, cx);
+            composer.set_configuration(&conversation.generation, cx);
         });
         self.conversation.update(cx, |view, cx| {
             view.regenerate(message_id, assistant, fake_response(&prompt), window, cx);

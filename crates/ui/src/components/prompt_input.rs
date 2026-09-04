@@ -23,7 +23,7 @@ use gpui_component::{
     v_flex,
 };
 
-use magenta_core::EffortLevel;
+use magenta_core::{EffortLevel, GenerationConfig, ModelId, ProviderId};
 
 use crate::{MagentaError, components::code_fence, notification_for_error};
 
@@ -55,10 +55,29 @@ impl ChatModel {
         }
     }
 
-    pub(crate) fn from_id(id: &str) -> Self {
-        match id {
-            "gpt" => Self::Gpt,
-            "gemini-pro" => Self::GeminiPro,
+    const fn provider_id(self) -> &'static str {
+        match self {
+            Self::Sonnet => "anthropic",
+            Self::Gpt => "openai",
+            Self::GeminiPro => "google",
+        }
+    }
+
+    pub(crate) fn generation_config(self, effort: EffortLevel) -> GenerationConfig {
+        GenerationConfig::new(
+            ProviderId::new(self.provider_id()),
+            ModelId::new(self.id()),
+            effort,
+        )
+    }
+
+    pub(crate) fn from_generation(configuration: &GenerationConfig) -> Self {
+        match (
+            configuration.provider.0.as_str(),
+            configuration.model.0.as_str(),
+        ) {
+            ("openai", "gpt") => Self::Gpt,
+            ("google", "gemini-pro") => Self::GeminiPro,
             _ => Self::Sonnet,
         }
     }
@@ -90,8 +109,7 @@ impl ReferenceImage {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptRequest {
     pub prompt: SharedString,
-    pub model: ChatModel,
-    pub effort: EffortLevel,
+    pub generation: GenerationConfig,
     pub attachments: Vec<PathBuf>,
 }
 
@@ -161,12 +179,11 @@ impl PromptComposer {
 
     pub fn set_configuration(
         &mut self,
-        model: ChatModel,
-        effort: EffortLevel,
+        configuration: &GenerationConfig,
         cx: &mut Context<'_, Self>,
     ) {
-        self.model = Some(model);
-        self.effort = Some(effort);
+        self.model = Some(ChatModel::from_generation(configuration));
+        self.effort = Some(configuration.effort);
         cx.notify();
     }
 
@@ -422,10 +439,11 @@ impl PromptComposer {
             return None;
         }
 
+        let model = self.model?;
+        let effort = self.effort?;
         Some(PromptRequest {
             prompt: self.input.read(cx).value().trim().to_owned().into(),
-            model: self.model?,
-            effort: self.effort?,
+            generation: model.generation_config(effort),
             attachments: self
                 .attachments
                 .iter()
@@ -825,9 +843,36 @@ mod tests {
 
                 let request = composer.request(cx).expect("the request should be ready");
                 assert_eq!(request.prompt.as_ref(), "A quiet cyan horizon");
-                assert_eq!(request.model, ChatModel::GeminiPro);
-                assert_eq!(request.effort, EffortLevel::High);
+                assert_eq!(request.generation.provider, ProviderId::new("google"));
+                assert_eq!(request.generation.model, ModelId::new("gemini-pro"));
+                assert_eq!(request.generation.effort, EffortLevel::High);
                 assert!(request.attachments.is_empty());
+            })
+            .expect("the composer test window should remain open");
+    }
+
+    #[test]
+    fn model_options_round_trip_through_core_generation_configuration() {
+        for model in ChatModel::ALL {
+            let configuration = model.generation_config(EffortLevel::Medium);
+
+            assert_eq!(ChatModel::from_generation(&configuration), model);
+            assert_eq!(configuration.effort, EffortLevel::Medium);
+        }
+    }
+
+    #[gpui::test]
+    fn core_configuration_restores_the_composer_selection(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let window = cx.open_window(size(px(720.), px(420.)), PromptComposer::new);
+        let configuration = ChatModel::Gpt.generation_config(EffortLevel::High);
+
+        window
+            .update(cx, |composer, _, cx| {
+                composer.set_configuration(&configuration, cx);
+
+                assert_eq!(composer.model, Some(ChatModel::Gpt));
+                assert_eq!(composer.effort, Some(EffortLevel::High));
             })
             .expect("the composer test window should remain open");
     }

@@ -1,6 +1,6 @@
 use magenta_core::{
-    Attachment, Conversation, ConversationId, EffortLevel, Message, MessageId, MessageRole,
-    MessageStatus, ModelId,
+    Attachment, Conversation, ConversationId, EffortLevel, GenerationConfig, Message, MessageId,
+    MessageRole, MessageStatus,
 };
 
 use crate::components::{
@@ -35,8 +35,7 @@ impl DemoCatalog {
                 let conversation = Conversation {
                     id: summary.id,
                     title: summary.title,
-                    model: model_id(model),
-                    effort,
+                    generation: model.generation_config(effort),
                 };
                 let messages = fixture_messages(
                     conversation.id,
@@ -68,14 +67,12 @@ impl DemoCatalog {
     pub fn create_conversation(
         &mut self,
         prompt: &str,
-        model: ChatModel,
-        effort: EffortLevel,
+        generation: GenerationConfig,
     ) -> Conversation {
         let conversation = Conversation {
             id: ConversationId::new(self.next_conversation_id),
             title: title_from_prompt(prompt),
-            model: model_id(model),
-            effort,
+            generation,
         };
         self.next_conversation_id = self.next_conversation_id.saturating_add(1);
         self.threads.push(DemoThread {
@@ -136,7 +133,7 @@ pub fn summary_for(conversation: &Conversation) -> ConversationSummary {
 
 #[must_use]
 pub fn chat_model_for(conversation: &Conversation) -> ChatModel {
-    ChatModel::from_id(conversation.model.0.as_str())
+    ChatModel::from_generation(&conversation.generation)
 }
 
 #[must_use]
@@ -290,10 +287,6 @@ const fn demo_effort(index: usize) -> EffortLevel {
     }
 }
 
-fn model_id(model: ChatModel) -> ModelId {
-    ModelId::new(model.id())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,6 +312,18 @@ mod tests {
 
         assert_eq!(title, "A very long first line that should become a...");
         assert!(title.chars().count() <= 46);
+    }
+
+    #[test]
+    fn created_conversations_preserve_the_generation_configuration() {
+        let mut catalog = DemoCatalog::new();
+        let generation = ChatModel::Gpt.generation_config(EffortLevel::High);
+
+        let conversation =
+            catalog.create_conversation("Keep the boundary narrow", generation.clone());
+
+        assert_eq!(conversation.generation, generation);
+        assert_eq!(chat_model_for(&conversation), ChatModel::Gpt);
     }
 
     #[test]

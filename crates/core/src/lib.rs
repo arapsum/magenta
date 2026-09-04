@@ -33,6 +33,16 @@ impl ModelId {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ProviderId(pub String);
+
+impl ProviderId {
+    #[must_use]
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EffortLevel {
     Low,
@@ -49,6 +59,24 @@ impl EffortLevel {
             Self::Low => "Low",
             Self::Medium => "Medium",
             Self::High => "High",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GenerationConfig {
+    pub provider: ProviderId,
+    pub model: ModelId,
+    pub effort: EffortLevel,
+}
+
+impl GenerationConfig {
+    #[must_use]
+    pub const fn new(provider: ProviderId, model: ModelId, effort: EffortLevel) -> Self {
+        Self {
+            provider,
+            model,
+            effort,
         }
     }
 }
@@ -76,8 +104,7 @@ pub struct Attachment {
 pub struct Conversation {
     pub id: ConversationId,
     pub title: String,
-    pub model: ModelId,
-    pub effort: EffortLevel,
+    pub generation: GenerationConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,6 +126,20 @@ mod tests {
         assert_eq!(ConversationId::new(7), ConversationId(7));
         assert_eq!(MessageId::new(11), MessageId(11));
         assert_eq!(ModelId::new("sonnet").0, "sonnet");
+        assert_eq!(ProviderId::new("anthropic").0, "anthropic");
+    }
+
+    #[test]
+    fn generation_configuration_keeps_provider_model_and_effort_together() {
+        let configuration = GenerationConfig::new(
+            ProviderId::new("anthropic"),
+            ModelId::new("sonnet"),
+            EffortLevel::High,
+        );
+
+        assert_eq!(configuration.provider, ProviderId::new("anthropic"));
+        assert_eq!(configuration.model, ModelId::new("sonnet"));
+        assert_eq!(configuration.effort, EffortLevel::High);
     }
 
     #[test]
