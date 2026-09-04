@@ -93,68 +93,79 @@ fn composer(cx: &mut Context<MainView>) -> AnyElement {
             linear_color_stop(cx.theme().secondary.opacity(0.82), 1.),
         ))
         .shadow_lg()
+        .child(composer_prompt(cx))
+        .child(composer_controls(cx))
+        .into_any_element()
+}
+
+fn composer_prompt(cx: &mut Context<MainView>) -> AnyElement {
+    v_flex()
+        .gap(px(7.))
         .child(
-            v_flex()
+            h_flex()
                 .gap(px(7.))
                 .child(
-                    h_flex()
-                        .gap(px(7.))
-                        .child(
-                            div()
-                                .size(px(34.))
-                                .rounded(px(7.))
-                                .border_1()
-                                .border_color(cx.theme().border)
-                                .bg(linear_gradient(
-                                    145.,
-                                    linear_color_stop(cx.theme().yellow.opacity(0.68), 0.),
-                                    linear_color_stop(cx.theme().blue.opacity(0.72), 1.),
-                                )),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .size(px(34.))
-                                .rounded(px(7.))
-                                .border_1()
-                                .border_color(cx.theme().border)
-                                .bg(cx.theme().muted)
-                                .child(Icon::new(IconName::GalleryVerticalEnd).size_4()),
-                        ),
+                    div()
+                        .size(px(34.))
+                        .rounded(px(7.))
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .bg(linear_gradient(
+                            145.,
+                            linear_color_stop(cx.theme().yellow.opacity(0.68), 0.),
+                            linear_color_stop(cx.theme().blue.opacity(0.72), 1.),
+                        )),
                 )
                 .child(
                     div()
-                        .text_size(px(12.))
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Describe a new image"),
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(34.))
+                        .rounded(px(7.))
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .bg(cx.theme().muted)
+                        .child(Icon::new(IconName::GalleryVerticalEnd).size_4()),
                 ),
         )
         .child(
-            h_flex()
-                .w_full()
-                .items_center()
-                .justify_between()
-                .child(
-                    h_flex()
-                        .gap(px(5.))
-                        .child(mini_chip("G", "Nano Banana Pro", cx))
-                        .child(mini_chip("", "4:3", cx))
-                        .child(mini_chip("◇", "1K", cx))
-                        .child(mini_chip("", "Unlimited  ●", cx)),
-                )
-                .child(
-                    Button::new("generate")
-                        .primary()
-                        .h(px(36.))
-                        .px(px(14.))
-                        .rounded(px(7.))
-                        .icon(IconName::Asterisk)
-                        .label("Generate"),
-                ),
+            div()
+                .text_size(px(12.))
+                .text_color(cx.theme().muted_foreground)
+                .child("Describe a new image"),
         )
         .into_any_element()
+}
+
+fn composer_controls(cx: &mut Context<MainView>) -> AnyElement {
+    h_flex()
+        .w_full()
+        .items_center()
+        .justify_between()
+        .child(composer_options(cx))
+        .child(generate_button())
+        .into_any_element()
+}
+
+fn composer_options(cx: &mut Context<MainView>) -> AnyElement {
+    h_flex()
+        .gap(px(5.))
+        .child(mini_chip("G", "Nano Banana Pro", cx))
+        .child(mini_chip("", "4:3", cx))
+        .child(mini_chip("◇", "1K", cx))
+        .child(mini_chip("", "Unlimited  ●", cx))
+        .into_any_element()
+}
+
+fn generate_button() -> Button {
+    Button::new("generate")
+        .primary()
+        .h(px(36.))
+        .px(px(14.))
+        .rounded(px(7.))
+        .icon(IconName::Asterisk)
+        .label("Generate")
 }
 
 fn mini_chip(prefix: &'static str, label: &'static str, cx: &mut Context<MainView>) -> AnyElement {

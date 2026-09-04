@@ -1,8 +1,11 @@
-use std::{io, path::PathBuf};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 use magenta_ui::{MagentaError, Result};
 use tracing_appender::{
-    non_blocking::WorkerGuard,
+    non_blocking::{NonBlocking, WorkerGuard},
     rolling::{RollingFileAppender, Rotation},
 };
 use tracing_subscriber::{fmt, layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
@@ -16,23 +19,37 @@ pub struct DiagnosticsGuard {
 
 pub fn init() -> Result<DiagnosticsGuard> {
     let log_directory = log_directory()?;
-    std::fs::create_dir_all(&log_directory).map_err(|source| MagentaError::Diagnostics {
-        path: log_directory.clone(),
-        source,
-    })?;
+    create_log_directory(&log_directory)?;
+    let file_appender = build_file_appender(&log_directory)?;
+    let (file_writer, file_guard) = tracing_appender::non_blocking(file_appender);
+    install_subscriber(file_writer, log_directory)?;
 
-    let file_appender = RollingFileAppender::builder()
+    Ok(DiagnosticsGuard {
+        _file_guard: file_guard,
+    })
+}
+
+fn create_log_directory(log_directory: &Path) -> Result<()> {
+    std::fs::create_dir_all(log_directory).map_err(|source| MagentaError::Diagnostics {
+        path: log_directory.to_path_buf(),
+        source,
+    })
+}
+
+fn build_file_appender(log_directory: &Path) -> Result<RollingFileAppender> {
+    RollingFileAppender::builder()
         .rotation(Rotation::DAILY)
         .filename_prefix("magenta")
         .filename_suffix("log")
         .max_log_files(RETAINED_LOG_FILES)
-        .build(&log_directory)
+        .build(log_directory)
         .map_err(|source| MagentaError::Diagnostics {
-            path: log_directory.clone(),
+            path: log_directory.to_path_buf(),
             source: io::Error::other(source),
-        })?;
-    let (file_writer, file_guard) = tracing_appender::non_blocking(file_appender);
+        })
+}
 
+fn install_subscriber(file_writer: NonBlocking, log_directory: PathBuf) -> Result<()> {
     tracing_subscriber::registry()
         .with(filter())
         .with(
@@ -51,11 +68,7 @@ pub fn init() -> Result<DiagnosticsGuard> {
         .map_err(|source| MagentaError::Diagnostics {
             path: log_directory,
             source: io::Error::other(source),
-        })?;
-
-    Ok(DiagnosticsGuard {
-        _file_guard: file_guard,
-    })
+        })
 }
 
 pub fn init_stderr() {

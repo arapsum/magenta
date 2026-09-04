@@ -216,6 +216,130 @@ impl SidebarBody {
             .into_any_element()
     }
 }
+fn new_chat_button(body: &SidebarBody, cx: &mut App) -> Button {
+    let mut bevel_top = cx.theme().button_hover;
+    bevel_top.s *= 0.34;
+    let mut bevel_bottom = cx.theme().button;
+    bevel_bottom.s *= 0.24;
+    bevel_bottom.l = (bevel_bottom.l + 0.025).min(1.);
+
+    let new_chat_view = body.view.clone();
+    Button::new(Destination::NewChat.id())
+        .accessibility_id("sidebar-new-chat")
+        .w_full()
+        .h(px(32.))
+        .px(px(10.))
+        .rounded(px(8.))
+        .border_1()
+        .border_color(cx.theme().input.opacity(0.88))
+        .bg(linear_gradient(
+            180.,
+            linear_color_stop(bevel_top.opacity(0.98), 0.),
+            linear_color_stop(bevel_bottom.opacity(0.99), 1.),
+        ))
+        .shadow(illuminated_button_shadow(cx))
+        .text_color(cx.theme().foreground)
+        .when(body.collapsed, |this| {
+            this.size(px(32.))
+                .p_0()
+                .rounded(px(8.))
+                .tooltip(Destination::NewChat.label())
+        })
+        .child(compact_bevel_light(cx))
+        .when(body.collapsed, |this| this.icon(IconName::Plus))
+        .when(!body.collapsed, |this| {
+            this.child(
+                h_flex()
+                    .relative()
+                    .w_full()
+                    .items_center()
+                    .justify_start()
+                    .gap(px(10.))
+                    .child(Icon::new(IconName::Plus).size_4())
+                    .child(
+                        div()
+                            .text_size(px(13.))
+                            .font_medium()
+                            .child(Destination::NewChat.label()),
+                    ),
+            )
+        })
+        .on_click(move |_, _, cx| {
+            new_chat_view.update(cx, |view, cx| {
+                view.select_sidebar_destination(Destination::NewChat, cx);
+            });
+        })
+}
+
+fn primary_navigation(body: &SidebarBody, cx: &mut App) -> AnyElement {
+    v_flex()
+        .w_full()
+        .gap(px(7.))
+        .child(body.destination_button(Destination::Models, IconName::Bot, None, cx))
+        .child(body.destination_button(
+            Destination::ImageLibrary,
+            IconName::GalleryVerticalEnd,
+            None,
+            cx,
+        ))
+        .child(body.destination_button(Destination::Experts, IconName::User, None, cx))
+        .child(body.destination_button(Destination::Collaborate, IconName::Calendar, None, cx))
+        .child(body.destination_button(Destination::TrustScore, IconName::Star, None, cx))
+        .child(body.destination_button(Destination::Billing, IconName::ChartPie, None, cx))
+        .into_any_element()
+}
+
+fn secondary_navigation(body: &SidebarBody, cx: &mut App) -> AnyElement {
+    let project_suffix = h_flex()
+        .gap_1()
+        .items_center()
+        .text_color(cx.theme().muted_foreground)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .size(px(19.))
+                .rounded(px(5.))
+                .bg(cx.theme().muted.opacity(0.75))
+                .text_size(px(10.))
+                .child("∞"),
+        )
+        .child(Icon::new(IconName::EllipsisVertical).xsmall())
+        .into_any_element();
+
+    v_flex()
+        .w_full()
+        .gap(px(5.))
+        .border_t_1()
+        .border_color(cx.theme().sidebar_border)
+        .pt(px(14.))
+        .child(body.destination_button(Destination::SearchChat, IconName::Search, None, cx))
+        .child(body.destination_button(Destination::AddFolder, IconName::Folder, None, cx))
+        .child(body.destination_button(
+            Destination::Project,
+            IconName::ChevronDown,
+            Some(project_suffix),
+            cx,
+        ))
+        .child(body.destination_button(Destination::Recent, IconName::Inbox, None, cx))
+        .child(body.history_button(
+            Some(Destination::StartupStrategy),
+            Destination::StartupStrategy.label(),
+            true,
+            false,
+            cx,
+        ))
+        .child(body.history_button(
+            Some(Destination::SocialContent),
+            Destination::SocialContent.label(),
+            false,
+            false,
+            cx,
+        ))
+        .child(body.history_button(None, "Website landing page copy", false, true, cx))
+        .into_any_element()
+}
 
 impl Collapsible for SidebarBody {
     fn collapsed(mut self, collapsed: bool) -> Self {
@@ -235,167 +359,18 @@ impl SidebarItem for SidebarBody {
         _window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
-        let mut bevel_top = cx.theme().button_hover;
-        bevel_top.s *= 0.34;
-        let mut bevel_bottom = cx.theme().button;
-        bevel_bottom.s *= 0.24;
-        bevel_bottom.l = (bevel_bottom.l + 0.025).min(1.);
-
-        let project_suffix = h_flex()
-            .gap_1()
-            .items_center()
-            .text_color(cx.theme().muted_foreground)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(px(19.))
-                    .rounded(px(5.))
-                    .bg(cx.theme().muted.opacity(0.75))
-                    .text_size(px(10.))
-                    .child("∞"),
-            )
-            .child(Icon::new(IconName::EllipsisVertical).xsmall())
-            .into_any_element();
-
-        let new_chat_view = self.view.clone();
-        let new_chat = Button::new(Destination::NewChat.id())
-            .accessibility_id("sidebar-new-chat")
-            .w_full()
-            .h(px(32.))
-            .px(px(10.))
-            .rounded(px(8.))
-            .border_1()
-            .border_color(cx.theme().input.opacity(0.88))
-            .bg(linear_gradient(
-                180.,
-                linear_color_stop(bevel_top.opacity(0.98), 0.),
-                linear_color_stop(bevel_bottom.opacity(0.99), 1.),
-            ))
-            .shadow(illuminated_button_shadow(cx))
-            .text_color(cx.theme().foreground)
-            .when(self.collapsed, |this| {
-                this.size(px(32.))
-                    .p_0()
-                    .rounded(px(8.))
-                    .tooltip(Destination::NewChat.label())
-            })
-            .child(compact_bevel_light(cx))
-            .when(self.collapsed, |this| this.icon(IconName::Plus))
-            .when(!self.collapsed, |this| {
-                this.child(
-                    h_flex()
-                        .relative()
-                        .w_full()
-                        .items_center()
-                        .justify_start()
-                        .gap(px(10.))
-                        .child(Icon::new(IconName::Plus).size_4())
-                        .child(
-                            div()
-                                .text_size(px(13.))
-                                .font_medium()
-                                .child(Destination::NewChat.label()),
-                        ),
-                )
-            })
-            .on_click(move |_, _, cx| {
-                new_chat_view.update(cx, |view, cx| {
-                    view.select_sidebar_destination(Destination::NewChat, cx);
-                });
-            });
+        let new_chat = new_chat_button(&self, cx);
+        let primary_navigation = primary_navigation(&self, cx);
+        let secondary_navigation_view = (!self.collapsed).then(|| secondary_navigation(&self, cx));
 
         v_flex()
             .id(id.into())
             .w_full()
             .gap(px(7.))
             .child(new_chat)
-            .child(
-                v_flex()
-                    .w_full()
-                    .gap(px(7.))
-                    .child(self.destination_button(Destination::Models, IconName::Bot, None, cx))
-                    .child(self.destination_button(
-                        Destination::ImageLibrary,
-                        IconName::GalleryVerticalEnd,
-                        None,
-                        cx,
-                    ))
-                    .child(self.destination_button(Destination::Experts, IconName::User, None, cx))
-                    .child(self.destination_button(
-                        Destination::Collaborate,
-                        IconName::Calendar,
-                        None,
-                        cx,
-                    ))
-                    .child(self.destination_button(
-                        Destination::TrustScore,
-                        IconName::Star,
-                        None,
-                        cx,
-                    ))
-                    .child(self.destination_button(
-                        Destination::Billing,
-                        IconName::ChartPie,
-                        None,
-                        cx,
-                    )),
-            )
-            .when(!self.collapsed, |this| {
-                this.child(
-                    v_flex()
-                        .w_full()
-                        .gap(px(5.))
-                        .border_t_1()
-                        .border_color(cx.theme().sidebar_border)
-                        .pt(px(14.))
-                        .child(self.destination_button(
-                            Destination::SearchChat,
-                            IconName::Search,
-                            None,
-                            cx,
-                        ))
-                        .child(self.destination_button(
-                            Destination::AddFolder,
-                            IconName::Folder,
-                            None,
-                            cx,
-                        ))
-                        .child(self.destination_button(
-                            Destination::Project,
-                            IconName::ChevronDown,
-                            Some(project_suffix),
-                            cx,
-                        ))
-                        .child(self.destination_button(
-                            Destination::Recent,
-                            IconName::Inbox,
-                            None,
-                            cx,
-                        ))
-                        .child(self.history_button(
-                            Some(Destination::StartupStrategy),
-                            Destination::StartupStrategy.label(),
-                            true,
-                            false,
-                            cx,
-                        ))
-                        .child(self.history_button(
-                            Some(Destination::SocialContent),
-                            Destination::SocialContent.label(),
-                            false,
-                            false,
-                            cx,
-                        ))
-                        .child(self.history_button(
-                            None,
-                            "Website landing page copy",
-                            false,
-                            true,
-                            cx,
-                        )),
-                )
+            .child(primary_navigation)
+            .when_some(secondary_navigation_view, |this, navigation| {
+                this.child(navigation)
             })
     }
 }
@@ -468,20 +443,28 @@ fn header(collapsed: bool, cx: &mut Context<MainView>) -> AnyElement {
 
 fn footer(collapsed: bool, cx: &mut Context<MainView>) -> AnyElement {
     if collapsed {
-        return h_flex()
-            .w_full()
-            .justify_center()
-            .child(
-                Button::new("upgrade-compact")
-                    .primary()
-                    .small()
-                    .icon(IconName::Asterisk)
-                    .tooltip("Upgrade to Magenta Pro")
-                    .on_click(select_handler(Destination::Billing, cx)),
-            )
-            .into_any_element();
+        compact_footer(cx)
+    } else {
+        upgrade_card(cx)
     }
+}
 
+fn compact_footer(cx: &mut Context<MainView>) -> AnyElement {
+    h_flex()
+        .w_full()
+        .justify_center()
+        .child(
+            Button::new("upgrade-compact")
+                .primary()
+                .small()
+                .icon(IconName::Asterisk)
+                .tooltip("Upgrade to Magenta Pro")
+                .on_click(select_handler(Destination::Billing, cx)),
+        )
+        .into_any_element()
+}
+
+fn upgrade_card(cx: &mut Context<MainView>) -> AnyElement {
     let mut card_top = cx.theme().button_hover;
     card_top.s *= 0.38;
     let mut card_bottom = cx.theme().button;
@@ -504,91 +487,99 @@ fn footer(collapsed: bool, cx: &mut Context<MainView>) -> AnyElement {
         .border_color(cx.theme().primary.opacity(0.38))
         .shadow(illuminated_card_shadow(cx))
         .child(card_bevel_light(cx))
+        .child(upgrade_card_header(cx))
+        .child(upgrade_card_copy(cx))
+        .child(upgrade_card_actions(cx))
+        .into_any_element()
+}
+
+fn upgrade_card_header(cx: &mut Context<MainView>) -> AnyElement {
+    h_flex()
+        .relative()
+        .items_center()
+        .justify_between()
         .child(
             h_flex()
-                .relative()
                 .items_center()
-                .justify_between()
-                .child(
-                    h_flex()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .size(px(24.))
-                                .rounded_full()
-                                .bg(cx.theme().tokens.primary.background)
-                                .text_color(cx.theme().primary_foreground)
-                                .child(Icon::new(IconName::Star).xsmall()),
-                        )
-                        .child(
-                            div()
-                                .font_medium()
-                                .text_size(px(13.))
-                                .text_color(cx.theme().foreground)
-                                .child("Upgrade Pro!"),
-                        ),
-                )
+                .gap_2()
                 .child(
                     div()
                         .flex()
                         .items_center()
                         .justify_center()
-                        .size(px(20.))
+                        .size(px(24.))
                         .rounded_full()
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .text_color(cx.theme().muted_foreground)
-                        .child(Icon::new(IconName::WindowClose).xsmall()),
+                        .bg(cx.theme().tokens.primary.background)
+                        .text_color(cx.theme().primary_foreground)
+                        .child(Icon::new(IconName::Star).xsmall()),
+                )
+                .child(
+                    div()
+                        .font_medium()
+                        .text_size(px(13.))
+                        .text_color(cx.theme().foreground)
+                        .child("Upgrade Pro!"),
                 ),
         )
         .child(
             div()
-                .relative()
-                .max_w(px(170.))
-                .text_size(px(10.))
-                .line_height(px(14.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .size(px(20.))
+                .rounded_full()
+                .border_1()
+                .border_color(cx.theme().border)
                 .text_color(cx.theme().muted_foreground)
-                .child("Upgrade to Pro and elevate your experience today"),
+                .child(Icon::new(IconName::WindowClose).xsmall()),
+        )
+        .into_any_element()
+}
+
+fn upgrade_card_copy(cx: &mut Context<MainView>) -> AnyElement {
+    div()
+        .relative()
+        .max_w(px(170.))
+        .text_size(px(10.))
+        .line_height(px(14.))
+        .text_color(cx.theme().muted_foreground)
+        .child("Upgrade to Pro and elevate your experience today")
+        .into_any_element()
+}
+
+fn upgrade_card_actions(cx: &mut Context<MainView>) -> AnyElement {
+    h_flex()
+        .relative()
+        .items_center()
+        .gap(px(8.))
+        .child(
+            Button::new("upgrade")
+                .primary()
+                .small()
+                .h(px(28.))
+                .px(px(14.))
+                .rounded(px(7.))
+                .bg(linear_gradient(
+                    100.,
+                    linear_color_stop(cx.theme().primary, 0.),
+                    linear_color_stop(cx.theme().blue, 1.),
+                ))
+                .shadow(vec![
+                    BoxShadow::new(px(0.), px(3.), cx.theme().primary.opacity(0.22))
+                        .blur_radius(px(9.)),
+                    BoxShadow::new(px(0.), px(1.), cx.theme().foreground.opacity(0.2)).inset(),
+                ])
+                .icon(IconName::Star)
+                .label("Upgrade")
+                .on_click(select_handler(Destination::Billing, cx)),
         )
         .child(
-            h_flex()
-                .relative()
-                .items_center()
-                .gap(px(8.))
-                .child(
-                    Button::new("upgrade")
-                        .primary()
-                        .small()
-                        .h(px(28.))
-                        .px(px(14.))
-                        .rounded(px(7.))
-                        .bg(linear_gradient(
-                            100.,
-                            linear_color_stop(cx.theme().primary, 0.),
-                            linear_color_stop(cx.theme().blue, 1.),
-                        ))
-                        .shadow(vec![
-                            BoxShadow::new(px(0.), px(3.), cx.theme().primary.opacity(0.22))
-                                .blur_radius(px(9.)),
-                            BoxShadow::new(px(0.), px(1.), cx.theme().foreground.opacity(0.2))
-                                .inset(),
-                        ])
-                        .icon(IconName::Star)
-                        .label("Upgrade")
-                        .on_click(select_handler(Destination::Billing, cx)),
-                )
-                .child(
-                    Button::new("learn-more")
-                        .ghost()
-                        .h(px(28.))
-                        .px(px(8.))
-                        .label("Learn More")
-                        .on_click(select_handler(Destination::Billing, cx)),
-                ),
+            Button::new("learn-more")
+                .ghost()
+                .h(px(28.))
+                .px(px(8.))
+                .label("Learn More")
+                .on_click(select_handler(Destination::Billing, cx)),
         )
         .into_any_element()
 }

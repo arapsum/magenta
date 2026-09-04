@@ -63,22 +63,27 @@ pub fn init(cx: &mut App) -> ThemeInitOutcome {
 
 fn init_from_str(themes: &str, cx: &mut App) -> ThemeInitOutcome {
     let requested = BuiltInTheme::Dark;
-    let loaded = ThemeRegistry::global_mut(cx)
-        .load_themes_from_str(themes)
-        .map_err(|source| MagentaError::ThemeLoad { source });
 
-    if let Err(error) = loaded {
-        apply_default_dark(cx);
-        return ThemeInitOutcome::Fallback { requested, error };
-    }
-
-    match apply(requested, cx) {
+    match load_and_apply_theme(themes, requested, cx) {
         Ok(()) => ThemeInitOutcome::Applied(requested),
-        Err(error) => {
-            apply_default_dark(cx);
-            ThemeInitOutcome::Fallback { requested, error }
-        }
+        Err(error) => fallback_to_default_dark(requested, error, cx),
     }
+}
+
+fn load_and_apply_theme(themes: &str, requested: BuiltInTheme, cx: &mut App) -> Result<()> {
+    ThemeRegistry::global_mut(cx)
+        .load_themes_from_str(themes)
+        .map_err(|source| MagentaError::ThemeLoad { source })?;
+    apply(requested, cx)
+}
+
+fn fallback_to_default_dark(
+    requested: BuiltInTheme,
+    error: MagentaError,
+    cx: &mut App,
+) -> ThemeInitOutcome {
+    apply_default_dark(cx);
+    ThemeInitOutcome::Fallback { requested, error }
 }
 
 /// Returns every theme known to gpui-component, including themes registered
