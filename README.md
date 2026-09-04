@@ -6,9 +6,9 @@ Magenta is an early-stage native AI workspace interface built in Rust with
 
 The project is currently focused on building a polished desktop shell: custom
 window chrome, a collapsible navigation sidebar, a conversation workspace,
-JSON-backed themes, and recoverable startup behavior. The composer, generated
-content, account controls, and service-backed destinations are still visual
-prototypes; Magenta does not connect to an AI provider yet.
+JSON-backed themes, accessible prompt composition, and recoverable startup
+behavior. Generated content, account controls, and service-backed destinations
+are still visual prototypes; Magenta does not connect to an AI provider yet.
 
 The visual direction is inspired by the
 [Mogonta AI Chat Workspace UI design](https://dribbble.com/shots/27203662-Mogonta-AI-Chat-Workspace-UI-Design).
@@ -19,7 +19,9 @@ original designer.
 
 - Native GPUI desktop window with custom Linux client-side chrome.
 - Expanded and compact sidebar layouts with destination selection.
-- Styled workspace, image composer mockup, and suggestion controls.
+- Editable multiline prompt composer with native text input behavior.
+- Combined model and effort menu with explicit generation readiness.
+- Native reference-image selection with removable previews and safe validation.
 - Bundled light and dark themes loaded from a JSON theme set.
 - Safe fallback to GPUI Component's default dark theme when Magenta's theme
   cannot be loaded.
@@ -128,7 +130,6 @@ recovery, privacy, and future asynchronous-work conventions.
 
 ## Current roadmap
 
-- Replace the composer mockup with accessible text and attachment input.
 - Connect generation and chat actions to a model/service boundary.
 - Add durable conversations, folders, and user preferences.
 - Add explicit loading, empty, cancellation, retry, and offline states.

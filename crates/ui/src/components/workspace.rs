@@ -1,17 +1,19 @@
 use gpui::{
-    AnyElement, Context, IntoElement, ParentElement as _, SharedString, Styled as _, div,
-    linear_color_stop, linear_gradient, prelude::FluentBuilder as _, px,
+    AnyElement, Context, Entity, IntoElement, ParentElement as _, SharedString, Styled as _, div,
+    linear_color_stop, linear_gradient, px,
 };
 use gpui_component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _,
-    button::{Button, ButtonVariants as _},
-    h_flex, v_flex,
+    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 
 use crate::app::MainView;
-use crate::components::orb;
+use crate::components::{orb, prompt_input::PromptComposer};
 
-pub(crate) fn render(name: SharedString, cx: &mut Context<MainView>) -> AnyElement {
+pub(crate) fn render(
+    name: SharedString,
+    composer: Entity<PromptComposer>,
+    cx: &mut Context<MainView>,
+) -> AnyElement {
     div()
         .relative()
         .flex()
@@ -53,7 +55,7 @@ pub(crate) fn render(name: SharedString, cx: &mut Context<MainView>) -> AnyEleme
                                 .child("Ask anything about your meetings?"),
                         ),
                 )
-                .child(composer(cx))
+                .child(div().w_full().max_w(px(660.)).mt(px(28.)).child(composer))
                 .child(suggestions(cx)),
         )
         .into_any_element()
@@ -72,122 +74,6 @@ fn ambient_light(cx: &mut Context<MainView>) -> AnyElement {
             linear_color_stop(cx.theme().background.opacity(0.), 1.),
         ))
         .opacity(0.75)
-        .into_any_element()
-}
-
-fn composer(cx: &mut Context<MainView>) -> AnyElement {
-    v_flex()
-        .w_full()
-        .max_w(px(660.))
-        .h(px(145.))
-        .mt(px(28.))
-        .p(px(10.))
-        .justify_between()
-        .rounded(px(9.))
-        .border_1()
-        .border_color(cx.theme().border.opacity(0.72))
-        .border_t_1()
-        .bg(linear_gradient(
-            145.,
-            linear_color_stop(cx.theme().button.opacity(0.96), 0.),
-            linear_color_stop(cx.theme().secondary.opacity(0.82), 1.),
-        ))
-        .shadow_lg()
-        .child(composer_prompt(cx))
-        .child(composer_controls(cx))
-        .into_any_element()
-}
-
-fn composer_prompt(cx: &mut Context<MainView>) -> AnyElement {
-    v_flex()
-        .gap(px(7.))
-        .child(
-            h_flex()
-                .gap(px(7.))
-                .child(
-                    div()
-                        .size(px(34.))
-                        .rounded(px(7.))
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .bg(linear_gradient(
-                            145.,
-                            linear_color_stop(cx.theme().yellow.opacity(0.68), 0.),
-                            linear_color_stop(cx.theme().blue.opacity(0.72), 1.),
-                        )),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .size(px(34.))
-                        .rounded(px(7.))
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .bg(cx.theme().muted)
-                        .child(Icon::new(IconName::GalleryVerticalEnd).size_4()),
-                ),
-        )
-        .child(
-            div()
-                .text_size(px(12.))
-                .text_color(cx.theme().muted_foreground)
-                .child("Describe a new image"),
-        )
-        .into_any_element()
-}
-
-fn composer_controls(cx: &mut Context<MainView>) -> AnyElement {
-    h_flex()
-        .w_full()
-        .items_center()
-        .justify_between()
-        .child(composer_options(cx))
-        .child(generate_button())
-        .into_any_element()
-}
-
-fn composer_options(cx: &mut Context<MainView>) -> AnyElement {
-    h_flex()
-        .gap(px(5.))
-        .child(mini_chip("G", "Nano Banana Pro", cx))
-        .child(mini_chip("", "4:3", cx))
-        .child(mini_chip("◇", "1K", cx))
-        .child(mini_chip("", "Unlimited  ●", cx))
-        .into_any_element()
-}
-
-fn generate_button() -> Button {
-    Button::new("generate")
-        .primary()
-        .h(px(36.))
-        .px(px(14.))
-        .rounded(px(7.))
-        .icon(IconName::Asterisk)
-        .label("Generate")
-}
-
-fn mini_chip(prefix: &'static str, label: &'static str, cx: &mut Context<MainView>) -> AnyElement {
-    h_flex()
-        .h(px(28.))
-        .gap(px(5.))
-        .px(px(8.))
-        .rounded(px(6.))
-        .border_1()
-        .border_color(cx.theme().border.opacity(0.72))
-        .bg(cx.theme().muted.opacity(0.82))
-        .text_size(px(10.))
-        .text_color(cx.theme().muted_foreground)
-        .when(!prefix.is_empty(), |this| {
-            this.child(
-                div()
-                    .font_semibold()
-                    .text_color(cx.theme().foreground)
-                    .child(prefix),
-            )
-        })
-        .child(label)
         .into_any_element()
 }
 

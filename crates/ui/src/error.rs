@@ -30,6 +30,12 @@ pub enum MagentaError {
         #[source]
         source: std::io::Error,
     },
+
+    #[error("failed to open the reference image picker")]
+    AttachmentPicker {
+        #[source]
+        source: anyhow::Error,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, MagentaError>;
@@ -75,6 +81,12 @@ impl MagentaError {
                 severity: ErrorSeverity::Warning,
                 title: "Local diagnostics unavailable",
                 message: "Magenta could not create its local log file. Diagnostics will be written to the console instead.",
+            },
+            Self::AttachmentPicker { .. } => ErrorPresentation {
+                code: "MAG-ATTACHMENT-PICKER",
+                severity: ErrorSeverity::Warning,
+                title: "Images could not be selected",
+                message: "The system image picker could not be opened. Try adding the reference images again.",
             },
         }
     }
@@ -167,6 +179,9 @@ mod tests {
             MagentaError::Diagnostics {
                 path: PathBuf::from("logs"),
                 source: std::io::Error::other("disk"),
+            },
+            MagentaError::AttachmentPicker {
+                source: anyhow::anyhow!("portal unavailable"),
             },
         ];
 

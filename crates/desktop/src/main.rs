@@ -116,7 +116,7 @@ fn exit_code(launch_failed: bool) -> ExitCode {
 fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     let window_options = main_window_options(cx);
     cx.open_window(window_options, |window, cx| {
-        let main_view = cx.new(|_| MainView::new());
+        let main_view = cx.new(|cx| MainView::new(window, cx));
         cx.new(|cx| Root::new(main_view, window, cx))
     })
     .map_err(|source| MagentaError::WindowOpen { source })
