@@ -12,7 +12,7 @@ fn main() {
         gpui_component::init(cx);
         magenta_ui::theme::init(cx);
 
-        let bounds = Bounds::centered(None, size(px(500.0), px(500.)), cx);
+        let bounds = Bounds::centered(None, size(px(1180.), px(760.)), cx);
         let mut window_options = gpui_component::TitleBar::window_options();
         window_options.window_bounds = Some(WindowBounds::Windowed(bounds));
         window_options.app_id = Some("magenta-1".into());
@@ -24,9 +24,7 @@ fn main() {
         }
 
         cx.open_window(window_options, |window, cx| {
-            let main_view = cx.new(|_| MainView {
-                text: "World".into(),
-            });
+            let main_view = cx.new(|_| MainView::new());
             cx.new(|cx| gpui_component::Root::new(main_view, window, cx))
         })
         .unwrap();
