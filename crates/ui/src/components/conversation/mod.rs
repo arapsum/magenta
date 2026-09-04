@@ -17,7 +17,10 @@ use gpui_component::{
 };
 use magenta_core::{Conversation, Message, MessageId, MessageRole, MessageStatus};
 
-use crate::components::prompt_input::PromptComposer;
+use crate::components::{
+    code_fence::{self, ContentSegment},
+    prompt_input::PromptComposer,
+};
 
 pub use model::{
     DemoCatalog, DemoThread, chat_model_for, fake_response, response_chunks, summary_for,
@@ -38,6 +41,15 @@ pub enum ConversationViewEvent {
 struct RenderedMessage {
     message: Message,
     markdown: Option<Entity<TextViewState>>,
+    user_segments: Vec<RenderedUserSegment>,
+}
+
+enum RenderedUserSegment {
+    Text(String),
+    Code {
+        source_start: usize,
+        markdown: Entity<TextViewState>,
+    },
 }
 
 pub struct ConversationView {
@@ -182,13 +194,34 @@ impl ConversationView {
     }
 
     fn rendered_message(message: Message, cx: &mut Context<'_, Self>) -> RenderedMessage {
-        let markdown = match message.role {
-            MessageRole::Assistant => {
-                Some(cx.new(|cx| TextViewState::markdown(&message.content, cx)))
-            }
-            MessageRole::User => None,
+        let (markdown, user_segments) = match message.role {
+            MessageRole::Assistant => (
+                Some(cx.new(|cx| TextViewState::markdown(&message.content, cx))),
+                Vec::new(),
+            ),
+            MessageRole::User => (
+                None,
+                code_fence::parse_segments(&message.content)
+                    .into_iter()
+                    .map(|segment| match segment {
+                        ContentSegment::Text(text) => RenderedUserSegment::Text(text),
+                        ContentSegment::Code(block) => {
+                            let source_start = block.source_start;
+                            let markdown = code_fence::markdown_for_block(&block);
+                            RenderedUserSegment::Code {
+                                source_start,
+                                markdown: cx.new(|cx| TextViewState::markdown(&markdown, cx)),
+                            }
+                        }
+                    })
+                    .collect(),
+            ),
         };
-        RenderedMessage { message, markdown }
+        RenderedMessage {
+            message,
+            markdown,
+            user_segments,
+        }
     }
 
     fn begin_stream(
@@ -312,10 +345,9 @@ impl ConversationView {
             return div().into_any_element();
         };
 
-        let message = &message.message;
-        let body = match message.role {
+        let body = match message.message.role {
             MessageRole::User => Self::render_user_message(message, cx),
-            MessageRole::Assistant => self.render_assistant_message(message, cx, view),
+            MessageRole::Assistant => self.render_assistant_message(&message.message, cx, view),
         };
 
         div()
@@ -332,10 +364,54 @@ impl ConversationView {
             .into_any_element()
     }
 
-    fn render_user_message(message: &Message, cx: &App) -> AnyElement {
-        let actions = Clipboard::new(("copy-message", message.id.0))
-            .value(message.content.clone())
+    fn render_user_message(message: &RenderedMessage, cx: &App) -> AnyElement {
+        let actions = Clipboard::new(("copy-message", message.message.id.0))
+            .value(message.message.content.clone())
             .tooltip("Copy message");
+        let message_id = message.message.id.0;
+        let style = TextViewStyle {
+            paragraph_gap: rems(0.45),
+            is_dark: cx.theme().is_dark(),
+            ..Default::default()
+        };
+        let segments =
+            message.user_segments.iter().enumerate().map(
+                |(segment_index, segment)| match segment {
+                    RenderedUserSegment::Text(text) => div().child(text.clone()).into_any_element(),
+                    RenderedUserSegment::Code {
+                        source_start,
+                        markdown,
+                    } => {
+                        let code_id = message_id.wrapping_add(*source_start as u64);
+                        let code_style = style.clone();
+                        TextView::new(markdown)
+                            .selectable(true)
+                            .style(code_style)
+                            .w_full()
+                            .text_size(px(12.))
+                            .line_height(px(18.))
+                            .code_block_actions(move |code_block, _window, app| {
+                                let code_id = code_id.wrapping_add(segment_index as u64);
+                                let language = code_block.lang().unwrap_or_else(|| "Code".into());
+                                h_flex()
+                                    .items_center()
+                                    .gap(px(5.))
+                                    .child(
+                                        div()
+                                            .text_size(px(10.))
+                                            .text_color(app.theme().muted_foreground)
+                                            .child(language),
+                                    )
+                                    .child(
+                                        Clipboard::new(("copy-user-code", code_id))
+                                            .value(code_block.code())
+                                            .tooltip("Copy code"),
+                                    )
+                            })
+                            .into_any_element()
+                    }
+                },
+            );
 
         div()
             .w_full()
@@ -359,7 +435,7 @@ impl ConversationView {
                     .text_size(px(13.))
                     .line_height(px(20.))
                     .text_color(cx.theme().foreground)
-                    .child(message.content.clone()),
+                    .child(v_flex().w_full().gap(px(8.)).children(segments)),
             )
             .child(h_flex().h(px(24.)).items_center().child(actions))
             .into_any_element()
@@ -452,6 +528,9 @@ impl ConversationView {
                         .text_size(px(13.))
                         .line_height(px(21.))
                         .code_block_actions(move |code_block, _window, _cx| {
+                            let code_id = code_block
+                                .span
+                                .map_or(code_id, |span| code_id.wrapping_add(span.start as u64));
                             Clipboard::new(("copy-code", code_id))
                                 .value(code_block.code())
                                 .tooltip("Copy code")
@@ -587,6 +666,45 @@ mod tests {
                     thread.conversation.id == magenta_core::ConversationId::new(1)
                         && !thread.messages.is_empty()
                 }));
+            })
+            .expect("the conversation test window should remain open");
+    }
+
+    #[gpui::test]
+    fn user_messages_keep_prose_literal_and_isolate_fenced_code(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
+            let composer = cx.new(|cx| PromptComposer::new(window, cx));
+            ConversationView::new(composer, window, cx)
+        });
+
+        window
+            .update(cx, |_, _, cx| {
+                let message = Message {
+                    id: MessageId::new(7),
+                    conversation_id: magenta_core::ConversationId::new(3),
+                    role: MessageRole::User,
+                    content: "Before\n```rust\nlet answer = 42;\n```\nAfter".to_owned(),
+                    status: MessageStatus::Complete,
+                    attachments: Vec::new(),
+                };
+                let rendered = ConversationView::rendered_message(message, cx);
+
+                assert!(matches!(
+                    &rendered.user_segments[0],
+                    RenderedUserSegment::Text(text) if text == "Before\n"
+                ));
+                assert!(matches!(
+                    &rendered.user_segments[1],
+                    RenderedUserSegment::Code {
+                        source_start: 7,
+                        ..
+                    }
+                ));
+                assert!(matches!(
+                    &rendered.user_segments[2],
+                    RenderedUserSegment::Text(text) if text == "After"
+                ));
             })
             .expect("the conversation test window should remain open");
     }

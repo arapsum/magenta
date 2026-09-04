@@ -2,27 +2,30 @@ use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use gpui::{
     App, AppContext as _, Context, Entity, EventEmitter, Focusable as _, InteractiveElement as _,
     IntoElement, ObjectFit, ParentElement as _, PathPromptOptions, Render, SharedString,
     Styled as _, StyledImage as _, Subscription, Task, Window, div, img, linear_color_stop,
-    linear_gradient, prelude::FluentBuilder as _, px,
+    linear_gradient, prelude::FluentBuilder as _, px, rems,
 };
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt,
     button::{Button, ButtonVariants},
+    clipboard::Clipboard,
     h_flex,
     input::{InputEvent, Textarea, TextareaState},
     menu::{DropdownMenu as _, PopupMenuItem},
     notification::{Notification, NotificationType},
+    text::{TextView, TextViewState, TextViewStyle},
     v_flex,
 };
 
 use magenta_core::EffortLevel;
 
-use crate::{MagentaError, notification_for_error};
+use crate::{MagentaError, components::code_fence, notification_for_error};
 
 const MAX_ATTACHMENTS: usize = 4;
 
@@ -100,11 +103,16 @@ pub enum PromptComposerEvent {
 
 pub struct PromptComposer {
     input: Entity<TextareaState>,
+    preview: Entity<TextViewState>,
+    preview_source: String,
+    preview_line_count: usize,
     model: Option<ChatModel>,
     effort: Option<EffortLevel>,
     generating: bool,
     attachments: Vec<ReferenceImage>,
     attachment_task: Option<Task<()>>,
+    preview_task: Option<Task<()>>,
+    preview_generation: u64,
     subscriptions: Vec<Subscription>,
 }
 
@@ -116,24 +124,33 @@ impl PromptComposer {
                 .auto_grow(2, 5)
                 .submit_on_enter(true)
         });
+        let preview = cx.new(|cx| TextViewState::markdown("", cx));
 
         let subscriptions = vec![cx.subscribe_in(
             &input,
             window,
-            |composer, _, event: &InputEvent, _window, cx| match event {
-                InputEvent::Change | InputEvent::Focus | InputEvent::Blur => cx.notify(),
+            |composer, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => composer.schedule_code_preview(window, cx),
+                InputEvent::Focus | InputEvent::Blur => cx.notify(),
                 InputEvent::PressEnter { shift: false, .. } => composer.submit(cx),
-                InputEvent::PressEnter { shift: true, .. } => {}
+                InputEvent::PressEnter { shift: true, .. } => {
+                    composer.handle_shift_enter(window, cx);
+                }
             },
         )];
 
         Self {
             input,
+            preview,
+            preview_source: String::new(),
+            preview_line_count: 0,
             model: Some(ChatModel::Sonnet),
             effort: Some(EffortLevel::Medium),
             generating: false,
             attachments: Vec::new(),
             attachment_task: None,
+            preview_task: None,
+            preview_generation: 0,
             subscriptions,
         }
     }
@@ -164,8 +181,93 @@ impl PromptComposer {
         self.input.update(cx, |input, cx| {
             input.set_value("", window, cx);
         });
+        self.preview_generation = self.preview_generation.wrapping_add(1);
+        self.preview_task.take();
+        self.clear_code_preview(cx);
         self.attachments.clear();
         cx.notify();
+    }
+
+    fn schedule_code_preview(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
+        self.preview_generation = self.preview_generation.wrapping_add(1);
+        let generation = self.preview_generation;
+        self.preview_task.take();
+
+        let source = self.input.read(cx).value().to_string();
+        if !source.contains("```") {
+            self.clear_code_preview(cx);
+            cx.notify();
+            return;
+        }
+
+        self.preview_task = Some(cx.spawn_in(window, async move |composer, window| {
+            window
+                .background_executor()
+                .timer(Duration::from_millis(60))
+                .await;
+
+            let blocks = window
+                .background_executor()
+                .spawn(async move { code_fence::fenced_blocks(&source) })
+                .await;
+
+            _ = composer.update_in(window, |composer, _, cx| {
+                if composer.preview_generation != generation {
+                    return;
+                }
+
+                composer.preview_task = None;
+                composer.apply_code_preview(&blocks, cx);
+            });
+        }));
+        cx.notify();
+    }
+
+    fn apply_code_preview(
+        &mut self,
+        blocks: &[code_fence::FencedCodeBlock],
+        cx: &mut Context<'_, Self>,
+    ) {
+        let source = code_fence::preview_markdown(blocks);
+        if self.preview_source == source {
+            return;
+        }
+
+        self.preview_line_count = source.lines().count();
+        self.preview_source.clone_from(&source);
+        self.preview.update(cx, |preview, cx| {
+            preview.set_text(&source, cx);
+        });
+        cx.notify();
+    }
+
+    fn clear_code_preview(&mut self, cx: &mut Context<'_, Self>) {
+        if self.preview_source.is_empty() {
+            return;
+        }
+
+        self.preview_source.clear();
+        self.preview_line_count = 0;
+        self.preview.update(cx, |preview, cx| {
+            preview.set_text("", cx);
+        });
+    }
+
+    fn handle_shift_enter(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let (value, cursor) = {
+            let input = self.input.read(cx);
+            (input.value(), input.cursor())
+        };
+        let Some(auto_close) = code_fence::opening_fence_after_newline(&value, cursor) else {
+            self.schedule_code_preview(window, cx);
+            return;
+        };
+
+        self.input.update(cx, |input, cx| {
+            input.insert(auto_close.insertion, window, cx);
+            input.set_selected_range(cursor..cursor, cx);
+        });
+        self.schedule_code_preview(window, cx);
     }
 
     fn has_content(&self, cx: &App) -> bool {
@@ -489,6 +591,65 @@ impl PromptComposer {
                     })
             })
     }
+
+    fn code_preview(&self, cx: &Context<'_, Self>) -> impl IntoElement {
+        let preview = self.preview.clone();
+        let style = TextViewStyle {
+            paragraph_gap: rems(0.45),
+            is_dark: cx.theme().is_dark(),
+            ..Default::default()
+        };
+        let scrollable = self.preview_line_count > 8;
+
+        v_flex()
+            .id("prompt-code-preview")
+            .flex_none()
+            .w_full()
+            .gap(px(5.))
+            .border_t_1()
+            .border_color(cx.theme().border.opacity(0.72))
+            .pt(px(7.))
+            .child(
+                h_flex()
+                    .h(px(16.))
+                    .items_center()
+                    .text_size(px(10.))
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Code preview"),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .when(scrollable, |this| this.h(px(192.)))
+                    .child(
+                        TextView::new(&preview)
+                            .selectable(true)
+                            .scrollable(scrollable)
+                            .style(style)
+                            .w_full()
+                            .text_size(px(12.))
+                            .line_height(px(18.))
+                            .code_block_actions(|code_block, _window, app| {
+                                let code_id = code_block.span.map_or(0, |span| span.start);
+                                let language = code_block.lang().unwrap_or_else(|| "Code".into());
+                                h_flex()
+                                    .items_center()
+                                    .gap(px(5.))
+                                    .child(
+                                        div()
+                                            .text_size(px(10.))
+                                            .text_color(app.theme().muted_foreground)
+                                            .child(language),
+                                    )
+                                    .child(
+                                        Clipboard::new(("copy-prompt-code", code_id))
+                                            .value(code_block.code())
+                                            .tooltip("Copy code"),
+                                    )
+                            }),
+                    ),
+            )
+    }
 }
 
 impl EventEmitter<PromptComposerEvent> for PromptComposer {}
@@ -526,6 +687,9 @@ impl Render for PromptComposer {
                     .min_h_0()
                     .gap(px(7.))
                     .child(self.attachment_strip(cx))
+                    .when(!self.preview_source.is_empty(), |this| {
+                        this.child(self.code_preview(cx))
+                    })
                     .child(
                         Textarea::new(&self.input)
                             .appearance(false)
@@ -664,6 +828,28 @@ mod tests {
                 assert_eq!(request.model, ChatModel::GeminiPro);
                 assert_eq!(request.effort, EffortLevel::High);
                 assert!(request.attachments.is_empty());
+            })
+            .expect("the composer test window should remain open");
+    }
+
+    #[gpui::test]
+    fn shift_enter_pairs_a_fence_and_keeps_the_caret_in_the_code_body(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let window = cx.open_window(size(px(720.), px(420.)), PromptComposer::new);
+
+        window
+            .update(cx, |composer, window, cx| {
+                let opening = "```rust\n";
+                composer.input.update(cx, |input, cx| {
+                    input.set_value(opening, window, cx);
+                    input.set_selected_range(opening.len()..opening.len(), cx);
+                });
+
+                composer.handle_shift_enter(window, cx);
+
+                let input = composer.input.read(cx);
+                assert_eq!(input.value().as_ref(), "```rust\n\n```");
+                assert_eq!(input.cursor(), opening.len());
             })
             .expect("the composer test window should remain open");
     }
