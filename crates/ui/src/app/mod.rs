@@ -1,15 +1,13 @@
-use std::sync::Arc;
-
 use gpui::{AnyElement, Entity, Render, SharedString, Subscription, Window, div, prelude::*};
 use gpui_component::{
     ActiveTheme as _, WindowExt,
     notification::{Notification, NotificationType},
 };
-use magenta_application::{PendingGeneration, SendMessage, SendMessageInput, SendTarget};
-use magenta_core::{
-    Attachment, ChatProvider, ConversationId, GenerationRequest, Message, MessageRole,
-    MessageStatus,
+use magenta_application::{
+    PendingGeneration, PendingRegeneration, RegenerateMessage, RegenerateMessageInput, SendMessage,
+    SendMessageInput, SendTarget,
 };
+use magenta_core::{Attachment, ConversationId};
 
 use crate::components::{
     conversation::{ConversationView, ConversationViewEvent, DemoCatalog, DemoThread, summary_for},
@@ -24,8 +22,8 @@ pub struct MainView {
     sidebar: Entity<SidebarView>,
     composer: Entity<PromptComposer>,
     conversation: Entity<ConversationView>,
-    provider: Arc<dyn ChatProvider>,
     send_message: SendMessage,
+    regenerate_message: RegenerateMessage,
     catalog: DemoCatalog,
     active_conversation: Option<ConversationId>,
     subscriptions: Vec<Subscription>,
@@ -33,8 +31,8 @@ pub struct MainView {
 
 impl MainView {
     pub fn new(
-        provider: Arc<dyn ChatProvider>,
         send_message: SendMessage,
+        regenerate_message: RegenerateMessage,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> Self {
@@ -107,8 +105,8 @@ impl MainView {
             sidebar,
             composer,
             conversation,
-            provider,
             send_message,
+            regenerate_message,
             catalog: DemoCatalog::new(),
             active_conversation: None,
             subscriptions,
@@ -275,39 +273,56 @@ impl MainView {
     fn regenerate(
         &mut self,
         message_id: magenta_core::MessageId,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
         let Some(conversation_id) = self.active_conversation else {
             return;
         };
-        let Some(messages) = self.conversation.read(cx).regeneration_context(message_id) else {
+        let Some(snapshot) = self.conversation.read(cx).snapshot() else {
             return;
         };
-        let Some(thread) = self.catalog.thread(conversation_id) else {
+        if snapshot.conversation.id != conversation_id {
             return;
+        }
+        let generation = snapshot.conversation.generation.clone();
+        let input = RegenerateMessageInput {
+            conversation: snapshot.conversation,
+            messages: snapshot.messages,
+            target_message_id: message_id,
+            assistant_message_id: self.catalog.reserve_message_id(),
         };
-        let conversation = thread.conversation.clone();
-        let ids = self.catalog.reserve_message_ids();
-        let assistant = Message {
-            id: ids.assistant,
-            conversation_id,
-            role: MessageRole::Assistant,
-            content: String::new(),
-            status: MessageStatus::Streaming,
-            attachments: Vec::new(),
+        let pending = match self.regenerate_message.execute(input) {
+            Ok(pending) => pending,
+            Err(source) => {
+                tracing::error!(
+                    error = ?source,
+                    operation = "message.regenerate.prepare",
+                    "could not prepare response regeneration"
+                );
+                let error = MagentaError::RegenerateMessage { source };
+                window.push_notification(notification_for_error(&error), cx);
+                return;
+            }
         };
-        let generation_request = GenerationRequest {
-            generation: conversation.generation.clone(),
-            messages,
-        };
-        let provider_id = conversation.generation.provider.clone();
-        let stream = self.provider.stream(generation_request);
+        let PendingRegeneration {
+            target_message_id,
+            assistant_message,
+            provider_id,
+            stream,
+        } = pending;
         self.composer.update(cx, |composer, cx| {
-            composer.set_configuration(&conversation.generation, cx);
+            composer.set_configuration(&generation, cx);
         });
         self.conversation.update(cx, |view, cx| {
-            view.regenerate(message_id, assistant, provider_id, stream, window, cx);
+            view.regenerate(
+                target_message_id,
+                assistant_message,
+                provider_id,
+                stream,
+                window,
+                cx,
+            );
         });
         self.sync_active_thread(cx);
     }

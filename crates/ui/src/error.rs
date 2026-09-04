@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use gpui_component::notification::{Notification, NotificationType};
-use magenta_application::SendMessageError;
+use magenta_application::{RegenerateMessageError, SendMessageError};
 use magenta_core::{ProviderError, ProviderId};
 
 /// The errors that can cross Magenta's subsystem boundaries.
@@ -50,6 +50,12 @@ pub enum MagentaError {
     SendMessage {
         #[source]
         source: SendMessageError,
+    },
+
+    #[error("regenerate-message workflow failed")]
+    RegenerateMessage {
+        #[source]
+        source: RegenerateMessageError,
     },
 }
 
@@ -115,6 +121,12 @@ impl MagentaError {
                 severity: ErrorSeverity::Error,
                 title: "Message could not be sent",
                 message: "Magenta could not prepare this message. Review the conversation and try again.",
+            },
+            Self::RegenerateMessage { .. } => ErrorPresentation {
+                code: "MAG-REGENERATE-MESSAGE",
+                severity: ErrorSeverity::Error,
+                title: "Response could not be regenerated",
+                message: "Magenta could not prepare this response. Try another completed response.",
             },
         }
     }
@@ -225,6 +237,11 @@ mod tests {
             },
             MagentaError::SendMessage {
                 source: SendMessageError::EmptyPrompt,
+            },
+            MagentaError::RegenerateMessage {
+                source: RegenerateMessageError::TargetNotFound {
+                    target: magenta_core::MessageId::new(42),
+                },
             },
         ];
 

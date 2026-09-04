@@ -200,22 +200,6 @@ impl ConversationView {
         }
     }
 
-    pub(crate) fn regeneration_context(&self, message_id: MessageId) -> Option<Vec<Message>> {
-        let index = self
-            .messages
-            .iter()
-            .position(|message| message.message.id == message_id)?;
-        let messages = self.messages[..index]
-            .iter()
-            .filter(|message| message.message.status == MessageStatus::Complete)
-            .map(|message| message.message.clone())
-            .collect::<Vec<_>>();
-        messages
-            .iter()
-            .any(|message| message.role == MessageRole::User)
-            .then_some(messages)
-    }
-
     fn rendered_message(message: Message, cx: &mut Context<'_, Self>) -> RenderedMessage {
         let (markdown, user_segments) = match message.role {
             MessageRole::Assistant => (

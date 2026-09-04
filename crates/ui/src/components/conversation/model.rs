@@ -79,6 +79,12 @@ impl DemoCatalog {
         ids
     }
 
+    pub const fn reserve_message_id(&mut self) -> MessageId {
+        let id = MessageId::new(self.next_message_id);
+        self.next_message_id = self.next_message_id.saturating_add(1);
+        id
+    }
+
     pub fn replace_thread(&mut self, thread: DemoThread) {
         if let Some(existing) = self
             .threads
@@ -222,13 +228,15 @@ mod tests {
         let first_conversation = catalog.reserve_conversation_id();
         let second_conversation = catalog.reserve_conversation_id();
         let first_messages = catalog.reserve_message_ids();
+        let replacement_message = catalog.reserve_message_id();
         let second_messages = catalog.reserve_message_ids();
 
         assert_eq!(first_conversation, ConversationId::new(100));
         assert_eq!(second_conversation, ConversationId::new(101));
         assert_eq!(first_messages.user, MessageId::new(1_040));
         assert_eq!(first_messages.assistant, MessageId::new(1_041));
-        assert_eq!(second_messages.user, MessageId::new(1_042));
-        assert_eq!(second_messages.assistant, MessageId::new(1_043));
+        assert_eq!(replacement_message, MessageId::new(1_042));
+        assert_eq!(second_messages.user, MessageId::new(1_043));
+        assert_eq!(second_messages.assistant, MessageId::new(1_044));
     }
 }

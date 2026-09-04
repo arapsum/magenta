@@ -8,7 +8,7 @@ use gpui::{
 #[cfg(target_os = "linux")]
 use gpui::{WindowBackgroundAppearance, WindowDecorations};
 use gpui_component::Root;
-use magenta_application::SendMessage;
+use magenta_application::{RegenerateMessage, SendMessage};
 use magenta_core::ChatProvider;
 use magenta_providers::DemoProvider;
 
@@ -120,9 +120,9 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     let window_options = main_window_options(cx);
     let provider: Arc<dyn ChatProvider> = Arc::new(DemoProvider::default());
     let send_message = SendMessage::new(Arc::clone(&provider));
+    let regenerate_message = RegenerateMessage::new(Arc::clone(&provider));
     cx.open_window(window_options, move |window, cx| {
-        let provider = Arc::clone(&provider);
-        let main_view = cx.new(|cx| MainView::new(provider, send_message, window, cx));
+        let main_view = cx.new(|cx| MainView::new(send_message, regenerate_message, window, cx));
         cx.new(|cx| Root::new(main_view, window, cx))
     })
     .map_err(|source| MagentaError::WindowOpen { source })
