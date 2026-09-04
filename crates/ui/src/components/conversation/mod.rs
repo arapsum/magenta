@@ -19,6 +19,7 @@ use magenta_core::{Conversation, Message, MessageId, MessageRole, MessageStatus}
 
 use crate::components::{
     code_fence::{self, ContentSegment},
+    inline_code::{self, MarkdownInlineCodePlugin},
     prompt_input::PromptComposer,
 };
 
@@ -377,7 +378,7 @@ impl ConversationView {
         let segments =
             message.user_segments.iter().enumerate().map(
                 |(segment_index, segment)| match segment {
-                    RenderedUserSegment::Text(text) => div().child(text.clone()).into_any_element(),
+                    RenderedUserSegment::Text(text) => inline_code::render_plain_text(text, cx),
                     RenderedUserSegment::Code {
                         source_start,
                         markdown,
@@ -523,6 +524,7 @@ impl ConversationView {
                 this.child(
                     TextView::new(markdown)
                         .selectable(true)
+                        .plugin(MarkdownInlineCodePlugin)
                         .style(style)
                         .w_full()
                         .text_size(px(13.))
