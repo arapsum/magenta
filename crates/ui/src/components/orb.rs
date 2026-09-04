@@ -5,7 +5,7 @@ use std::{
 
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, Context, ImageCacheError, ObjectFit,
-    RenderImage, Window, div, img, prelude::*, px, rgb,
+    RenderImage, Transformation, Window, div, img, percentage, prelude::*, px, rgb, size, svg,
 };
 
 use crate::app::MainView;
@@ -16,27 +16,12 @@ const ORB_WAVE_SVG: &[u8] = include_bytes!("../assets/glowing_orb_wave.svg");
 const ORB_RIM_SVG: &[u8] = include_bytes!("../assets/glowing_orb_rim.svg");
 
 static ORB_IMAGE: OnceLock<Result<Arc<RenderImage>, ImageCacheError>> = OnceLock::new();
-static ORB_WAVE_IMAGE: OnceLock<Result<Arc<RenderImage>, ImageCacheError>> = OnceLock::new();
 static ORB_RIM_IMAGE: OnceLock<Result<Arc<RenderImage>, ImageCacheError>> = OnceLock::new();
 
 pub(crate) fn render(_cx: &mut Context<MainView>) -> AnyElement {
     div()
         .relative()
         .size(px(ORB_SIZE))
-        .with_animation(
-            "glowing-orb-motion",
-            // The two source animations have different periods. A 35-second
-            // shared cycle preserves their 7s float and 5s breathing rhythms.
-            Animation::new(Duration::from_secs(35)).repeat(),
-            |this, progress| {
-                let float_phase = progress * 5. * std::f32::consts::TAU;
-                let breath_phase = progress * 7. * std::f32::consts::TAU;
-                let vertical_offset = 0.5 - 3.5 * float_phase.cos();
-                let opacity = 0.96 + 0.04 * (0.5 - 0.5 * breath_phase.cos());
-
-                this.top(px(vertical_offset)).opacity(opacity)
-            },
-        )
         .child(
             img(orb_image)
                 .size_full()
@@ -54,6 +39,9 @@ pub(crate) fn render(_cx: &mut Context<MainView>) -> AnyElement {
         .child(wave_layer())
         .child(
             img(orb_rim_image)
+                .absolute()
+                .top_0()
+                .left_0()
                 .size_full()
                 .object_fit(ObjectFit::Fill)
                 .with_fallback(|| div().size_full().into_any_element()),
@@ -68,23 +56,29 @@ fn wave_layer() -> AnyElement {
         .left_0()
         .w_full()
         .h(px(ORB_SIZE))
-        .with_animation(
-            "glowing-orb-ribbon-motion",
-            Animation::new(Duration::from_secs_f32(6.5)).repeat(),
-            |this, progress| {
-                let phase = 0.5 - 0.5 * (progress * std::f32::consts::TAU).cos();
-                let scale = 1. - 0.03 * phase;
-                let height = ORB_SIZE * scale;
-                let top = (ORB_SIZE - height) / 2. - 1. + 3. * phase;
-
-                this.top(px(top)).h(px(height))
-            },
-        )
         .child(
-            img(orb_wave_image)
+            // GPUI's color image element has no transform primitive. The SVG
+            // element does, so use the wave SVG as an alpha mask and rotate
+            // only the luminous interior while the glass shell stays still.
+            svg()
+                .data(ORB_WAVE_SVG)
                 .size_full()
-                .object_fit(ObjectFit::Fill)
-                .with_fallback(|| div().size_full().into_any_element()),
+                .text_color(rgb(0x8beeffff))
+                .with_animation(
+                    "glowing-orb-ribbon-rotation",
+                    Animation::new(Duration::from_secs(14))
+                        .repeat()
+                        .with_max_fps(60.),
+                    |this, progress| {
+                        let angle = progress * std::f32::consts::TAU;
+                        let depth = 0.58 + 0.42 * angle.cos().abs();
+
+                        this.with_transformation(
+                            Transformation::rotate(percentage(progress))
+                                .with_scaling(size(1., depth)),
+                        )
+                    },
+                ),
         )
         .into_any_element()
 }
@@ -94,13 +88,6 @@ fn orb_image(
     cx: &mut App,
 ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
     cached_image(&ORB_IMAGE, ORB_SVG, cx)
-}
-
-fn orb_wave_image(
-    _window: &mut Window,
-    cx: &mut App,
-) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
-    cached_image(&ORB_WAVE_IMAGE, ORB_WAVE_SVG, cx)
 }
 
 fn orb_rim_image(
