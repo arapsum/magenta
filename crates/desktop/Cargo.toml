@@ -8,8 +8,12 @@ name = "magenta"
 path = "src/main.rs"
 
 [dependencies]
+dirs.workspace = true
 magenta-ui.workspace = true
 gpui.workspace = true
 gpui_platform.workspace = true
 gpui-component.workspace = true
 gpui-component-assets.workspace = true
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true

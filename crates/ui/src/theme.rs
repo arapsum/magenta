@@ -2,6 +2,8 @@ use gpui::{App, SharedString};
 use gpui_component::{Theme, ThemeConfig, ThemeMode, ThemeRegistry};
 use std::rc::Rc;
 
+use crate::{MagentaError, Result};
+
 const BUILT_IN_THEMES: &str = include_str!("../../../themes/magenta.json");
 
 pub const MAGENTA_LIGHT_THEME: &str = "Magenta Light";
@@ -28,17 +30,55 @@ pub struct ThemeOption {
     pub mode: ThemeMode,
 }
 
+#[derive(Debug)]
+pub enum ThemeInitOutcome {
+    Applied(BuiltInTheme),
+    Fallback {
+        requested: BuiltInTheme,
+        error: MagentaError,
+    },
+}
+
+impl ThemeInitOutcome {
+    pub fn error(&self) -> Option<&MagentaError> {
+        match self {
+            Self::Applied(_) => None,
+            Self::Fallback { error, .. } => Some(error),
+        }
+    }
+
+    pub fn into_error(self) -> Option<MagentaError> {
+        match self {
+            Self::Applied(_) => None,
+            Self::Fallback { error, .. } => Some(error),
+        }
+    }
+}
+
 /// Registers Magenta's bundled themes with gpui-component and applies the
 /// dark appearance used by the product reference.
-pub fn init(cx: &mut App) {
-    ThemeRegistry::global_mut(cx)
-        .load_themes_from_str(BUILT_IN_THEMES)
-        .expect("Magenta's bundled theme JSON must be valid");
+pub fn init(cx: &mut App) -> ThemeInitOutcome {
+    init_from_str(BUILT_IN_THEMES, cx)
+}
 
-    assert!(
-        apply(BuiltInTheme::Dark, cx),
-        "Magenta Dark must be present in the bundled theme set"
-    );
+fn init_from_str(themes: &str, cx: &mut App) -> ThemeInitOutcome {
+    let requested = BuiltInTheme::Dark;
+    let loaded = ThemeRegistry::global_mut(cx)
+        .load_themes_from_str(themes)
+        .map_err(|source| MagentaError::ThemeLoad { source });
+
+    if let Err(error) = loaded {
+        apply_default_dark(cx);
+        return ThemeInitOutcome::Fallback { requested, error };
+    }
+
+    match apply(requested, cx) {
+        Ok(()) => ThemeInitOutcome::Applied(requested),
+        Err(error) => {
+            apply_default_dark(cx);
+            ThemeInitOutcome::Fallback { requested, error }
+        }
+    }
 }
 
 /// Returns every theme known to gpui-component, including themes registered
@@ -54,30 +94,39 @@ pub fn available(cx: &App) -> Vec<ThemeOption> {
         .collect()
 }
 
-pub fn apply(theme: BuiltInTheme, cx: &mut App) -> bool {
+pub fn apply(theme: BuiltInTheme, cx: &mut App) -> Result<()> {
     apply_named(theme.name(), cx)
 }
 
 /// Applies any registered gpui-component theme by name. A future theme picker
 /// or persisted preference can use the same entry point.
-pub fn apply_named(name: &str, cx: &mut App) -> bool {
+pub fn apply_named(name: &str, cx: &mut App) -> Result<()> {
     let name = SharedString::from(name);
-    let Some(theme) = ThemeRegistry::global(cx).themes().get(&name).cloned() else {
-        return false;
-    };
+    let theme = ThemeRegistry::global(cx)
+        .themes()
+        .get(&name)
+        .cloned()
+        .ok_or_else(|| MagentaError::ThemeNotFound {
+            name: name.to_string(),
+        })?;
 
     apply_config(theme, cx);
-    true
+    Ok(())
 }
 
-pub fn toggle(cx: &mut App) -> BuiltInTheme {
+pub fn toggle(cx: &mut App) -> Result<BuiltInTheme> {
     let next = if Theme::global(cx).is_dark() {
         BuiltInTheme::Light
     } else {
         BuiltInTheme::Dark
     };
-    let _ = apply(next, cx);
-    next
+    apply(next, cx)?;
+    Ok(next)
+}
+
+fn apply_default_dark(cx: &mut App) {
+    Theme::change(ThemeMode::Dark, None, cx);
+    cx.refresh_windows();
 }
 
 fn apply_config(theme: Rc<ThemeConfig>, cx: &mut App) {
@@ -92,4 +141,82 @@ fn apply_config(theme: Rc<ThemeConfig>, cx: &mut App) {
 
     Theme::change(mode, None, cx);
     cx.refresh_windows();
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::TestAppContext;
+
+    use super::*;
+
+    #[gpui::test]
+    fn unknown_theme_is_reported_without_changing_the_active_theme(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            let outcome = init(cx);
+            assert!(matches!(
+                outcome,
+                ThemeInitOutcome::Applied(BuiltInTheme::Dark)
+            ));
+
+            let before = Theme::global(cx).mode;
+            let error = apply_named("Theme That Does Not Exist", cx).unwrap_err();
+
+            assert!(matches!(error, MagentaError::ThemeNotFound { .. }));
+            assert_eq!(Theme::global(cx).mode, before);
+        });
+    }
+
+    #[gpui::test]
+    fn bundled_themes_toggle_successfully(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            assert!(matches!(
+                init(cx),
+                ThemeInitOutcome::Applied(BuiltInTheme::Dark)
+            ));
+            assert!(Theme::global(cx).is_dark());
+
+            assert_eq!(toggle(cx).unwrap(), BuiltInTheme::Light);
+            assert!(!Theme::global(cx).is_dark());
+            assert_eq!(toggle(cx).unwrap(), BuiltInTheme::Dark);
+            assert!(Theme::global(cx).is_dark());
+        });
+    }
+
+    #[gpui::test]
+    fn malformed_bundled_theme_falls_back_to_default_dark(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+
+            let outcome = init_from_str("{ definitely not valid json", cx);
+
+            assert!(matches!(
+                outcome,
+                ThemeInitOutcome::Fallback {
+                    requested: BuiltInTheme::Dark,
+                    error: MagentaError::ThemeLoad { .. }
+                }
+            ));
+            assert!(Theme::global(cx).is_dark());
+        });
+    }
+
+    #[gpui::test]
+    fn missing_magenta_dark_falls_back_without_panicking(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+
+            let outcome = init_from_str(r#"{"name":"Empty","themes":[]}"#, cx);
+
+            assert!(matches!(
+                outcome,
+                ThemeInitOutcome::Fallback {
+                    requested: BuiltInTheme::Dark,
+                    error: MagentaError::ThemeNotFound { .. }
+                }
+            ));
+            assert!(Theme::global(cx).is_dark());
+        });
+    }
 }
