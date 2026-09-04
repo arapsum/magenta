@@ -58,6 +58,41 @@ pub enum GenerationEvent {
     Completed,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GenerationOutcome {
+    pub finish_reason: FinishReason,
+    pub usage: Option<TokenUsage>,
+}
+
+impl GenerationOutcome {
+    #[must_use]
+    pub const fn new(finish_reason: FinishReason, usage: Option<TokenUsage>) -> Self {
+        Self {
+            finish_reason,
+            usage,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FinishReason {
+    Stop,
+    Length,
+    ContentFilter,
+    ToolUse,
+    Other(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+/// A provider-owned stream whose work must stop when the stream is dropped.
+///
+/// GPUI views rely on this contract to cancel generation by dropping the task
+/// that owns the stream.
 pub type GenerationStream =
     Pin<Box<dyn Stream<Item = Result<GenerationEvent, ProviderError>> + Send + 'static>>;
 
@@ -80,5 +115,25 @@ mod tests {
         assert_eq!(configuration.provider, ProviderId::new("anthropic"));
         assert_eq!(configuration.model, ModelId::new("sonnet"));
         assert_eq!(configuration.effort, EffortLevel::High);
+    }
+
+    #[test]
+    fn generation_outcome_keeps_finish_reason_and_usage_together() {
+        let outcome = GenerationOutcome::new(
+            FinishReason::Length,
+            Some(TokenUsage {
+                input_tokens: 21,
+                output_tokens: 34,
+            }),
+        );
+
+        assert_eq!(outcome.finish_reason, FinishReason::Length);
+        assert_eq!(
+            outcome.usage,
+            Some(TokenUsage {
+                input_tokens: 21,
+                output_tokens: 34,
+            })
+        );
     }
 }
