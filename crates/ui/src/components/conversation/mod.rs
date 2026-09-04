@@ -15,8 +15,8 @@ use gpui_component::{
     v_flex,
 };
 use magenta_core::{
-    Conversation, GenerationConfig, GenerationEvent, GenerationStream, Message, MessageId,
-    MessageRole, MessageStatus, ProviderError, ProviderId,
+    Conversation, GenerationConfig, GenerationEvent, GenerationOutcome, GenerationStream, Message,
+    MessageId, MessageRole, MessageStatus, ProviderError, ProviderId,
 };
 
 use crate::components::{
@@ -243,11 +243,12 @@ impl ConversationView {
         let generation = self.generation;
         self.streaming_message = Some(assistant_id);
         self.generation_task = Some(cx.spawn_in(window, async move |view, window| {
-            let mut completed = false;
+            let mut completed = None;
             let mut stream = stream;
 
             while let Some(event) = stream.next().await {
                 match event {
+                    Ok(GenerationEvent::Started) => {}
                     Ok(GenerationEvent::TextDelta(chunk)) => {
                         if view
                             .update_in(window, |view, _, cx| {
@@ -258,8 +259,8 @@ impl ConversationView {
                             return;
                         }
                     }
-                    Ok(GenerationEvent::Completed) => {
-                        completed = true;
+                    Ok(GenerationEvent::Completed(outcome)) => {
+                        completed = Some(outcome);
                         break;
                     }
                     Err(error) => {
@@ -271,9 +272,9 @@ impl ConversationView {
                 }
             }
 
-            if completed {
+            if let Some(outcome) = completed {
                 _ = view.update_in(window, |view, _, cx| {
-                    view.finish_stream(generation, assistant_id, cx);
+                    view.finish_stream(generation, assistant_id, outcome, cx);
                 });
             } else {
                 let error = ProviderError::new(provider_id, IncompleteGeneration);
@@ -318,6 +319,7 @@ impl ConversationView {
         &mut self,
         generation: u64,
         assistant_id: MessageId,
+        outcome: GenerationOutcome,
         cx: &mut Context<'_, Self>,
     ) {
         if self.generation != generation || self.streaming_message != Some(assistant_id) {
@@ -330,6 +332,7 @@ impl ConversationView {
             .find(|message| message.message.id == assistant_id)
         {
             message.message.status = MessageStatus::Complete;
+            message.message.generation_outcome = Some(outcome);
         }
         self.streaming_message = None;
         cx.emit(ConversationViewEvent::Updated);
@@ -706,9 +709,67 @@ fn conversation_ambient_light(cx: &Context<'_, ConversationView>) -> AnyElement 
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        cell::RefCell,
+        pin::Pin,
+        rc::Rc,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        task::{Context as TaskContext, Poll},
+    };
+
+    use futures_util::{Stream, stream};
     use gpui::{TestAppContext, size};
+    use gpui_component::Root;
+    use magenta_core::{
+        ConversationId, EffortLevel, FinishReason, GenerationConfig, ModelId, TokenUsage,
+    };
 
     use super::*;
+
+    fn conversation() -> Conversation {
+        Conversation {
+            id: ConversationId::new(77),
+            title: "Provider-ready stream".to_owned(),
+            generation: GenerationConfig::new(
+                ProviderId::new("demo"),
+                ModelId::new("magenta-demo"),
+                EffortLevel::Medium,
+            ),
+        }
+    }
+
+    fn message(id: u64, role: MessageRole, status: MessageStatus) -> Message {
+        Message {
+            id: MessageId::new(id),
+            conversation_id: ConversationId::new(77),
+            role,
+            content: String::new(),
+            status,
+            attachments: Vec::new(),
+            generation_outcome: None,
+        }
+    }
+
+    struct DropAwareStream {
+        dropped: Arc<AtomicBool>,
+    }
+
+    impl Stream for DropAwareStream {
+        type Item = Result<GenerationEvent, ProviderError>;
+
+        fn poll_next(self: Pin<&mut Self>, _cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Pending
+        }
+    }
+
+    impl Drop for DropAwareStream {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::SeqCst);
+        }
+    }
 
     #[gpui::test]
     fn loading_a_fixture_keeps_the_conversation_in_the_view(cx: &mut TestAppContext) {
@@ -750,6 +811,7 @@ mod tests {
                     content: "Before\n```rust\nlet answer = 42;\n```\nAfter".to_owned(),
                     status: MessageStatus::Complete,
                     attachments: Vec::new(),
+                    generation_outcome: None,
                 };
                 let rendered = ConversationView::rendered_message(message, cx);
 
@@ -768,6 +830,211 @@ mod tests {
                     &rendered.user_segments[2],
                     RenderedUserSegment::Text(text) if text == "After"
                 ));
+            })
+            .expect("the conversation test window should remain open");
+    }
+
+    #[gpui::test]
+    fn completed_stream_stores_its_outcome(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
+            let composer = cx.new(|cx| PromptComposer::new(window, cx));
+            ConversationView::new(composer, window, cx)
+        });
+        let outcome = GenerationOutcome::new(
+            FinishReason::Length,
+            Some(TokenUsage {
+                input_tokens: 12,
+                output_tokens: 24,
+            }),
+        );
+
+        window
+            .update(cx, |view, window, cx| {
+                view.load(
+                    DemoThread {
+                        conversation: conversation(),
+                        messages: Vec::new(),
+                    },
+                    cx,
+                );
+                view.start_generation(
+                    message(1, MessageRole::User, MessageStatus::Complete),
+                    message(2, MessageRole::Assistant, MessageStatus::Streaming),
+                    ProviderId::new("demo"),
+                    Box::pin(stream::iter([
+                        Ok(GenerationEvent::Started),
+                        Ok(GenerationEvent::TextDelta("hello λ".to_owned())),
+                        Ok(GenerationEvent::Completed(outcome.clone())),
+                    ])),
+                    window,
+                    cx,
+                );
+            })
+            .expect("the conversation test window should remain open");
+        cx.run_until_parked();
+
+        window
+            .update(cx, |view, _, _| {
+                let thread = view
+                    .snapshot()
+                    .expect("the conversation should remain loaded");
+                let assistant = thread
+                    .messages
+                    .last()
+                    .expect("an assistant response should exist");
+                assert_eq!(assistant.content, "hello λ");
+                assert_eq!(assistant.status, MessageStatus::Complete);
+                assert_eq!(assistant.generation_outcome, Some(outcome));
+            })
+            .expect("the conversation test window should remain open");
+    }
+
+    #[gpui::test]
+    fn stream_ending_without_completion_marks_the_response_failed(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let view_slot = Rc::new(RefCell::new(None));
+        let view_for_window = Rc::clone(&view_slot);
+        let window = cx.open_window(size(px(900.), px(640.)), move |window, cx| {
+            let composer = cx.new(|cx| PromptComposer::new(window, cx));
+            let view = cx.new(|cx| ConversationView::new(composer, window, cx));
+            view_for_window.replace(Some(view.clone()));
+            Root::new(view, window, cx)
+        });
+        let view = view_slot
+            .borrow()
+            .clone()
+            .expect("the conversation view should be created");
+
+        window
+            .update(cx, |_, window, cx| {
+                view.update(cx, |view, cx| {
+                    view.load(
+                        DemoThread {
+                            conversation: conversation(),
+                            messages: Vec::new(),
+                        },
+                        cx,
+                    );
+                    view.start_generation(
+                        message(1, MessageRole::User, MessageStatus::Complete),
+                        message(2, MessageRole::Assistant, MessageStatus::Streaming),
+                        ProviderId::new("demo"),
+                        Box::pin(stream::iter([Ok(GenerationEvent::Started)])),
+                        window,
+                        cx,
+                    );
+                });
+            })
+            .expect("the conversation test window should remain open");
+        cx.run_until_parked();
+
+        view.read_with(cx, |view, _| {
+            let thread = view
+                .snapshot()
+                .expect("the conversation should remain loaded");
+            assert_eq!(
+                thread.messages.last().map(|message| message.status),
+                Some(MessageStatus::Failed)
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn cancellation_drops_the_stream_and_rejects_stale_chunks(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
+            let composer = cx.new(|cx| PromptComposer::new(window, cx));
+            ConversationView::new(composer, window, cx)
+        });
+        let dropped = Arc::new(AtomicBool::new(false));
+
+        window
+            .update(cx, |view, window, cx| {
+                view.load(
+                    DemoThread {
+                        conversation: conversation(),
+                        messages: Vec::new(),
+                    },
+                    cx,
+                );
+                view.start_generation(
+                    message(1, MessageRole::User, MessageStatus::Complete),
+                    message(2, MessageRole::Assistant, MessageStatus::Streaming),
+                    ProviderId::new("demo"),
+                    Box::pin(DropAwareStream {
+                        dropped: Arc::clone(&dropped),
+                    }),
+                    window,
+                    cx,
+                );
+                let stale_generation = view.generation;
+                view.cancel(cx);
+                view.push_stream_chunk(stale_generation, MessageId::new(2), "stale", cx);
+
+                let thread = view
+                    .snapshot()
+                    .expect("the conversation should remain loaded");
+                let assistant = thread
+                    .messages
+                    .last()
+                    .expect("an assistant response should exist");
+                assert_eq!(assistant.status, MessageStatus::Stopped);
+                assert!(assistant.content.is_empty());
+            })
+            .expect("the conversation test window should remain open");
+
+        cx.run_until_parked();
+        assert!(dropped.load(Ordering::SeqCst));
+    }
+
+    #[gpui::test]
+    fn superseding_a_generation_rejects_chunks_from_the_old_stream(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
+            let composer = cx.new(|cx| PromptComposer::new(window, cx));
+            ConversationView::new(composer, window, cx)
+        });
+
+        window
+            .update(cx, |view, window, cx| {
+                view.load(
+                    DemoThread {
+                        conversation: conversation(),
+                        messages: Vec::new(),
+                    },
+                    cx,
+                );
+                view.start_generation(
+                    message(1, MessageRole::User, MessageStatus::Complete),
+                    message(2, MessageRole::Assistant, MessageStatus::Streaming),
+                    ProviderId::new("demo"),
+                    Box::pin(stream::pending()),
+                    window,
+                    cx,
+                );
+                let stale_generation = view.generation;
+                view.start_generation(
+                    message(3, MessageRole::User, MessageStatus::Complete),
+                    message(4, MessageRole::Assistant, MessageStatus::Streaming),
+                    ProviderId::new("demo"),
+                    Box::pin(stream::pending()),
+                    window,
+                    cx,
+                );
+                view.push_stream_chunk(stale_generation, MessageId::new(2), "stale", cx);
+
+                let thread = view
+                    .snapshot()
+                    .expect("the conversation should remain loaded");
+                let old_response = thread
+                    .messages
+                    .iter()
+                    .find(|message| message.id == MessageId::new(2))
+                    .expect("the superseded response should remain visible");
+                assert_eq!(old_response.status, MessageStatus::Stopped);
+                assert!(old_response.content.is_empty());
+                view.cancel(cx);
             })
             .expect("the conversation test window should remain open");
     }

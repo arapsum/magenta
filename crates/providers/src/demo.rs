@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use futures_util::stream;
 use magenta_core::{
-    ChatProvider, GenerationEvent, GenerationRequest, GenerationStream, ProviderError,
+    ChatProvider, FinishReason, GenerationEvent, GenerationOutcome, GenerationRequest,
+    GenerationStream, ProviderError,
 };
 use smol::Timer;
 
@@ -47,11 +48,16 @@ impl ChatProvider for DemoProvider {
                 ))]
             },
             |prompt| {
-                let mut events = response_chunks(&fake_response(&prompt))
-                    .into_iter()
-                    .map(|chunk| Ok(GenerationEvent::TextDelta(chunk)))
-                    .collect::<Vec<_>>();
-                events.push(Ok(GenerationEvent::Completed));
+                let mut events = vec![Ok(GenerationEvent::Started)];
+                events.extend(
+                    response_chunks(&fake_response(&prompt))
+                        .into_iter()
+                        .map(|chunk| Ok(GenerationEvent::TextDelta(chunk))),
+                );
+                events.push(Ok(GenerationEvent::Completed(GenerationOutcome::new(
+                    FinishReason::Stop,
+                    None,
+                ))));
                 events
             },
         );
@@ -79,13 +85,13 @@ enum DemoProviderError {
 mod tests {
     use std::time::Duration;
 
-    use futures_util::StreamExt as _;
     use magenta_core::{
         ConversationId, EffortLevel, GenerationConfig, Message, MessageId, MessageRole,
         MessageStatus, ModelId, ProviderId,
     };
 
     use super::*;
+    use crate::contract::{assert_failure_contract, assert_success_contract};
 
     fn request(messages: Vec<Message>) -> GenerationRequest {
         GenerationRequest {
@@ -106,6 +112,7 @@ mod tests {
             content: content.to_owned(),
             status: MessageStatus::Complete,
             attachments: Vec::new(),
+            generation_outcome: None,
         }
     }
 
@@ -113,35 +120,19 @@ mod tests {
     fn demo_stream_reassembles_the_response_and_completes_once() {
         let prompt = "keep the provider boundary narrow";
         let provider = DemoProvider::new(Duration::ZERO, Duration::ZERO);
-        let events = smol::block_on(
-            provider
-                .stream(request(vec![user_message(prompt)]))
-                .collect::<Vec<_>>(),
+        let outcome = assert_success_contract(
+            &provider,
+            request(vec![user_message(prompt)]),
+            &fake_response(prompt),
         );
-        let mut response = String::new();
-        let mut completions = 0;
 
-        for event in events {
-            match event.expect("the demo provider should succeed") {
-                GenerationEvent::TextDelta(chunk) => response.push_str(&chunk),
-                GenerationEvent::Completed => completions += 1,
-            }
-        }
-
-        assert_eq!(response, fake_response(prompt));
-        assert_eq!(completions, 1);
+        assert_eq!(outcome, GenerationOutcome::new(FinishReason::Stop, None));
     }
 
     #[test]
     fn demo_stream_reports_a_typed_error_without_user_context() {
         let provider = DemoProvider::new(Duration::ZERO, Duration::ZERO);
-        let events = smol::block_on(provider.stream(request(Vec::new())).collect::<Vec<_>>());
-
-        let error = events
-            .into_iter()
-            .next()
-            .expect("the demo provider should emit an error")
-            .expect_err("an empty request should fail");
+        let error = assert_failure_contract(&provider, request(Vec::new()));
         assert_eq!(error.provider, ProviderId::new("anthropic"));
         assert_eq!(
             error.source.to_string(),

@@ -5,7 +5,7 @@ use magenta_core::{
     GenerationStream, Message, MessageId, MessageRole, MessageStatus,
 };
 
-use crate::{Result, SendMessageError};
+use crate::SendMessageError;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SendTarget {
@@ -52,7 +52,7 @@ impl SendMessage {
     ///
     /// Returns an error when the prompt is empty, reserved IDs collide with
     /// history, or history belongs to another conversation.
-    pub fn execute(&self, input: SendMessageInput) -> Result<PendingGeneration> {
+    pub fn execute(&self, input: SendMessageInput) -> Result<PendingGeneration, SendMessageError> {
         let prompt = input.prompt.trim().to_owned();
         if prompt.is_empty() {
             return Err(SendMessageError::EmptyPrompt);
@@ -69,6 +69,7 @@ impl SendMessage {
             content: prompt,
             status: MessageStatus::Complete,
             attachments: input.attachments,
+            generation_outcome: None,
         };
         let assistant_message = Message {
             id: input.ids.assistant,
@@ -77,6 +78,7 @@ impl SendMessage {
             content: String::new(),
             status: MessageStatus::Streaming,
             attachments: Vec::new(),
+            generation_outcome: None,
         };
 
         let messages = input
@@ -117,7 +119,7 @@ fn conversation_for(
     }
 }
 
-fn validate_message_ids(history: &[Message], ids: MessageIds) -> Result<()> {
+fn validate_message_ids(history: &[Message], ids: MessageIds) -> Result<(), SendMessageError> {
     if ids.user == ids.assistant {
         return Err(SendMessageError::DuplicateMessageIds);
     }
@@ -132,7 +134,10 @@ fn validate_message_ids(history: &[Message], ids: MessageIds) -> Result<()> {
     Ok(())
 }
 
-fn validate_history(conversation_id: ConversationId, history: &[Message]) -> Result<()> {
+fn validate_history(
+    conversation_id: ConversationId,
+    history: &[Message],
+) -> Result<(), SendMessageError> {
     history
         .iter()
         .find(|message| message.conversation_id != conversation_id)
@@ -170,7 +175,10 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use futures_util::stream;
-    use magenta_core::{EffortLevel, GenerationEvent, GenerationStream, ModelId, ProviderId};
+    use magenta_core::{
+        EffortLevel, FinishReason, GenerationEvent, GenerationOutcome, GenerationStream, ModelId,
+        ProviderId,
+    };
 
     use super::*;
 
@@ -185,7 +193,13 @@ mod tests {
                 .lock()
                 .expect("the provider request lock should not be poisoned")
                 .push(request);
-            Box::pin(stream::once(async { Ok(GenerationEvent::Completed) }))
+            Box::pin(stream::iter([
+                Ok(GenerationEvent::Started),
+                Ok(GenerationEvent::Completed(GenerationOutcome::new(
+                    FinishReason::Stop,
+                    None,
+                ))),
+            ]))
         }
     }
 
@@ -211,6 +225,7 @@ mod tests {
             content: content.to_owned(),
             status,
             attachments: Vec::new(),
+            generation_outcome: None,
         }
     }
 

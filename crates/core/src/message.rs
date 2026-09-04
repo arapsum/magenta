@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::{ConversationId, MessageId};
+use super::{ConversationId, GenerationOutcome, MessageId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MessageRole {
@@ -30,6 +30,7 @@ pub struct Message {
     pub content: String,
     pub status: MessageStatus,
     pub attachments: Vec<Attachment>,
+    pub generation_outcome: Option<GenerationOutcome>,
 }
 
 #[cfg(test)]
@@ -48,6 +49,7 @@ mod tests {
                 name: "brief.png".to_owned(),
                 path: PathBuf::from("brief.png"),
             }],
+            generation_outcome: None,
         };
 
         assert_eq!(message.role, MessageRole::User);

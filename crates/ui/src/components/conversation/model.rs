@@ -171,6 +171,7 @@ fn push_fixture_message(
         content,
         status: MessageStatus::Complete,
         attachments: Vec::new(),
+        generation_outcome: None,
     });
     *next_message_id = (*next_message_id).saturating_add(1);
 }

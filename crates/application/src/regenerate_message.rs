@@ -96,6 +96,7 @@ impl RegenerateMessage {
             content: String::new(),
             status: MessageStatus::Streaming,
             attachments: Vec::new(),
+            generation_outcome: None,
         };
         let stream = self.provider.stream(GenerationRequest {
             generation: input.conversation.generation,
@@ -133,7 +134,8 @@ mod tests {
 
     use futures_util::stream;
     use magenta_core::{
-        ConversationId, EffortLevel, GenerationConfig, GenerationEvent, ModelId, ProviderId,
+        ConversationId, EffortLevel, FinishReason, GenerationConfig, GenerationEvent,
+        GenerationOutcome, ModelId, ProviderId,
     };
 
     use super::*;
@@ -149,7 +151,13 @@ mod tests {
                 .lock()
                 .expect("the provider request lock should not be poisoned")
                 .push(request);
-            Box::pin(stream::once(async { Ok(GenerationEvent::Completed) }))
+            Box::pin(stream::iter([
+                Ok(GenerationEvent::Started),
+                Ok(GenerationEvent::Completed(GenerationOutcome::new(
+                    FinishReason::Stop,
+                    None,
+                ))),
+            ]))
         }
     }
 
@@ -173,6 +181,7 @@ mod tests {
             content: format!("message {id}"),
             status,
             attachments: Vec::new(),
+            generation_outcome: None,
         }
     }
 

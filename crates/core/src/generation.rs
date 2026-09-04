@@ -54,8 +54,9 @@ pub struct GenerationRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GenerationEvent {
+    Started,
     TextDelta(String),
-    Completed,
+    Completed(GenerationOutcome),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
