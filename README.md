@@ -1,42 +1,120 @@
 # Magenta
 
-Magenta is an early-stage native AI workspace interface built in Rust with
+Magenta is an experimental native AI chat client written in Rust with
 [GPUI](https://gpui.rs/) and
 [GPUI Component](https://github.com/longbridge/gpui-component).
 
-The project is currently focused on building a polished desktop shell: custom
-window chrome, a collapsible navigation sidebar, a conversation workspace,
-JSON-backed themes, accessible prompt composition, and recoverable startup
-behavior. Generated content, account controls, and service-backed destinations
-are still visual prototypes; Magenta does not connect to an AI provider yet.
+Its premise is deliberately focused: provide a polished, local-first desktop
+experience for remote AI providers without turning a chat client into a
+browser tab in a desktop wrapper. Magenta is intended to be fast at idle,
+careful with memory, and pleasant to use for long-lived conversations.
 
-The visual direction is inspired by the
+> **Status:** Magenta is in the interface-foundation stage. It does not yet
+> connect to an AI provider or persist conversations. The current application
+> is an interactive native shell with representative local data.
+
+The visual language takes inspiration from the
 [Mogonta AI Chat Workspace UI design](https://dribbble.com/shots/27203662-Mogonta-AI-Chat-Workspace-UI-Design).
 Magenta is an independent implementation and is not affiliated with the
 original designer.
 
+## Product direction
+
+Magenta is a general AI chat client, not an image studio or an agent/terminal
+workstation. Its eventual core experience is:
+
+```text
+Native GPUI interface
+        |
+        v
+Conversation workflows
+        |
+        +---- provider adapters ----> remote model APIs
+        |
+        +---- local persistence ----> SQLite + local attachment files
+```
+
+The product is guided by a few constraints:
+
+- **Native all the way down.** The chat experience should not require an
+  embedded Chromium, Electron, or WebView runtime.
+- **Provider-neutral domain model.** The application should model
+  conversations, messages, attachments, and generation events—not one
+  provider’s request JSON.
+- **Local-first history.** Conversations and settings belong on the user’s
+  machine; credentials should use the operating system’s secure credential
+  store rather than a plaintext database.
+- **Bounded working set.** Memory should scale chiefly with what is visible:
+  lightweight conversation summaries in the sidebar, paged messages in an
+  open thread, and released attachment buffers when they are no longer needed.
+- **Streaming without churn.** Provider stream chunks should update the active
+  message at a sensible visual cadence rather than rebuilding an entire
+  conversation for every token.
+
 ## What works today
 
-- Native GPUI desktop window with custom Linux client-side chrome.
-- Expanded and compact sidebar layouts with destination selection.
-- Editable multiline prompt composer with native text input behavior.
-- Combined model and effort menu with explicit generation readiness.
-- Native reference-image selection with removable previews and safe validation.
-- Bundled light and dark themes loaded from a JSON theme set.
-- Safe fallback to GPUI Component's default dark theme when Magenta's theme
-  cannot be loaded.
-- Typed errors through `MagentaError` and the shared `Result<T>` alias.
-- Persistent, deduplicated GPUI notifications for recoverable failures.
-- Structured local diagnostics with daily rotation and stderr fallback.
+- Native GPUI window with custom Linux client-side chrome.
+- Bundled JSON light and dark themes, including safe fallback behavior if a
+  bundled theme cannot be loaded.
+- A responsive, collapsible chat sidebar with:
+  - New Chat state;
+  - searchable representative conversation history;
+  - pinned conversations and grouped recent history;
+  - local pin/unpin, selection, expansion, and “Show more” interactions;
+  - an active-selection bevel that moves from New Chat to the selected
+    conversation;
+  - a local profile/settings entry point and a theme toggle.
+- Empty workspace with Magenta’s animated glass orb and ambient surface.
+- Native multiline prompt composer with model/effort selection, image
+  attachment validation and previews, and a disabled-until-ready submission
+  state. This remains a UI prototype; it does not make network requests.
+- Typed errors through `MagentaError` and a shared `Result<T>` alias.
+- Recoverable notifications and privacy-safe error presentation.
+- Local structured diagnostics with daily rotation and stderr fallback.
+
+## Not implemented yet
+
+- Remote provider integrations or model discovery.
+- Streaming responses, cancellation, retry, and usage accounting.
+- SQLite conversation persistence, search indexing, or pagination.
+- Secure credential storage.
+- Markdown/message rendering, code blocks, copy actions, tables, and rich tool
+  results.
+- Conversation create, rename, delete, or regenerate workflows.
+- Attachments beyond the present composer prototype.
+
+## Planned architecture
+
+The workspace intentionally starts small:
+
+```text
+crates/
+├── desktop    # executable, diagnostics, platform/window composition
+└── ui         # GPUI app shell, components, themes, UI error mapping
+```
+
+As real chat workflows arrive, the expected dependency direction is:
+
+```text
+desktop
+├── ui
+├── providers     # OpenAI, Anthropic, Gemini, or similar adapters
+├── storage       # SQLite, attachment metadata, migrations
+└── core          # provider-independent conversation/message concepts
+```
+
+`core` must not depend on GPUI, HTTP, SQLite, or a specific model API. An
+application/workflow crate may be introduced only when operations such as
+“send message” have outgrown the UI layer.
 
 ## Requirements
 
-- Rust 1.97.1 or newer. The locked GPUI revision uses Rust 1.97.1 upstream.
+- Rust 1.97.1 or newer; the locked GPUI revision currently requires it.
 - Git and network access for the first dependency fetch.
 - A Linux Wayland or X11 desktop with the native development libraries needed
   by GPUI. Linux is the platform currently exercised by this repository.
 
-The dependency graph is captured in `Cargo.lock`. Use `--locked` for
+The dependency graph is committed in `Cargo.lock`. Use `--locked` for
 reproducible development and verification.
 
 ## Run Magenta
@@ -50,7 +128,7 @@ cargo run --locked
 The first build compiles GPUI and its graphics stack, so it can take longer
 than subsequent launches.
 
-The repository also includes a [bacon](https://dystroy.org/bacon/) configuration:
+The repository also includes a [bacon](https://dystroy.org/bacon/) setup:
 
 ```bash
 bacon
@@ -61,43 +139,25 @@ bacon run-long
 
 ## Development checks
 
-Run the same widening verification gates used during development:
+Run formatting, the workspace test suite, and the project’s strict lint gate:
 
 ```bash
 cargo fmt --all -- --check
-cargo check --workspace --locked --all-targets
-cargo test --workspace --locked
-cargo clippy --workspace --locked --all-targets -- -D warnings
+cargo test --workspace --locked --all-features
+cargo clippy --all-targets --all-features -- \
+  -D warnings -W clippy::pedantic -W clippy::nursery -W rust-2018-idioms
 ```
 
-Compilation and tests do not replace launching the application. UI changes
-should also be exercised in the real window at the default and compact sidebar
-sizes.
-
-## Project structure
-
-```text
-magenta/
-├── crates/
-│   ├── desktop/         # process startup, diagnostics, window configuration
-│   └── ui/              # root view, components, themes, and UI error mapping
-├── docs/
-│   └── error-handling.md
-├── themes/
-│   └── magenta.json     # bundled GPUI Component light/dark theme set
-├── Cargo.toml
-└── bacon.toml
-```
-
-The `desktop` crate owns process and platform concerns. The `ui` crate owns the
-GPUI view tree and exports `MainView`, theme operations, `MagentaError`, and the
-project `Result<T>` type.
+Compilation and unit tests do not replace launching the application. UI changes
+should also be exercised in the real window, including expanded and collapsed
+sidebar states, keyboard focus, search, selection, theme switching, and a
+small window size.
 
 ## Themes
 
-Magenta's bundled themes live in [`themes/magenta.json`](themes/magenta.json).
-They use GPUI Component's theme schema and provide `Magenta Light` and
-`Magenta Dark` configurations.
+Magenta’s bundled themes live in [`themes/magenta.json`](themes/magenta.json).
+They use the GPUI Component schema and provide `Magenta Light` and `Magenta
+Dark` configurations.
 
 Theme operations return typed results:
 
@@ -106,39 +166,42 @@ magenta_ui::theme::apply_named("Magenta Dark", cx)?;
 magenta_ui::theme::toggle(cx)?;
 ```
 
-An unavailable theme leaves the current theme unchanged. A malformed bundled
-theme falls back to GPUI Component's default dark theme and produces a
-user-safe warning.
+An unavailable theme leaves the active theme unchanged. A malformed bundled
+theme falls back to GPUI Component’s default dark theme and presents a safe
+warning.
 
 ## Errors and diagnostics
 
-Application errors are represented by `MagentaError` and preserve their source
-chains for developer diagnostics. User-facing messages are mapped separately
-so raw paths, credentials, prompts, and internal details are not exposed.
+Application failures use `MagentaError`, retaining technical source chains for
+diagnostics while mapping user-facing messages separately. Raw paths,
+credentials, prompts, clipboard data, and internal details must not appear in
+the interface.
 
-Logs are written to the platform-local Magenta data directory under
-`magenta/logs`. They rotate daily and retain seven files. If file logging is
-unavailable, Magenta continues with stderr logging. Development verbosity can
-be adjusted with `RUST_LOG`:
+Logs are stored in the platform-local Magenta data directory under
+`magenta/logs`, rotate daily, and retain seven files. If file logging is not
+available, Magenta continues with stderr logging. Development verbosity can be
+adjusted with `RUST_LOG`:
 
 ```bash
 RUST_LOG=magenta=debug,gpui=info cargo run --locked
 ```
 
-See [`docs/error-handling.md`](docs/error-handling.md) for the error presentation,
-recovery, privacy, and future asynchronous-work conventions.
+See [`docs/error-handling.md`](docs/error-handling.md) for presentation,
+recovery, privacy, and asynchronous-work conventions.
 
-## Current roadmap
+## Roadmap
 
-- Connect generation and chat actions to a model/service boundary.
-- Add durable conversations, folders, and user preferences.
-- Add explicit loading, empty, cancellation, retry, and offline states.
-- Complete keyboard, screen-reader, resize, and cross-platform runtime QA.
-- Add packaging, signing, and installed-artifact verification before release.
+1. Complete the visual shell and keyboard/accessibility QA.
+2. Add provider-independent core conversation and message types.
+3. Implement one streaming remote provider behind a provider boundary.
+4. Add local SQLite persistence with a lightweight conversation index and
+   paged message loading.
+5. Build Markdown and code-block rendering, then provider settings and secure
+   credential storage.
 
 ## Contributing
 
-Keep changes scoped to the owning crate, preserve the existing state model,
-and accompany behavioral changes with focused tests. Before handing off a
-change, run the development checks above and launch the real application when
-the change affects layout, interaction, themes, windows, or platform behavior.
+Keep changes scoped to the owning crate and preserve the application’s clean
+dependency direction. Add focused tests for behavioral changes, run the checks
+above, and launch the real application for changes that affect layout,
+interaction, themes, windows, or platform behavior.
