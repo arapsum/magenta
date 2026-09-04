@@ -13,8 +13,8 @@ careful with memory, and pleasant to use for long-lived conversations.
 > connect to a remote AI provider or persist conversations. The current
 > application is an interactive native shell with in-memory demo conversations
 > and a deterministic provider adapter for shaping the chat experience. The
-> first headless application workflow now prepares and starts a send operation
-> independently of GPUI.
+> headless application workflows now prepare both send and regeneration
+> operations independently of GPUI.
 
 The visual language takes inspiration from the
 [Mogonta AI Chat Workspace UI design](https://dribbble.com/shots/27203662-Mogonta-AI-Chat-Workspace-UI-Design).
@@ -78,14 +78,19 @@ The product is guided by a few constraints:
   code-block copy actions, response regeneration, cancellable demo streaming,
   provider failure handling, and safe local synchronization back into the demo
   catalog.
-- A focused `SendMessage` application workflow that validates prompt history,
-  allocates provider-neutral messages, derives new conversation titles, and
-  invokes the provider without depending on GPUI. The UI still owns its
+- Focused `SendMessage` and `RegenerateMessage` application workflows that
+  validate conversation history, allocate provider-neutral messages, and
+  invoke the provider without depending on GPUI. The UI still owns its
   transitional in-memory ID allocator while the demo catalog is active.
 - A `ChatProvider` port in `core` with a deterministic `DemoProvider` adapter
-  in `providers`; the UI consumes typed generation events rather than fake
-  response content or provider-specific payloads.
-- Typed errors through `MagentaError` and a shared `Result<T>` alias.
+  in `providers`; the UI consumes ordered start, text-delta, and completion
+  events rather than fake response content or provider-specific payloads.
+- Generation completion metadata on assistant messages, including normalized
+  finish reasons and optional input/output token usage. GPUI owns the active
+  stream task, so cancelling or superseding a response drops the stream and
+  stale chunks cannot alter the conversation.
+- Workflow-specific application errors plus a typed `MagentaError` and
+  `Result<T>` alias at the UI boundary.
 - Recoverable notifications and privacy-safe error presentation.
 - Local structured diagnostics with daily rotation and stderr fallback.
 
@@ -130,11 +135,11 @@ The demo conversation catalog and its transitional ID allocator currently live
 in `ui` so the interaction can be designed with fake data. The provider port
 and generation events live in `core`, while `providers` owns the deterministic
 adapter that supplies the current local stream. The `application` crate now
-owns the provider-facing preparation for “send message”: it receives domain
-values, returns a pending generation, and leaves stream lifecycle and rendering
-to the UI. Regeneration remains in the UI until its workflow is large enough to
-extract cleanly. Future storage and remote-provider adapters will depend on
-`core`; `core` must not depend on GPUI, HTTP, SQLite, or a specific model API.
+owns provider-facing preparation for both sending and regenerating messages:
+it receives domain values, returns a pending generation, and leaves stream
+lifecycle, cancellation, stale-result rejection, and rendering to the UI.
+Future storage and remote-provider adapters will depend on `core`; `core` must
+not depend on GPUI, HTTP, SQLite, or a specific model API.
 
 ## Requirements
 
@@ -221,11 +226,10 @@ recovery, privacy, and asynchronous-work conventions.
 ## Roadmap
 
 1. Complete visual and keyboard/accessibility QA for the conversation surface.
-2. Move regeneration orchestration into the application workflow boundary.
-3. Implement one streaming remote provider behind the existing port.
-4. Add local SQLite persistence with a lightweight conversation index and
+2. Implement one streaming remote provider behind the existing, contract-tested port.
+3. Add local SQLite persistence with a lightweight conversation index and
    paged message loading.
-5. Add provider settings, secure credential storage, and durable attachments.
+4. Add provider settings, secure credential storage, and durable attachments.
 
 ## Contributing
 
