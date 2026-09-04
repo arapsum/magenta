@@ -3647,6 +3647,10 @@ dependencies = [
 [[package]]
 name = "magenta-core"
 version = "0.1.0"
+dependencies = [
+ "futures-core",
+ "thiserror 2.0.20",
+]
 
 [[package]]
 name = "magenta-desktop"
@@ -3657,6 +3661,7 @@ dependencies = [
  "gpui-component",
  "gpui-component-assets",
  "gpui_platform",
+ "magenta-providers",
  "magenta-ui",
  "tracing",
  "tracing-appender",
@@ -3664,10 +3669,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "magenta-providers"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "magenta-core",
+ "smol",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "magenta-ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "futures-util",
  "gpui",
  "gpui-component",
  "magenta-core",

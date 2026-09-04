@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use gpui_component::notification::{Notification, NotificationType};
+use magenta_core::{ProviderError, ProviderId};
 
 /// The errors that can cross Magenta's subsystem boundaries.
 ///
@@ -35,6 +36,13 @@ pub enum MagentaError {
     AttachmentPicker {
         #[source]
         source: anyhow::Error,
+    },
+
+    #[error("provider generation failed")]
+    ProviderGeneration {
+        provider: ProviderId,
+        #[source]
+        source: ProviderError,
     },
 }
 
@@ -88,6 +96,12 @@ impl MagentaError {
                 severity: ErrorSeverity::Warning,
                 title: "Images could not be selected",
                 message: "The system image picker could not be opened. Try adding the reference images again.",
+            },
+            Self::ProviderGeneration { .. } => ErrorPresentation {
+                code: "MAG-PROVIDER-GENERATION",
+                severity: ErrorSeverity::Error,
+                title: "Response could not be generated",
+                message: "The selected model could not finish the response. Try again or choose another model.",
             },
         }
     }
@@ -188,6 +202,13 @@ mod tests {
             },
             MagentaError::AttachmentPicker {
                 source: anyhow::anyhow!("portal unavailable"),
+            },
+            MagentaError::ProviderGeneration {
+                provider: ProviderId::new("anthropic"),
+                source: ProviderError::new(
+                    ProviderId::new("anthropic"),
+                    std::io::Error::other("connection closed"),
+                ),
             },
         ];
 

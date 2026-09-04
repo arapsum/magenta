@@ -1,6 +1,6 @@
 mod diagnostics;
 
-use std::{cell::Cell, process::ExitCode, rc::Rc};
+use std::{cell::Cell, process::ExitCode, rc::Rc, sync::Arc};
 
 use gpui::{
     px, size, App, AppContext, Application, Bounds, WindowBounds, WindowHandle, WindowOptions,
@@ -8,6 +8,7 @@ use gpui::{
 #[cfg(target_os = "linux")]
 use gpui::{WindowBackgroundAppearance, WindowDecorations};
 use gpui_component::Root;
+use magenta_providers::DemoProvider;
 
 use magenta_ui::{notification_for_error, MagentaError, MainView, Result};
 
@@ -115,8 +116,10 @@ const fn exit_code(launch_failed: bool) -> ExitCode {
 
 fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     let window_options = main_window_options(cx);
-    cx.open_window(window_options, |window, cx| {
-        let main_view = cx.new(|cx| MainView::new(window, cx));
+    let provider = Arc::new(DemoProvider::default());
+    cx.open_window(window_options, move |window, cx| {
+        let provider = Arc::clone(&provider);
+        let main_view = cx.new(|cx| MainView::new(provider, window, cx));
         cx.new(|cx| Root::new(main_view, window, cx))
     })
     .map_err(|source| MagentaError::WindowOpen { source })

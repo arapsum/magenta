@@ -1,15 +1,16 @@
+use std::sync::Arc;
+
 use gpui::{AnyElement, Entity, Render, SharedString, Subscription, Window, div, prelude::*};
 use gpui_component::{
     ActiveTheme as _, WindowExt,
     notification::{Notification, NotificationType},
 };
-use magenta_core::{Attachment, ConversationId, MessageRole, MessageStatus};
+use magenta_core::{
+    Attachment, ChatProvider, ConversationId, GenerationRequest, MessageRole, MessageStatus,
+};
 
 use crate::components::{
-    conversation::{
-        ConversationView, ConversationViewEvent, DemoCatalog, DemoThread, fake_response,
-        summary_for,
-    },
+    conversation::{ConversationView, ConversationViewEvent, DemoCatalog, DemoThread, summary_for},
     prompt_input::{PromptComposer, PromptComposerEvent, PromptRequest},
     sidebar::{SidebarEvent, SidebarView},
     titlebar, workspace,
@@ -20,13 +21,18 @@ pub struct MainView {
     sidebar: Entity<SidebarView>,
     composer: Entity<PromptComposer>,
     conversation: Entity<ConversationView>,
+    provider: Arc<dyn ChatProvider>,
     catalog: DemoCatalog,
     active_conversation: Option<ConversationId>,
     subscriptions: Vec<Subscription>,
 }
 
 impl MainView {
-    pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
+    pub fn new(
+        provider: Arc<dyn ChatProvider>,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> Self {
         let composer = cx.new(|cx| PromptComposer::new(window, cx));
         let sidebar = cx.new(|cx| SidebarView::new(window, cx));
         let conversation = cx.new(|cx| ConversationView::new(composer.clone(), window, cx));
@@ -96,6 +102,7 @@ impl MainView {
             sidebar,
             composer,
             conversation,
+            provider,
             catalog: DemoCatalog::new(),
             active_conversation: None,
             subscriptions,
@@ -132,14 +139,23 @@ impl MainView {
             return;
         }
 
+        let generation = request.generation.clone();
         let conversation = if let Some(id) = self.active_conversation {
-            self.catalog
+            let conversation = self
+                .catalog
                 .thread(id)
-                .map(|thread| thread.conversation.clone())
+                .map(|thread| thread.conversation.clone());
+            if conversation.is_some() {
+                let generation = generation.clone();
+                self.conversation.update(cx, |view, cx| {
+                    view.set_generation(generation, cx);
+                });
+            }
+            conversation
         } else {
             let conversation = self
                 .catalog
-                .create_conversation(request.prompt.as_ref(), request.generation.clone());
+                .create_conversation(request.prompt.as_ref(), generation.clone());
             self.sidebar.update(cx, |sidebar, cx| {
                 sidebar.add_conversation(summary_for(&conversation), cx);
             });
@@ -185,11 +201,22 @@ impl MainView {
             MessageStatus::Streaming,
             Vec::new(),
         );
-        let response = fake_response(request.prompt.as_ref());
+        let mut messages = self
+            .conversation
+            .read(cx)
+            .snapshot()
+            .map_or_else(Vec::new, |thread| thread.messages);
+        messages.retain(|message| message.status == MessageStatus::Complete);
+        messages.push(user.clone());
+        let generation_request = GenerationRequest {
+            generation,
+            messages,
+        };
+        let provider = Arc::clone(&self.provider);
         self.composer
             .update(cx, |composer, cx| composer.clear_after_submit(window, cx));
         self.conversation.update(cx, |view, cx| {
-            view.start_generation(user, assistant, response, window, cx);
+            view.start_generation(user, assistant, generation_request, provider, window, cx);
         });
         tracing::info!(
             provider = %request.generation.provider.0,
@@ -219,7 +246,7 @@ impl MainView {
         let Some(conversation_id) = self.active_conversation else {
             return;
         };
-        let Some(prompt) = self.conversation.read(cx).regeneration_prompt(message_id) else {
+        let Some(messages) = self.conversation.read(cx).regeneration_context(message_id) else {
             return;
         };
         let Some(thread) = self.catalog.thread(conversation_id) else {
@@ -233,11 +260,23 @@ impl MainView {
             MessageStatus::Streaming,
             Vec::new(),
         );
+        let generation_request = GenerationRequest {
+            generation: conversation.generation.clone(),
+            messages,
+        };
+        let provider = Arc::clone(&self.provider);
         self.composer.update(cx, |composer, cx| {
             composer.set_configuration(&conversation.generation, cx);
         });
         self.conversation.update(cx, |view, cx| {
-            view.regenerate(message_id, assistant, fake_response(&prompt), window, cx);
+            view.regenerate(
+                message_id,
+                assistant,
+                generation_request,
+                provider,
+                window,
+                cx,
+            );
         });
         self.sync_active_thread(cx);
     }

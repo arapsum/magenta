@@ -4,3 +4,5 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+futures-core.workspace = true
+thiserror.workspace = true

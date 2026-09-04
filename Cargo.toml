@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/desktop", "crates/ui"]
+members = ["crates/core", "crates/desktop", "crates/providers", "crates/ui"]
 default-members = ["crates/desktop"]
 
 [workspace.package]
@@ -10,7 +10,10 @@ edition = "2024"
 [workspace.dependencies]
 anyhow = "1"
 dirs = "6"
+futures-core = "0.3"
+futures-util = "0.3"
 magenta-core = { path = "crates/core" }
+magenta-providers = { path = "crates/providers" }
 magenta-ui = { path = "crates/ui" }
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
@@ -20,6 +23,7 @@ gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
 ] }
 gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "49229371e095bfd2ca77d336b5972b16956f0a87" }
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "49229371e095bfd2ca77d336b5972b16956f0a87" }
+smol = "2"
 thiserror = "2"
 tracing = "0.1"
 tracing-appender = "0.2.5"

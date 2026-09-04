@@ -1,0 +1,10 @@
+[package]
+name = "magenta-providers"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+futures-util.workspace = true
+magenta-core.workspace = true
+smol.workspace = true
+thiserror.workspace = true

@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 dirs.workspace = true
+magenta-providers.workspace = true
 magenta-ui.workspace = true
 gpui.workspace = true
 gpui_platform.workspace = true

@@ -10,9 +10,9 @@ browser tab in a desktop wrapper. Magenta is intended to be fast at idle,
 careful with memory, and pleasant to use for long-lived conversations.
 
 > **Status:** Magenta is in the interface-foundation stage. It does not yet
-> connect to an AI provider or persist conversations. The current application
-> is an interactive native shell with in-memory demo conversations and a local
-> streaming simulation for shaping the chat experience.
+> connect to a remote AI provider or persist conversations. The current
+> application is an interactive native shell with in-memory demo conversations
+> and a deterministic provider adapter for shaping the chat experience.
 
 The visual language takes inspiration from the
 [Mogonta AI Chat Workspace UI design](https://dribbble.com/shots/27203662-Mogonta-AI-Chat-Workspace-UI-Design).
@@ -73,8 +73,12 @@ The product is guided by a few constraints:
 - A conversation surface backed by provider-independent core types and
   representative in-memory fixtures for every sidebar conversation.
 - Conversation selection, new-thread creation, rich Markdown responses,
-  code-block copy actions, response regeneration, cancellable fake streaming,
-  and safe local synchronization back into the demo catalog.
+  code-block copy actions, response regeneration, cancellable demo streaming,
+  provider failure handling, and safe local synchronization back into the demo
+  catalog.
+- A `ChatProvider` port in `core` with a deterministic `DemoProvider` adapter
+  in `providers`; the UI consumes typed generation events rather than fake
+  response content or provider-specific payloads.
 - Typed errors through `MagentaError` and a shared `Result<T>` alias.
 - Recoverable notifications and privacy-safe error presentation.
 - Local structured diagnostics with daily rotation and stderr fallback.
@@ -95,8 +99,9 @@ The workspace intentionally starts small:
 
 ```text
 crates/
-├── core       # provider-independent conversation/message values
+├── core       # provider-independent values, ports, events, and errors
 ├── desktop    # executable, diagnostics, platform/window composition
+├── providers  # provider adapters; currently the deterministic demo provider
 └── ui         # GPUI app shell, components, themes, and demo workflows
 ```
 
@@ -104,12 +109,16 @@ The current dependency direction is intentionally small:
 
 ```text
 desktop
+├── providers
+│   └── core
 └── ui
     └── core
 ```
 
 The demo conversation catalog currently lives in `ui` so the interaction can
-be designed with fake data. When real chat workflows arrive, provider and
+be designed with fake data. The provider port and generation events already
+live in `core`, while `providers` owns the deterministic adapter that supplies
+the current local stream. When real chat workflows arrive, remote provider and
 storage adapters will depend on `core`, while an application/workflow crate
 can own operations such as “send message” once they have outgrown the UI
 layer. `core` must not depend on GPUI, HTTP, SQLite, or a specific model API.
@@ -199,9 +208,8 @@ recovery, privacy, and asynchronous-work conventions.
 ## Roadmap
 
 1. Complete visual and keyboard/accessibility QA for the conversation surface.
-2. Replace the in-memory demo catalog with application workflows and a
-   provider boundary.
-3. Implement one streaming remote provider behind that boundary.
+2. Move send/regenerate orchestration into an application workflow boundary.
+3. Implement one streaming remote provider behind the existing port.
 4. Add local SQLite persistence with a lightweight conversation index and
    paged message loading.
 5. Add provider settings, secure credential storage, and durable attachments.

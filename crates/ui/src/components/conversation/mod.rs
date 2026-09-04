@@ -1,35 +1,42 @@
 mod model;
 
-use std::time::Duration;
+use std::sync::Arc;
 
+use futures_util::StreamExt as _;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FollowMode, IntoElement,
     ListAlignment, ListSizingBehavior, ListState, ParentElement as _, Render, Styled as _, Task,
     Window, div, linear_color_stop, linear_gradient, list, prelude::FluentBuilder as _, px, rems,
 };
 use gpui_component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _,
+    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     h_flex,
     text::{TextView, TextViewState, TextViewStyle},
     v_flex,
 };
-use magenta_core::{Conversation, Message, MessageId, MessageRole, MessageStatus};
+use magenta_core::{
+    ChatProvider, Conversation, GenerationConfig, GenerationEvent, GenerationRequest, Message,
+    MessageId, MessageRole, MessageStatus, ProviderError,
+};
 
 use crate::components::{
     code_fence::{self, ContentSegment},
     inline_code::{self, MarkdownInlineCodePlugin},
     prompt_input::PromptComposer,
 };
+use crate::{MagentaError, notification_for_error};
 
-pub use model::{
-    DemoCatalog, DemoThread, chat_model_for, fake_response, response_chunks, summary_for,
-};
+pub use model::{DemoCatalog, DemoThread, chat_model_for, summary_for};
 
 const MESSAGE_MAX_WIDTH: gpui::Pixels = px(760.);
 const USER_MESSAGE_MAX_WIDTH: gpui::Pixels = px(560.);
 const LIST_OVERDRAW: gpui::Pixels = px(640.);
+
+#[derive(Debug, thiserror::Error)]
+#[error("provider stream ended before completion")]
+struct IncompleteGeneration;
 
 #[derive(Clone, Debug)]
 pub enum ConversationViewEvent {
@@ -104,6 +111,17 @@ impl ConversationView {
         cx.notify();
     }
 
+    pub(crate) fn set_generation(
+        &mut self,
+        generation: GenerationConfig,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if let Some(conversation) = &mut self.conversation {
+            conversation.generation = generation;
+            cx.notify();
+        }
+    }
+
     pub(crate) fn snapshot(&self) -> Option<DemoThread> {
         Some(DemoThread {
             conversation: self.conversation.clone()?,
@@ -123,7 +141,8 @@ impl ConversationView {
         &mut self,
         user_message: Message,
         assistant_message: Message,
-        response: String,
+        request: GenerationRequest,
+        provider: Arc<dyn ChatProvider>,
         window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
@@ -137,7 +156,7 @@ impl ConversationView {
         self.list_state.splice(old_count..old_count, 2);
         self.list_state.set_follow_mode(FollowMode::Tail);
         self.list_state.scroll_to_end();
-        self.begin_stream(assistant_id, response, window, cx);
+        self.begin_stream(assistant_id, request, provider, window, cx);
         cx.notify();
     }
 
@@ -145,7 +164,8 @@ impl ConversationView {
         &mut self,
         assistant_id: MessageId,
         assistant_message: Message,
-        response: String,
+        request: GenerationRequest,
+        provider: Arc<dyn ChatProvider>,
         window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
@@ -163,7 +183,7 @@ impl ConversationView {
         self.list_state.remeasure_items(index..index + 1);
         self.list_state.set_follow_mode(FollowMode::Tail);
         self.list_state.scroll_to_end();
-        self.begin_stream(new_assistant_id, response, window, cx);
+        self.begin_stream(new_assistant_id, request, provider, window, cx);
         cx.notify();
     }
 
@@ -182,16 +202,20 @@ impl ConversationView {
         }
     }
 
-    pub(crate) fn regeneration_prompt(&self, message_id: MessageId) -> Option<String> {
+    pub(crate) fn regeneration_context(&self, message_id: MessageId) -> Option<Vec<Message>> {
         let index = self
             .messages
             .iter()
             .position(|message| message.message.id == message_id)?;
-        self.messages[..index]
+        let messages = self.messages[..index]
             .iter()
-            .rev()
-            .find(|message| message.message.role == MessageRole::User)
-            .map(|message| message.message.content.clone())
+            .filter(|message| message.message.status == MessageStatus::Complete)
+            .map(|message| message.message.clone())
+            .collect::<Vec<_>>();
+        messages
+            .iter()
+            .any(|message| message.role == MessageRole::User)
+            .then_some(messages)
     }
 
     fn rendered_message(message: Message, cx: &mut Context<'_, Self>) -> RenderedMessage {
@@ -228,7 +252,8 @@ impl ConversationView {
     fn begin_stream(
         &mut self,
         assistant_id: MessageId,
-        response: String,
+        request: GenerationRequest,
+        provider: Arc<dyn ChatProvider>,
         window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
@@ -236,29 +261,45 @@ impl ConversationView {
         let generation = self.generation;
         self.streaming_message = Some(assistant_id);
         self.generation_task = Some(cx.spawn_in(window, async move |view, window| {
-            window
-                .background_executor()
-                .timer(Duration::from_millis(260))
-                .await;
+            let provider_id = request.generation.provider.clone();
+            let mut stream = provider.stream(request);
+            let mut completed = false;
 
-            for chunk in response_chunks(&response) {
-                window
-                    .background_executor()
-                    .timer(Duration::from_millis(38))
-                    .await;
-                if view
-                    .update_in(window, |view, _, cx| {
-                        view.push_stream_chunk(generation, assistant_id, &chunk, cx);
-                    })
-                    .is_err()
-                {
-                    return;
+            while let Some(event) = stream.next().await {
+                match event {
+                    Ok(GenerationEvent::TextDelta(chunk)) => {
+                        if view
+                            .update_in(window, |view, _, cx| {
+                                view.push_stream_chunk(generation, assistant_id, &chunk, cx);
+                            })
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    Ok(GenerationEvent::Completed) => {
+                        completed = true;
+                        break;
+                    }
+                    Err(error) => {
+                        _ = view.update_in(window, |view, window, cx| {
+                            view.fail_stream(generation, assistant_id, error, window, cx);
+                        });
+                        return;
+                    }
                 }
             }
 
-            _ = view.update_in(window, |view, _, cx| {
-                view.finish_stream(generation, assistant_id, cx);
-            });
+            if completed {
+                _ = view.update_in(window, |view, _, cx| {
+                    view.finish_stream(generation, assistant_id, cx);
+                });
+            } else {
+                let error = ProviderError::new(provider_id, IncompleteGeneration);
+                _ = view.update_in(window, |view, window, cx| {
+                    view.fail_stream(generation, assistant_id, error, window, cx);
+                });
+            }
         }));
         cx.emit(ConversationViewEvent::GenerationStarted);
     }
@@ -310,6 +351,43 @@ impl ConversationView {
             message.message.status = MessageStatus::Complete;
         }
         self.streaming_message = None;
+        cx.emit(ConversationViewEvent::Updated);
+        cx.emit(ConversationViewEvent::GenerationFinished);
+        cx.notify();
+    }
+
+    fn fail_stream(
+        &mut self,
+        generation: u64,
+        assistant_id: MessageId,
+        error: ProviderError,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.generation != generation || self.streaming_message != Some(assistant_id) {
+            return;
+        }
+
+        let provider = error.provider.clone();
+        tracing::error!(
+            error = ?error,
+            provider = %provider.0,
+            operation = "conversation.generate",
+            "provider generation failed"
+        );
+        if let Some(message) = self
+            .messages
+            .iter_mut()
+            .find(|message| message.message.id == assistant_id)
+        {
+            message.message.status = MessageStatus::Failed;
+        }
+        self.streaming_message = None;
+        let application_error = MagentaError::ProviderGeneration {
+            provider,
+            source: error,
+        };
+        window.push_notification(notification_for_error(&application_error), cx);
         cx.emit(ConversationViewEvent::Updated);
         cx.emit(ConversationViewEvent::GenerationFinished);
         cx.notify();
@@ -447,10 +525,10 @@ impl ConversationView {
             .conversation
             .as_ref()
             .map_or("Model", |conversation| chat_model_for(conversation).label());
-        let label = if message.status == MessageStatus::Stopped {
-            format!("{model_label} · stopped")
-        } else {
-            model_label.to_owned()
+        let label = match message.status {
+            MessageStatus::Stopped => format!("{model_label} · stopped"),
+            MessageStatus::Failed => format!("{model_label} · failed"),
+            MessageStatus::Complete | MessageStatus::Streaming => model_label.to_owned(),
         };
 
         h_flex()
@@ -518,6 +596,14 @@ impl ConversationView {
                         .text_color(cx.theme().muted_foreground)
                         .child(Icon::new(IconName::LoaderCircle).xsmall())
                         .child("Magenta is thinking..."),
+                )
+            })
+            .when(message.status == MessageStatus::Failed, |this| {
+                this.child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child("The response could not be generated. Try again."),
                 )
             })
             .when(!message.content.is_empty(), |this| {
@@ -642,12 +728,6 @@ mod tests {
     use gpui::{TestAppContext, size};
 
     use super::*;
-
-    #[test]
-    fn response_chunks_are_reversible() {
-        let response = "A small, native conversation surface.";
-        assert_eq!(response_chunks(response).concat(), response);
-    }
 
     #[gpui::test]
     fn loading_a_fixture_keeps_the_conversation_in_the_view(cx: &mut TestAppContext) {
