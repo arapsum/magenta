@@ -1,7 +1,5 @@
 mod model;
 
-use std::sync::Arc;
-
 use futures_util::StreamExt as _;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FollowMode, IntoElement,
@@ -17,8 +15,8 @@ use gpui_component::{
     v_flex,
 };
 use magenta_core::{
-    ChatProvider, Conversation, GenerationConfig, GenerationEvent, GenerationRequest, Message,
-    MessageId, MessageRole, MessageStatus, ProviderError,
+    Conversation, GenerationConfig, GenerationEvent, GenerationStream, Message, MessageId,
+    MessageRole, MessageStatus, ProviderError, ProviderId,
 };
 
 use crate::components::{
@@ -141,8 +139,8 @@ impl ConversationView {
         &mut self,
         user_message: Message,
         assistant_message: Message,
-        request: GenerationRequest,
-        provider: Arc<dyn ChatProvider>,
+        provider_id: ProviderId,
+        stream: GenerationStream,
         window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
@@ -156,7 +154,7 @@ impl ConversationView {
         self.list_state.splice(old_count..old_count, 2);
         self.list_state.set_follow_mode(FollowMode::Tail);
         self.list_state.scroll_to_end();
-        self.begin_stream(assistant_id, request, provider, window, cx);
+        self.begin_stream(assistant_id, provider_id, stream, window, cx);
         cx.notify();
     }
 
@@ -164,8 +162,8 @@ impl ConversationView {
         &mut self,
         assistant_id: MessageId,
         assistant_message: Message,
-        request: GenerationRequest,
-        provider: Arc<dyn ChatProvider>,
+        provider_id: ProviderId,
+        stream: GenerationStream,
         window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
@@ -183,7 +181,7 @@ impl ConversationView {
         self.list_state.remeasure_items(index..index + 1);
         self.list_state.set_follow_mode(FollowMode::Tail);
         self.list_state.scroll_to_end();
-        self.begin_stream(new_assistant_id, request, provider, window, cx);
+        self.begin_stream(new_assistant_id, provider_id, stream, window, cx);
         cx.notify();
     }
 
@@ -252,8 +250,8 @@ impl ConversationView {
     fn begin_stream(
         &mut self,
         assistant_id: MessageId,
-        request: GenerationRequest,
-        provider: Arc<dyn ChatProvider>,
+        provider_id: ProviderId,
+        stream: GenerationStream,
         window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
@@ -261,9 +259,8 @@ impl ConversationView {
         let generation = self.generation;
         self.streaming_message = Some(assistant_id);
         self.generation_task = Some(cx.spawn_in(window, async move |view, window| {
-            let provider_id = request.generation.provider.clone();
-            let mut stream = provider.stream(request);
             let mut completed = false;
+            let mut stream = stream;
 
             while let Some(event) = stream.next().await {
                 match event {

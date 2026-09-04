@@ -1,6 +1,6 @@
+use magenta_application::MessageIds;
 use magenta_core::{
-    Attachment, Conversation, ConversationId, EffortLevel, GenerationConfig, Message, MessageId,
-    MessageRole, MessageStatus,
+    Conversation, ConversationId, EffortLevel, Message, MessageId, MessageRole, MessageStatus,
 };
 
 use crate::components::{
@@ -64,42 +64,19 @@ impl DemoCatalog {
             .find(|thread| thread.conversation.id == id)
     }
 
-    pub fn create_conversation(
-        &mut self,
-        prompt: &str,
-        generation: GenerationConfig,
-    ) -> Conversation {
-        let conversation = Conversation {
-            id: ConversationId::new(self.next_conversation_id),
-            title: title_from_prompt(prompt),
-            generation,
-        };
+    pub const fn reserve_conversation_id(&mut self) -> ConversationId {
+        let id = ConversationId::new(self.next_conversation_id);
         self.next_conversation_id = self.next_conversation_id.saturating_add(1);
-        self.threads.push(DemoThread {
-            conversation: conversation.clone(),
-            messages: Vec::new(),
-        });
-        conversation
+        id
     }
 
-    pub const fn new_message(
-        &mut self,
-        conversation_id: ConversationId,
-        role: MessageRole,
-        content: String,
-        status: MessageStatus,
-        attachments: Vec<Attachment>,
-    ) -> Message {
-        let message = Message {
-            id: MessageId::new(self.next_message_id),
-            conversation_id,
-            role,
-            content,
-            status,
-            attachments,
+    pub const fn reserve_message_ids(&mut self) -> MessageIds {
+        let ids = MessageIds {
+            user: MessageId::new(self.next_message_id),
+            assistant: MessageId::new(self.next_message_id.saturating_add(1)),
         };
-        self.next_message_id = self.next_message_id.saturating_add(1);
-        message
+        self.next_message_id = self.next_message_id.saturating_add(2);
+        ids
     }
 
     pub fn replace_thread(&mut self, thread: DemoThread) {
@@ -206,26 +183,6 @@ fn fixture_response(title: &str, index: usize) -> String {
     }
 }
 
-fn title_from_prompt(prompt: &str) -> String {
-    let title = prompt
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let mut title = title;
-    if title.chars().count() > 46 {
-        title = title.chars().take(43).collect();
-        title.push_str("...");
-    }
-    if title.is_empty() {
-        "New conversation".to_owned()
-    } else {
-        title
-    }
-}
-
 const fn demo_model(index: usize) -> ChatModel {
     match index % 3 {
         0 => ChatModel::Sonnet,
@@ -260,24 +217,18 @@ mod tests {
     }
 
     #[test]
-    fn title_from_prompt_is_single_line_and_bounded() {
-        let title = title_from_prompt(
-            "  A very long first line that should become a concise conversation title for the sidebar\nsecond line",
-        );
-
-        assert_eq!(title, "A very long first line that should become a...");
-        assert!(title.chars().count() <= 46);
-    }
-
-    #[test]
-    fn created_conversations_preserve_the_generation_configuration() {
+    fn reserved_ids_advance_without_reuse() {
         let mut catalog = DemoCatalog::new();
-        let generation = ChatModel::Gpt.generation_config(EffortLevel::High);
+        let first_conversation = catalog.reserve_conversation_id();
+        let second_conversation = catalog.reserve_conversation_id();
+        let first_messages = catalog.reserve_message_ids();
+        let second_messages = catalog.reserve_message_ids();
 
-        let conversation =
-            catalog.create_conversation("Keep the boundary narrow", generation.clone());
-
-        assert_eq!(conversation.generation, generation);
-        assert_eq!(chat_model_for(&conversation), ChatModel::Gpt);
+        assert_eq!(first_conversation, ConversationId::new(100));
+        assert_eq!(second_conversation, ConversationId::new(101));
+        assert_eq!(first_messages.user, MessageId::new(1_040));
+        assert_eq!(first_messages.assistant, MessageId::new(1_041));
+        assert_eq!(second_messages.user, MessageId::new(1_042));
+        assert_eq!(second_messages.assistant, MessageId::new(1_043));
     }
 }

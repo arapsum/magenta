@@ -5,8 +5,10 @@ use gpui_component::{
     ActiveTheme as _, WindowExt,
     notification::{Notification, NotificationType},
 };
+use magenta_application::{PendingGeneration, SendMessage, SendMessageInput, SendTarget};
 use magenta_core::{
-    Attachment, ChatProvider, ConversationId, GenerationRequest, MessageRole, MessageStatus,
+    Attachment, ChatProvider, ConversationId, GenerationRequest, Message, MessageRole,
+    MessageStatus,
 };
 
 use crate::components::{
@@ -15,6 +17,7 @@ use crate::components::{
     sidebar::{SidebarEvent, SidebarView},
     titlebar, workspace,
 };
+use crate::{MagentaError, notification_for_error};
 
 pub struct MainView {
     text: SharedString,
@@ -22,6 +25,7 @@ pub struct MainView {
     composer: Entity<PromptComposer>,
     conversation: Entity<ConversationView>,
     provider: Arc<dyn ChatProvider>,
+    send_message: SendMessage,
     catalog: DemoCatalog,
     active_conversation: Option<ConversationId>,
     subscriptions: Vec<Subscription>,
@@ -30,6 +34,7 @@ pub struct MainView {
 impl MainView {
     pub fn new(
         provider: Arc<dyn ChatProvider>,
+        send_message: SendMessage,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> Self {
@@ -103,6 +108,7 @@ impl MainView {
             composer,
             conversation,
             provider,
+            send_message,
             catalog: DemoCatalog::new(),
             active_conversation: None,
             subscriptions,
@@ -139,23 +145,32 @@ impl MainView {
             return;
         }
 
-        let generation = request.generation.clone();
-        let conversation = if let Some(id) = self.active_conversation {
-            let conversation = self
-                .catalog
-                .thread(id)
-                .map(|thread| thread.conversation.clone());
-            if conversation.is_some() {
-                let generation = generation.clone();
-                self.conversation.update(cx, |view, cx| {
-                    view.set_generation(generation, cx);
-                });
+        let is_new_conversation = self.active_conversation.is_none();
+        let Some(input) = self.send_input(request, cx) else {
+            return;
+        };
+        let pending = match self.send_message.execute(input) {
+            Ok(pending) => pending,
+            Err(source) => {
+                tracing::error!(
+                    error = ?source,
+                    operation = "prompt.prepare",
+                    "could not prepare prompt"
+                );
+                let error = MagentaError::SendMessage { source };
+                window.push_notification(notification_for_error(&error), cx);
+                return;
             }
-            conversation
-        } else {
-            let conversation = self
-                .catalog
-                .create_conversation(request.prompt.as_ref(), generation.clone());
+        };
+        let PendingGeneration {
+            conversation,
+            user_message,
+            assistant_message,
+            stream,
+        } = pending;
+        let provider_id = conversation.generation.provider.clone();
+
+        if is_new_conversation {
             self.sidebar.update(cx, |sidebar, cx| {
                 sidebar.add_conversation(summary_for(&conversation), cx);
             });
@@ -169,11 +184,63 @@ impl MainView {
                     cx,
                 );
             });
-            Some(conversation)
-        };
+        } else {
+            self.conversation.update(cx, |view, cx| {
+                view.set_generation(conversation.generation.clone(), cx);
+            });
+        }
 
-        let Some(conversation) = conversation else {
-            return;
+        self.composer
+            .update(cx, |composer, cx| composer.clear_after_submit(window, cx));
+        self.conversation.update(cx, |view, cx| {
+            view.start_generation(
+                user_message,
+                assistant_message,
+                provider_id,
+                stream,
+                window,
+                cx,
+            );
+        });
+        tracing::info!(
+            provider = %request.generation.provider.0,
+            model = %request.generation.model.0,
+            effort = ?request.generation.effort,
+            attachment_count = request.attachments.len(),
+            prompt_length = request.prompt.len(),
+            operation = "prompt.submit",
+            "local conversation prompt accepted"
+        );
+        self.sync_active_thread(cx);
+    }
+
+    fn send_input(
+        &mut self,
+        request: &PromptRequest,
+        cx: &Context<'_, Self>,
+    ) -> Option<SendMessageInput> {
+        let (target, history) = if let Some(id) = self.active_conversation {
+            let Some(thread) = self.catalog.thread(id) else {
+                tracing::warn!(
+                    conversation_id = id.0,
+                    "active demo conversation was not found"
+                );
+                return None;
+            };
+            let Some(snapshot) = self.conversation.read(cx).snapshot() else {
+                tracing::warn!(
+                    conversation_id = id.0,
+                    "active conversation has no loaded state"
+                );
+                return None;
+            };
+            (
+                SendTarget::Existing(thread.conversation.clone()),
+                snapshot.messages,
+            )
+        } else {
+            let conversation_id = self.catalog.reserve_conversation_id();
+            (SendTarget::New { conversation_id }, Vec::new())
         };
         let attachments = request
             .attachments
@@ -187,47 +254,15 @@ impl MainView {
                 path: path.clone(),
             })
             .collect();
-        let user = self.catalog.new_message(
-            conversation.id,
-            MessageRole::User,
-            request.prompt.to_string(),
-            MessageStatus::Complete,
+
+        Some(SendMessageInput {
+            target,
+            history,
+            ids: self.catalog.reserve_message_ids(),
+            prompt: request.prompt.to_string(),
             attachments,
-        );
-        let assistant = self.catalog.new_message(
-            conversation.id,
-            MessageRole::Assistant,
-            String::new(),
-            MessageStatus::Streaming,
-            Vec::new(),
-        );
-        let mut messages = self
-            .conversation
-            .read(cx)
-            .snapshot()
-            .map_or_else(Vec::new, |thread| thread.messages);
-        messages.retain(|message| message.status == MessageStatus::Complete);
-        messages.push(user.clone());
-        let generation_request = GenerationRequest {
-            generation,
-            messages,
-        };
-        let provider = Arc::clone(&self.provider);
-        self.composer
-            .update(cx, |composer, cx| composer.clear_after_submit(window, cx));
-        self.conversation.update(cx, |view, cx| {
-            view.start_generation(user, assistant, generation_request, provider, window, cx);
-        });
-        tracing::info!(
-            provider = %request.generation.provider.0,
-            model = %request.generation.model.0,
-            effort = ?request.generation.effort,
-            attachment_count = request.attachments.len(),
-            prompt_length = request.prompt.len(),
-            operation = "prompt.submit",
-            "local conversation prompt accepted"
-        );
-        self.sync_active_thread(cx);
+            generation: request.generation.clone(),
+        })
     }
 
     fn cancel_generation(&self, cx: &mut Context<'_, Self>) {
@@ -253,30 +288,26 @@ impl MainView {
             return;
         };
         let conversation = thread.conversation.clone();
-        let assistant = self.catalog.new_message(
+        let ids = self.catalog.reserve_message_ids();
+        let assistant = Message {
+            id: ids.assistant,
             conversation_id,
-            MessageRole::Assistant,
-            String::new(),
-            MessageStatus::Streaming,
-            Vec::new(),
-        );
+            role: MessageRole::Assistant,
+            content: String::new(),
+            status: MessageStatus::Streaming,
+            attachments: Vec::new(),
+        };
         let generation_request = GenerationRequest {
             generation: conversation.generation.clone(),
             messages,
         };
-        let provider = Arc::clone(&self.provider);
+        let provider_id = conversation.generation.provider.clone();
+        let stream = self.provider.stream(generation_request);
         self.composer.update(cx, |composer, cx| {
             composer.set_configuration(&conversation.generation, cx);
         });
         self.conversation.update(cx, |view, cx| {
-            view.regenerate(
-                message_id,
-                assistant,
-                generation_request,
-                provider,
-                window,
-                cx,
-            );
+            view.regenerate(message_id, assistant, provider_id, stream, window, cx);
         });
         self.sync_active_thread(cx);
     }

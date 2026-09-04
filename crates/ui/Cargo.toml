@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 anyhow.workspace = true
 futures-util.workspace = true
+magenta-application.workspace = true
 magenta-core.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true

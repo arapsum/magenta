@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use gpui_component::notification::{Notification, NotificationType};
+use magenta_application::SendMessageError;
 use magenta_core::{ProviderError, ProviderId};
 
 /// The errors that can cross Magenta's subsystem boundaries.
@@ -43,6 +44,12 @@ pub enum MagentaError {
         provider: ProviderId,
         #[source]
         source: ProviderError,
+    },
+
+    #[error("send-message workflow failed")]
+    SendMessage {
+        #[source]
+        source: SendMessageError,
     },
 }
 
@@ -102,6 +109,12 @@ impl MagentaError {
                 severity: ErrorSeverity::Error,
                 title: "Response could not be generated",
                 message: "The selected model could not finish the response. Try again or choose another model.",
+            },
+            Self::SendMessage { .. } => ErrorPresentation {
+                code: "MAG-SEND-MESSAGE",
+                severity: ErrorSeverity::Error,
+                title: "Message could not be sent",
+                message: "Magenta could not prepare this message. Review the conversation and try again.",
             },
         }
     }
@@ -209,6 +222,9 @@ mod tests {
                     ProviderId::new("anthropic"),
                     std::io::Error::other("connection closed"),
                 ),
+            },
+            MagentaError::SendMessage {
+                source: SendMessageError::EmptyPrompt,
             },
         ];
 

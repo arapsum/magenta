@@ -3645,6 +3645,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "magenta-application"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "magenta-core",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "magenta-core"
 version = "0.1.0"
 dependencies = [
@@ -3661,6 +3670,8 @@ dependencies = [
  "gpui-component",
  "gpui-component-assets",
  "gpui_platform",
+ "magenta-application",
+ "magenta-core",
  "magenta-providers",
  "magenta-ui",
  "tracing",
@@ -3686,6 +3697,7 @@ dependencies = [
  "futures-util",
  "gpui",
  "gpui-component",
+ "magenta-application",
  "magenta-core",
  "thiserror 2.0.20",
  "tracing",

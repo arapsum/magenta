@@ -12,7 +12,9 @@ careful with memory, and pleasant to use for long-lived conversations.
 > **Status:** Magenta is in the interface-foundation stage. It does not yet
 > connect to a remote AI provider or persist conversations. The current
 > application is an interactive native shell with in-memory demo conversations
-> and a deterministic provider adapter for shaping the chat experience.
+> and a deterministic provider adapter for shaping the chat experience. The
+> first headless application workflow now prepares and starts a send operation
+> independently of GPUI.
 
 The visual language takes inspiration from the
 [Mogonta AI Chat Workspace UI design](https://dribbble.com/shots/27203662-Mogonta-AI-Chat-Workspace-UI-Design).
@@ -76,6 +78,10 @@ The product is guided by a few constraints:
   code-block copy actions, response regeneration, cancellable demo streaming,
   provider failure handling, and safe local synchronization back into the demo
   catalog.
+- A focused `SendMessage` application workflow that validates prompt history,
+  allocates provider-neutral messages, derives new conversation titles, and
+  invokes the provider without depending on GPUI. The UI still owns its
+  transitional in-memory ID allocator while the demo catalog is active.
 - A `ChatProvider` port in `core` with a deterministic `DemoProvider` adapter
   in `providers`; the UI consumes typed generation events rather than fake
   response content or provider-specific payloads.
@@ -99,29 +105,36 @@ The workspace intentionally starts small:
 
 ```text
 crates/
-├── core       # provider-independent values, ports, events, and errors
-├── desktop    # executable, diagnostics, platform/window composition
-├── providers  # provider adapters; currently the deterministic demo provider
-└── ui         # GPUI app shell, components, themes, and demo workflows
+├── application # headless application workflows such as sending a message
+├── core        # provider-independent values, ports, events, and errors
+├── desktop     # executable, diagnostics, platform/window composition
+├── providers   # provider adapters; currently the deterministic demo provider
+└── ui          # GPUI app shell, components, themes, and demo views
 ```
 
 The current dependency direction is intentionally small:
 
 ```text
 desktop
+├── application
+│   └── core
 ├── providers
 │   └── core
 └── ui
+    ├── application
+    │   └── core
     └── core
 ```
 
-The demo conversation catalog currently lives in `ui` so the interaction can
-be designed with fake data. The provider port and generation events already
-live in `core`, while `providers` owns the deterministic adapter that supplies
-the current local stream. When real chat workflows arrive, remote provider and
-storage adapters will depend on `core`, while an application/workflow crate
-can own operations such as “send message” once they have outgrown the UI
-layer. `core` must not depend on GPUI, HTTP, SQLite, or a specific model API.
+The demo conversation catalog and its transitional ID allocator currently live
+in `ui` so the interaction can be designed with fake data. The provider port
+and generation events live in `core`, while `providers` owns the deterministic
+adapter that supplies the current local stream. The `application` crate now
+owns the provider-facing preparation for “send message”: it receives domain
+values, returns a pending generation, and leaves stream lifecycle and rendering
+to the UI. Regeneration remains in the UI until its workflow is large enough to
+extract cleanly. Future storage and remote-provider adapters will depend on
+`core`; `core` must not depend on GPUI, HTTP, SQLite, or a specific model API.
 
 ## Requirements
 
@@ -208,7 +221,7 @@ recovery, privacy, and asynchronous-work conventions.
 ## Roadmap
 
 1. Complete visual and keyboard/accessibility QA for the conversation surface.
-2. Move send/regenerate orchestration into an application workflow boundary.
+2. Move regeneration orchestration into the application workflow boundary.
 3. Implement one streaming remote provider behind the existing port.
 4. Add local SQLite persistence with a lightweight conversation index and
    paged message loading.

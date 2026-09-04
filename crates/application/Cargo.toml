@@ -1,0 +1,11 @@
+[package]
+name = "magenta-application"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+magenta-core.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+futures-util.workspace = true
