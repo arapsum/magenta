@@ -1,3 +1,4 @@
+pub mod conversation;
 mod orb;
 pub mod prompt_input;
 pub mod sidebar;

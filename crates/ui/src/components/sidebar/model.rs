@@ -1,5 +1,4 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct ConversationId(pub u64);
+pub use magenta_core::ConversationId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConversationPeriod {
@@ -17,6 +16,7 @@ impl ConversationPeriod {
         Self::Older,
     ];
 
+    #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::Today => "Today",
@@ -30,7 +30,7 @@ impl ConversationPeriod {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConversationSummary {
     pub id: ConversationId,
-    pub title: &'static str,
+    pub title: String,
     pub period: ConversationPeriod,
     pub pinned: bool,
 }
@@ -42,65 +42,65 @@ pub enum SidebarEvent {
     OpenSettings,
 }
 
-pub(super) fn demo_conversations() -> Vec<ConversationSummary> {
+pub fn demo_conversations() -> Vec<ConversationSummary> {
     vec![
         ConversationSummary {
             id: ConversationId(1),
-            title: "Designing Magenta's provider boundary",
+            title: "Designing Magenta's provider boundary".to_owned(),
             period: ConversationPeriod::PreviousSevenDays,
             pinned: true,
         },
         ConversationSummary {
             id: ConversationId(2),
-            title: "Native Markdown rendering",
+            title: "Native Markdown rendering".to_owned(),
             period: ConversationPeriod::PreviousSevenDays,
             pinned: true,
         },
         ConversationSummary {
             id: ConversationId(3),
-            title: "Reducing idle memory usage",
+            title: "Reducing idle memory usage".to_owned(),
             period: ConversationPeriod::Today,
             pinned: false,
         },
         ConversationSummary {
             id: ConversationId(4),
-            title: "Streaming responses in GPUI",
+            title: "Streaming responses in GPUI".to_owned(),
             period: ConversationPeriod::Today,
             pinned: false,
         },
         ConversationSummary {
             id: ConversationId(5),
-            title: "SQLite conversation schema",
+            title: "SQLite conversation schema".to_owned(),
             period: ConversationPeriod::Yesterday,
             pinned: false,
         },
         ConversationSummary {
             id: ConversationId(6),
-            title: "Keyboard shortcut map",
+            title: "Keyboard shortcut map".to_owned(),
             period: ConversationPeriod::Yesterday,
             pinned: false,
         },
         ConversationSummary {
             id: ConversationId(7),
-            title: "Cross-provider model mapping",
+            title: "Cross-provider model mapping".to_owned(),
             period: ConversationPeriod::PreviousSevenDays,
             pinned: false,
         },
         ConversationSummary {
             id: ConversationId(8),
-            title: "Accessible code blocks",
+            title: "Accessible code blocks".to_owned(),
             period: ConversationPeriod::PreviousSevenDays,
             pinned: false,
         },
         ConversationSummary {
             id: ConversationId(9),
-            title: "Linux window integration",
+            title: "Linux window integration".to_owned(),
             period: ConversationPeriod::Older,
             pinned: false,
         },
         ConversationSummary {
             id: ConversationId(10),
-            title: "Conversation persistence boundaries",
+            title: "Conversation persistence boundaries".to_owned(),
             period: ConversationPeriod::Older,
             pinned: false,
         },

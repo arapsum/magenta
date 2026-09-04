@@ -175,7 +175,7 @@ mod tests {
     use super::*;
 
     #[gpui::test]
-    fn unknown_theme_is_reported_without_changing_the_active_theme(cx: &mut TestAppContext) {
+    fn unknown_theme_is_reported_without_changing_the_active_theme(cx: &TestAppContext) {
         cx.update(|cx| {
             gpui_component::init(cx);
             let outcome = init(cx);
@@ -193,7 +193,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn bundled_themes_toggle_successfully(cx: &mut TestAppContext) {
+    fn bundled_themes_toggle_successfully(cx: &TestAppContext) {
         cx.update(|cx| {
             gpui_component::init(cx);
             assert!(matches!(
@@ -210,7 +210,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn malformed_bundled_theme_falls_back_to_default_dark(cx: &mut TestAppContext) {
+    fn malformed_bundled_theme_falls_back_to_default_dark(cx: &TestAppContext) {
         cx.update(|cx| {
             gpui_component::init(cx);
 
@@ -228,7 +228,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn missing_magenta_dark_falls_back_without_panicking(cx: &mut TestAppContext) {
+    fn missing_magenta_dark_falls_back_without_panicking(cx: &TestAppContext) {
         cx.update(|cx| {
             gpui_component::init(cx);
 

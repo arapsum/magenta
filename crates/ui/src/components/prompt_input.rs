@@ -12,7 +12,7 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt,
-    button::{Button, ButtonVariants as _},
+    button::{Button, ButtonVariants},
     h_flex,
     input::{InputEvent, Textarea, TextareaState},
     menu::{DropdownMenu as _, PopupMenuItem},
@@ -20,44 +20,43 @@ use gpui_component::{
     v_flex,
 };
 
+use magenta_core::EffortLevel;
+
 use crate::{MagentaError, notification_for_error};
 
 const MAX_ATTACHMENTS: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ImageModel {
-    NanoBananaPro,
-    NanoBanana,
-    Imagen4,
+pub enum ChatModel {
+    Sonnet,
+    Gpt,
+    GeminiPro,
 }
 
-impl ImageModel {
-    const ALL: [Self; 3] = [Self::NanoBananaPro, Self::NanoBanana, Self::Imagen4];
+impl ChatModel {
+    const ALL: [Self; 3] = [Self::Sonnet, Self::Gpt, Self::GeminiPro];
 
-    const fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
-            Self::NanoBananaPro => "Nano Banana Pro",
-            Self::NanoBanana => "Nano Banana",
-            Self::Imagen4 => "Imagen 4",
+            Self::Sonnet => "Sonnet",
+            Self::Gpt => "GPT",
+            Self::GeminiPro => "Gemini Pro",
         }
     }
-}
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EffortLevel {
-    Low,
-    Medium,
-    High,
-}
-
-impl EffortLevel {
-    const ALL: [Self; 3] = [Self::Low, Self::Medium, Self::High];
-
-    const fn label(self) -> &'static str {
+    pub(crate) const fn id(self) -> &'static str {
         match self {
-            Self::Low => "Low",
-            Self::Medium => "Medium",
-            Self::High => "High",
+            Self::Sonnet => "sonnet",
+            Self::Gpt => "gpt",
+            Self::GeminiPro => "gemini-pro",
+        }
+    }
+
+    pub(crate) fn from_id(id: &str) -> Self {
+        match id {
+            "gpt" => Self::Gpt,
+            "gemini-pro" => Self::GeminiPro,
+            _ => Self::Sonnet,
         }
     }
 }
@@ -88,7 +87,7 @@ impl ReferenceImage {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptRequest {
     pub prompt: SharedString,
-    pub model: ImageModel,
+    pub model: ChatModel,
     pub effort: EffortLevel,
     pub attachments: Vec<PathBuf>,
 }
@@ -96,12 +95,14 @@ pub struct PromptRequest {
 #[derive(Clone, Debug)]
 pub enum PromptComposerEvent {
     Submit(PromptRequest),
+    Cancel,
 }
 
 pub struct PromptComposer {
     input: Entity<TextareaState>,
-    model: Option<ImageModel>,
+    model: Option<ChatModel>,
     effort: Option<EffortLevel>,
+    generating: bool,
     attachments: Vec<ReferenceImage>,
     attachment_task: Option<Task<()>>,
     subscriptions: Vec<Subscription>,
@@ -111,7 +112,7 @@ impl PromptComposer {
     pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Describe a new image")
+                .placeholder("Message Magenta")
                 .auto_grow(2, 5)
                 .submit_on_enter(true)
         });
@@ -119,17 +120,18 @@ impl PromptComposer {
         let subscriptions = vec![cx.subscribe_in(
             &input,
             window,
-            |composer, _, event: &InputEvent, window, cx| match event {
+            |composer, _, event: &InputEvent, _window, cx| match event {
                 InputEvent::Change | InputEvent::Focus | InputEvent::Blur => cx.notify(),
-                InputEvent::PressEnter { shift: false, .. } => composer.submit(window, cx),
+                InputEvent::PressEnter { shift: false, .. } => composer.submit(cx),
                 InputEvent::PressEnter { shift: true, .. } => {}
             },
         )];
 
         Self {
             input,
-            model: None,
-            effort: None,
+            model: Some(ChatModel::Sonnet),
+            effort: Some(EffortLevel::Medium),
+            generating: false,
             attachments: Vec::new(),
             attachment_task: None,
             subscriptions,
@@ -140,6 +142,32 @@ impl PromptComposer {
         self.input.focus_handle(cx).focus(window, cx);
     }
 
+    pub fn set_configuration(
+        &mut self,
+        model: ChatModel,
+        effort: EffortLevel,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.model = Some(model);
+        self.effort = Some(effort);
+        cx.notify();
+    }
+
+    pub fn set_generating(&mut self, generating: bool, cx: &mut Context<'_, Self>) {
+        if self.generating != generating {
+            self.generating = generating;
+            cx.notify();
+        }
+    }
+
+    pub fn clear_after_submit(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.input.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+        });
+        self.attachments.clear();
+        cx.notify();
+    }
+
     fn has_content(&self, cx: &App) -> bool {
         !self.input.read(cx).value().trim().is_empty() || !self.attachments.is_empty()
     }
@@ -148,7 +176,7 @@ impl PromptComposer {
         self.has_content(cx) && self.model.is_some() && self.effort.is_some()
     }
 
-    fn select_model(&mut self, model: ImageModel, cx: &mut Context<'_, Self>) {
+    fn select_model(&mut self, model: ChatModel, cx: &mut Context<'_, Self>) {
         if self.model != Some(model) {
             self.model = Some(model);
             cx.notify();
@@ -167,7 +195,7 @@ impl PromptComposer {
             window.push_notification(
                 Notification::new()
                     .title("Four images already attached")
-                    .message("Remove an image before adding another reference.")
+                    .message("Remove an image before adding another attachment.")
                     .with_type(NotificationType::Warning),
                 cx,
             );
@@ -178,7 +206,7 @@ impl PromptComposer {
             files: true,
             directories: false,
             multiple: true,
-            prompt: Some("Add reference images".into()),
+            prompt: Some("Add images".into()),
         });
 
         self.attachment_task = Some(cx.spawn_in(window, async move |composer, window| {
@@ -304,19 +332,22 @@ impl PromptComposer {
         })
     }
 
-    fn submit(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    fn submit(&self, cx: &mut Context<'_, Self>) {
+        if self.generating {
+            return;
+        }
+
         let Some(request) = self.request(cx) else {
             return;
         };
 
         cx.emit(PromptComposerEvent::Submit(request));
-        window.push_notification(
-            Notification::new()
-                .title("Prompt ready")
-                .message("Generation will begin when an image service is connected.")
-                .with_type(NotificationType::Info),
-            cx,
-        );
+    }
+
+    fn cancel(&self, cx: &mut Context<'_, Self>) {
+        if self.generating {
+            cx.emit(PromptComposerEvent::Cancel);
+        }
     }
 
     fn attachment_strip(&self, cx: &Context<'_, Self>) -> impl IntoElement {
@@ -380,8 +411,8 @@ impl PromptComposer {
                 this.child(
                     Button::new("prompt-add-image")
                         .ghost()
-                        .accessibility_id("prompt-add-reference-image")
-                        .tooltip("Add reference images")
+                        .accessibility_id("prompt-add-image")
+                        .tooltip("Add images")
                         .size(px(34.))
                         .p_0()
                         .rounded(px(7.))
@@ -414,7 +445,7 @@ impl PromptComposer {
         option_button("prompt-model", trigger_label, IconName::Bot)
             .accessibility_id("prompt-model-and-effort-selector")
             .dropdown_menu(move |menu, window, cx| {
-                let menu = ImageModel::ALL.into_iter().fold(
+                let menu = ChatModel::ALL.into_iter().fold(
                     menu.min_w(px(210.)).label("Models"),
                     |menu, model| {
                         let select_view = view.clone();
@@ -466,12 +497,13 @@ impl Render for PromptComposer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let _ = &self.subscriptions;
         let focused = self.input.read(cx).focus_handle(cx).is_focused(window);
-        let ready = self.is_ready(cx);
+        let ready = self.is_ready(cx) && !self.generating;
         let submit_view = cx.entity();
+        let generating = self.generating;
 
         v_flex()
             .w_full()
-            .min_h(px(145.))
+            .min_h(px(112.))
             .p(px(10.))
             .gap(px(8.))
             .justify_between()
@@ -498,7 +530,7 @@ impl Render for PromptComposer {
                         Textarea::new(&self.input)
                             .appearance(false)
                             .bordered(false)
-                            .aria_label("Image generation prompt")
+                            .aria_label("Chat message composer")
                             .w_full()
                             .flex_1()
                             .min_h(px(38.))
@@ -515,22 +547,37 @@ impl Render for PromptComposer {
                     .gap(px(10.))
                     .child(h_flex().min_w_0().gap(px(5.)).child(self.model_menu(cx)))
                     .child(
-                        Button::new("generate")
-                            .primary()
-                            .disabled(!ready)
-                            .accessibility_id("prompt-generate")
-                            .tooltip(if ready {
-                                "Generate image"
+                        Button::new("prompt-submit")
+                            .when(generating, ButtonVariants::secondary)
+                            .when(!generating, ButtonVariants::primary)
+                            .disabled(!ready && !generating)
+                            .accessibility_id(if generating {
+                                "prompt-cancel"
                             } else {
-                                "Add a prompt or image, then choose a model and effort"
+                                "prompt-submit"
+                            })
+                            .tooltip(if generating {
+                                "Stop generating"
+                            } else if ready {
+                                "Send message"
+                            } else {
+                                "Add a message before sending"
                             })
                             .size(px(36.))
                             .p_0()
                             .rounded_full()
-                            .icon(IconName::ChevronUp)
-                            .on_click(move |_, window, cx| {
+                            .icon(if generating {
+                                IconName::CircleX
+                            } else {
+                                IconName::ChevronUp
+                            })
+                            .on_click(move |_, _window, cx| {
                                 submit_view.update(cx, |composer, cx| {
-                                    composer.submit(window, cx);
+                                    if generating {
+                                        composer.cancel(cx);
+                                    } else {
+                                        composer.submit(cx);
+                                    }
                                 });
                             }),
                     ),
@@ -587,7 +634,7 @@ mod tests {
                 composer.input.update(cx, |input, cx| {
                     input.set_value("   ", window, cx);
                 });
-                composer.select_model(ImageModel::NanoBananaPro, cx);
+                composer.select_model(ChatModel::Sonnet, cx);
                 composer.select_effort(EffortLevel::Medium, cx);
                 assert!(!composer.is_ready(cx));
 
@@ -609,12 +656,12 @@ mod tests {
                 composer.input.update(cx, |input, cx| {
                     input.set_value("  A quiet cyan horizon  ", window, cx);
                 });
-                composer.select_model(ImageModel::Imagen4, cx);
+                composer.select_model(ChatModel::GeminiPro, cx);
                 composer.select_effort(EffortLevel::High, cx);
 
                 let request = composer.request(cx).expect("the request should be ready");
                 assert_eq!(request.prompt.as_ref(), "A quiet cyan horizon");
-                assert_eq!(request.model, ImageModel::Imagen4);
+                assert_eq!(request.model, ChatModel::GeminiPro);
                 assert_eq!(request.effort, EffortLevel::High);
                 assert!(request.attachments.is_empty());
             })

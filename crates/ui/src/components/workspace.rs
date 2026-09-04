@@ -9,6 +9,7 @@ use gpui_component::{
 use crate::app::MainView;
 use crate::components::{orb, prompt_input::PromptComposer};
 
+#[must_use]
 pub fn render(
     name: &SharedString,
     composer: Entity<PromptComposer>,

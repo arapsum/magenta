@@ -17,12 +17,10 @@ use gpui_component::{
 
 use crate::theme;
 
+pub use model::demo_conversations;
 pub use model::{ConversationId, ConversationPeriod, ConversationSummary, SidebarEvent};
 
-use self::{
-    model::{demo_conversations, title_matches},
-    styles::compact_bevel_light,
-};
+use self::{model::title_matches, styles::compact_bevel_light};
 
 const EXPANDED_WIDTH: gpui::Pixels = px(252.);
 const ROW_HEIGHT: gpui::Pixels = px(34.);
@@ -82,6 +80,19 @@ impl SidebarView {
         cx.notify();
     }
 
+    pub fn add_conversation(
+        &mut self,
+        conversation: ConversationSummary,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let id = conversation.id;
+        self.conversations.retain(|item| item.id != id);
+        self.conversations.insert(0, conversation);
+        self.active_conversation = Some(id);
+        self.recency_limit = INITIAL_RECENCY_LIMIT;
+        cx.notify();
+    }
+
     fn toggle_pinned(&mut self, id: ConversationId, cx: &mut Context<'_, Self>) {
         if let Some(conversation) = self.conversations.iter_mut().find(|item| item.id == id) {
             conversation.pinned = !conversation.pinned;
@@ -108,7 +119,7 @@ impl SidebarView {
     }
 
     fn matches_search(&self, conversation: &ConversationSummary, cx: &App) -> bool {
-        title_matches(conversation.title, &self.search_term(cx))
+        title_matches(&conversation.title, &self.search_term(cx))
     }
 
     fn visible_recency(&self, cx: &App) -> Vec<&ConversationSummary> {
@@ -382,7 +393,7 @@ impl SidebarView {
                             .whitespace_nowrap()
                             .text_ellipsis()
                             .text_size(px(12.))
-                            .child(conversation.title),
+                            .child(conversation.title.clone()),
                     )
                     .on_click(move |_, _, cx| {
                         select_view.update(cx, |sidebar, cx| sidebar.select_conversation(id, cx));

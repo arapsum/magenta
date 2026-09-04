@@ -13,12 +13,17 @@ mod linux {
 
     const LINUX_TITLE_BAR_HEIGHT: Pixels = px(28.0);
 
-    pub fn render(_title: impl IntoElement) -> AnyElement {
-        LinuxTitleBar.into_any_element()
+    pub fn render(title: impl IntoElement) -> AnyElement {
+        LinuxTitleBar {
+            title: title.into_any_element(),
+        }
+        .into_any_element()
     }
 
     #[derive(IntoElement)]
-    struct LinuxTitleBar;
+    struct LinuxTitleBar {
+        title: AnyElement,
+    }
 
     struct TitleBarState {
         should_move: bool,
@@ -43,7 +48,7 @@ mod linux {
                 return hidden_title_bar();
             }
 
-            render_title_bar(&state, window, cx)
+            render_title_bar(&state, self.title, window, cx)
         }
     }
 
@@ -70,6 +75,7 @@ mod linux {
 
     fn render_title_bar(
         state: &Entity<TitleBarState>,
+        title: AnyElement,
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
@@ -80,7 +86,7 @@ mod linux {
         let left_controls = render_controls("left-window-controls", button_layout.left, window, cx);
         let right_controls =
             render_controls("right-window-controls", button_layout.right, window, cx);
-        let drag_region = drag_region(state, supports_window_menu, window);
+        let drag_region = drag_region(state, supports_window_menu, title, window, cx);
 
         div()
             .id("title-bar")
@@ -110,7 +116,9 @@ mod linux {
     fn drag_region(
         state: &Entity<TitleBarState>,
         supports_window_menu: bool,
+        title: AnyElement,
         window: &Window,
+        cx: &App,
     ) -> AnyElement {
         let mut drag_region = div()
             .id("title-bar-drag-region")
@@ -146,6 +154,23 @@ mod linux {
                     window.zoom_window();
                 }
             });
+
+        drag_region = drag_region
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_start()
+            .pl(px(12.0))
+            .text_size(px(11.0))
+            .text_color(cx.theme().foreground.opacity(0.72))
+            .child(
+                div()
+                    .max_w(px(420.0))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(title),
+            );
 
         if supports_window_menu {
             drag_region = drag_region.on_mouse_down(MouseButton::Right, |event, window, _| {
