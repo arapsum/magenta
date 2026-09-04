@@ -11,7 +11,8 @@ careful with memory, and pleasant to use for long-lived conversations.
 
 > **Status:** Magenta is in the interface-foundation stage. It does not yet
 > connect to an AI provider or persist conversations. The current application
-> is an interactive native shell with representative local data.
+> is an interactive native shell with in-memory demo conversations and a local
+> streaming simulation for shaping the chat experience.
 
 The visual language takes inspiration from the
 [Mogonta AI Chat Workspace UI design](https://dribbble.com/shots/27203662-Mogonta-AI-Chat-Workspace-UI-Design).
@@ -66,8 +67,14 @@ The product is guided by a few constraints:
   - a local profile/settings entry point and a theme toggle.
 - Empty workspace with Magenta’s animated glass orb and ambient surface.
 - Native multiline prompt composer with model/effort selection, image
-  attachment validation and previews, and a disabled-until-ready submission
-  state. This remains a UI prototype; it does not make network requests.
+-  attachment validation and previews, a disabled-until-ready submission
+  state, and a circular send/stop control. This remains a UI prototype; it
+  does not make network requests.
+- A conversation surface backed by provider-independent core types and
+  representative in-memory fixtures for every sidebar conversation.
+- Conversation selection, new-thread creation, rich Markdown responses,
+  code-block copy actions, response regeneration, cancellable fake streaming,
+  and safe local synchronization back into the demo catalog.
 - Typed errors through `MagentaError` and a shared `Result<T>` alias.
 - Recoverable notifications and privacy-safe error presentation.
 - Local structured diagnostics with daily rotation and stderr fallback.
@@ -75,13 +82,12 @@ The product is guided by a few constraints:
 ## Not implemented yet
 
 - Remote provider integrations or model discovery.
-- Streaming responses, cancellation, retry, and usage accounting.
+- Remote provider streaming, cancellation, retry, and usage accounting.
 - SQLite conversation persistence, search indexing, or pagination.
 - Secure credential storage.
-- Markdown/message rendering, code blocks, copy actions, tables, and rich tool
-  results.
-- Conversation create, rename, delete, or regenerate workflows.
-- Attachments beyond the present composer prototype.
+- Durable conversation create, rename, delete, and search workflows.
+- Attachment rendering and persistence beyond the present composer prototype.
+- Rich provider events such as reasoning, tool calls, citations, and usage.
 
 ## Planned architecture
 
@@ -89,23 +95,24 @@ The workspace intentionally starts small:
 
 ```text
 crates/
+├── core       # provider-independent conversation/message values
 ├── desktop    # executable, diagnostics, platform/window composition
-└── ui         # GPUI app shell, components, themes, UI error mapping
+└── ui         # GPUI app shell, components, themes, and demo workflows
 ```
 
-As real chat workflows arrive, the expected dependency direction is:
+The current dependency direction is intentionally small:
 
 ```text
 desktop
-├── ui
-├── providers     # OpenAI, Anthropic, Gemini, or similar adapters
-├── storage       # SQLite, attachment metadata, migrations
-└── core          # provider-independent conversation/message concepts
+└── ui
+    └── core
 ```
 
-`core` must not depend on GPUI, HTTP, SQLite, or a specific model API. An
-application/workflow crate may be introduced only when operations such as
-“send message” have outgrown the UI layer.
+The demo conversation catalog currently lives in `ui` so the interaction can
+be designed with fake data. When real chat workflows arrive, provider and
+storage adapters will depend on `core`, while an application/workflow crate
+can own operations such as “send message” once they have outgrown the UI
+layer. `core` must not depend on GPUI, HTTP, SQLite, or a specific model API.
 
 ## Requirements
 
@@ -191,13 +198,13 @@ recovery, privacy, and asynchronous-work conventions.
 
 ## Roadmap
 
-1. Complete the visual shell and keyboard/accessibility QA.
-2. Add provider-independent core conversation and message types.
-3. Implement one streaming remote provider behind a provider boundary.
+1. Complete visual and keyboard/accessibility QA for the conversation surface.
+2. Replace the in-memory demo catalog with application workflows and a
+   provider boundary.
+3. Implement one streaming remote provider behind that boundary.
 4. Add local SQLite persistence with a lightweight conversation index and
    paged message loading.
-5. Build Markdown and code-block rendering, then provider settings and secure
-   credential storage.
+5. Add provider settings, secure credential storage, and durable attachments.
 
 ## Contributing
 
