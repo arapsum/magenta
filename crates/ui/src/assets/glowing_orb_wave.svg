@@ -1,0 +1,68 @@
+<svg
+  width="300"
+  height="300"
+  viewBox="0 0 300 300"
+  fill="none"
+  xmlns="http://www.w3.org/2000/svg"
+>
+  <defs>
+    <linearGradient id="wave" x1="25" y1="130" x2="275" y2="175" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#85eaff" />
+      <stop offset="24%" stop-color="#baf8ff" />
+      <stop offset="48%" stop-color="#74e4ff" />
+      <stop offset="72%" stop-color="#a8f4ff" />
+      <stop offset="100%" stop-color="#5ddcff" />
+    </linearGradient>
+
+    <linearGradient id="waveUnder" x1="25" y1="130" x2="275" y2="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2fbede" stop-opacity="0.2" />
+      <stop offset="45%" stop-color="#68e8ff" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#169cc2" stop-opacity="0.2" />
+    </linearGradient>
+
+    <clipPath id="orbClip">
+      <circle cx="150" cy="150" r="120" />
+    </clipPath>
+
+    <filter id="waveGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" />
+    </filter>
+  </defs>
+
+  <g clip-path="url(#orbClip)">
+    <!-- Soft bloom behind the ribbon. -->
+    <path
+      d="M 20 154 C 42 111, 71 116, 106 132 C 142 148, 174 177, 207 183 C 236 188, 259 175, 280 143"
+      stroke="#44dfff"
+      stroke-width="12"
+      stroke-linecap="round"
+      opacity="0.42"
+      filter="url(#waveGlow)"
+    />
+
+    <!-- Translucent underside of the ribbon. -->
+    <path
+      d="M 20 156 C 42 113, 71 118, 106 134 C 142 150, 174 179, 207 185 C 236 190, 259 177, 280 145"
+      stroke="url(#waveUnder)"
+      stroke-width="8"
+      stroke-linecap="round"
+    />
+
+    <!-- Bright ribbon core. -->
+    <path
+      d="M 20 152 C 42 109, 71 114, 106 130 C 142 146, 174 175, 207 181 C 236 186, 259 173, 280 141"
+      stroke="url(#wave)"
+      stroke-width="4.2"
+      stroke-linecap="round"
+    />
+
+    <!-- Razor highlight along the upper edge. -->
+    <path
+      d="M 21 150 C 43 108, 72 113, 107 129 C 143 145, 174 173, 207 179 C 236 184, 258 171, 279 140"
+      stroke="#e9fdff"
+      stroke-width="1.2"
+      stroke-linecap="round"
+      opacity="0.68"
+    />
+  </g>
+</svg>

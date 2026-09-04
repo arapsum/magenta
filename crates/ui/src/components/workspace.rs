@@ -9,6 +9,7 @@ use gpui_component::{
 };
 
 use crate::app::MainView;
+use crate::components::orb;
 
 pub(crate) fn render(name: SharedString, cx: &mut Context<MainView>) -> AnyElement {
     div()
@@ -31,7 +32,7 @@ pub(crate) fn render(name: SharedString, cx: &mut Context<MainView>) -> AnyEleme
                 .items_center()
                 .gap_0()
                 .pb(px(22.))
-                .child(orb(cx))
+                .child(orb::render(cx))
                 .child(
                     v_flex()
                         .items_center()
@@ -71,68 +72,6 @@ fn ambient_light(cx: &mut Context<MainView>) -> AnyElement {
             linear_color_stop(cx.theme().background.opacity(0.), 1.),
         ))
         .opacity(0.75)
-        .into_any_element()
-}
-
-fn orb(cx: &mut Context<MainView>) -> AnyElement {
-    div()
-        .relative()
-        .size(px(120.))
-        .rounded_full()
-        .overflow_hidden()
-        .border_1()
-        .border_color(cx.theme().primary.opacity(0.88))
-        .bg(linear_gradient(
-            155.,
-            linear_color_stop(cx.theme().primary.opacity(0.7), 0.),
-            linear_color_stop(cx.theme().background, 0.55),
-        ))
-        .shadow_lg()
-        .child(
-            div()
-                .absolute()
-                .top(px(5.))
-                .left(px(5.))
-                .size(px(108.))
-                .rounded_full()
-                .bg(linear_gradient(
-                    160.,
-                    linear_color_stop(cx.theme().muted.opacity(0.92), 0.),
-                    linear_color_stop(cx.theme().background, 0.72),
-                )),
-        )
-        .child(
-            div()
-                .absolute()
-                .left(px(-15.))
-                .top(px(22.))
-                .w(px(105.))
-                .h(px(70.))
-                .rounded_full()
-                .border_2()
-                .border_color(cx.theme().primary.opacity(0.86)),
-        )
-        .child(
-            div()
-                .absolute()
-                .right(px(-17.))
-                .top(px(35.))
-                .w(px(107.))
-                .h(px(62.))
-                .rounded_full()
-                .border_2()
-                .border_color(cx.theme().primary.opacity(0.86)),
-        )
-        .child(
-            div()
-                .absolute()
-                .top(px(9.))
-                .left(px(20.))
-                .w(px(54.))
-                .h(px(18.))
-                .rounded_full()
-                .bg(cx.theme().foreground.opacity(0.06)),
-        )
         .into_any_element()
 }
 
