@@ -9,10 +9,10 @@ use gpui_component::{
 use crate::app::MainView;
 use crate::components::{orb, prompt_input::PromptComposer};
 
-pub(crate) fn render(
-    name: SharedString,
+pub fn render(
+    name: &SharedString,
     composer: Entity<PromptComposer>,
-    cx: &mut Context<MainView>,
+    cx: &Context<'_, MainView>,
 ) -> AnyElement {
     div()
         .relative()
@@ -34,7 +34,7 @@ pub(crate) fn render(
                 .items_center()
                 .gap_0()
                 .pb(px(22.))
-                .child(orb::render(cx))
+                .child(orb::render())
                 .child(
                     v_flex()
                         .items_center()
@@ -61,7 +61,7 @@ pub(crate) fn render(
         .into_any_element()
 }
 
-fn ambient_light(cx: &mut Context<MainView>) -> AnyElement {
+fn ambient_light(cx: &Context<'_, MainView>) -> AnyElement {
     div()
         .absolute()
         .top(px(-160.))
@@ -77,7 +77,7 @@ fn ambient_light(cx: &mut Context<MainView>) -> AnyElement {
         .into_any_element()
 }
 
-fn suggestions(cx: &mut Context<MainView>) -> AnyElement {
+fn suggestions(cx: &Context<'_, MainView>) -> AnyElement {
     h_flex()
         .mt(px(12.))
         .gap(px(7.))
@@ -96,7 +96,7 @@ fn suggestions(cx: &mut Context<MainView>) -> AnyElement {
         .into_any_element()
 }
 
-fn suggestion(icon: IconName, label: &'static str, cx: &mut Context<MainView>) -> AnyElement {
+fn suggestion(icon: IconName, label: &'static str, cx: &Context<'_, MainView>) -> AnyElement {
     h_flex()
         .h(px(30.))
         .gap(px(6.))

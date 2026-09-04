@@ -105,7 +105,7 @@ fn launch_main_window(
     }
 }
 
-fn exit_code(launch_failed: bool) -> ExitCode {
+const fn exit_code(launch_failed: bool) -> ExitCode {
     if launch_failed {
         ExitCode::FAILURE
     } else {
@@ -122,7 +122,7 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     .map_err(|source| MagentaError::WindowOpen { source })
 }
 
-fn main_window_options(cx: &mut App) -> WindowOptions {
+fn main_window_options(cx: &App) -> WindowOptions {
     let bounds = Bounds::centered(None, size(px(1180.), px(760.)), cx);
     let mut window_options = gpui_component::TitleBar::window_options();
     window_options.window_bounds = Some(WindowBounds::Windowed(bounds));
@@ -134,17 +134,18 @@ fn main_window_options(cx: &mut App) -> WindowOptions {
 }
 
 fn configure_titlebar(window_options: &mut WindowOptions) {
-    match window_options.titlebar.as_mut() {
-        Some(titlebar) => titlebar.title = Some("Magenta".into()),
-        None => tracing::warn!(
+    if let Some(titlebar) = window_options.titlebar.as_mut() {
+        titlebar.title = Some("Magenta".into());
+    } else {
+        tracing::warn!(
             operation = "window.configure",
             "GPUI did not provide titlebar options; using platform defaults"
-        ),
+        );
     }
 }
 
 #[cfg(target_os = "linux")]
-fn configure_linux_window(window_options: &mut WindowOptions) {
+const fn configure_linux_window(window_options: &mut WindowOptions) {
     window_options.window_decorations = Some(WindowDecorations::Client);
     window_options.window_background = WindowBackgroundAppearance::Transparent;
 }

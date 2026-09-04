@@ -4,11 +4,9 @@ use std::{
 };
 
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, Context, ImageCacheError, ObjectFit,
-    RenderImage, Transformation, Window, div, img, percentage, prelude::*, px, rgb, size, svg,
+    Animation, AnimationExt as _, AnyElement, App, ImageCacheError, ObjectFit, RenderImage,
+    Transformation, Window, div, img, percentage, prelude::*, px, rgb, size, svg,
 };
-
-use crate::app::MainView;
 
 const ORB_SIZE: f32 = 260.;
 const ORB_SVG: &[u8] = include_bytes!("../assets/glowing_orb.svg");
@@ -18,7 +16,7 @@ const ORB_RIM_SVG: &[u8] = include_bytes!("../assets/glowing_orb_rim.svg");
 static ORB_IMAGE: OnceLock<Result<Arc<RenderImage>, ImageCacheError>> = OnceLock::new();
 static ORB_RIM_IMAGE: OnceLock<Result<Arc<RenderImage>, ImageCacheError>> = OnceLock::new();
 
-pub(crate) fn render(_cx: &mut Context<MainView>) -> AnyElement {
+pub(super) fn render() -> AnyElement {
     div()
         .relative()
         .size(px(ORB_SIZE))
@@ -31,8 +29,8 @@ pub(crate) fn render(_cx: &mut Context<MainView>) -> AnyElement {
                         .size_full()
                         .rounded_full()
                         .border_1()
-                        .border_color(rgb(0x35d6ffff))
-                        .bg(rgb(0x071116ff))
+                        .border_color(rgb(0x35d6_ffff))
+                        .bg(rgb(0x0711_16ff))
                         .into_any_element()
                 }),
         )
@@ -63,7 +61,7 @@ fn wave_layer() -> AnyElement {
             svg()
                 .data(ORB_WAVE_SVG)
                 .size_full()
-                .text_color(rgb(0x8beeffff))
+                .text_color(rgb(0x8bee_ffff))
                 .with_animation(
                     "glowing-orb-ribbon-rotation",
                     Animation::new(Duration::from_secs(14))
@@ -71,7 +69,7 @@ fn wave_layer() -> AnyElement {
                         .with_max_fps(60.),
                     |this, progress| {
                         let angle = progress * std::f32::consts::TAU;
-                        let depth = 0.58 + 0.42 * angle.cos().abs();
+                        let depth = 0.42_f32.mul_add(angle.cos().abs(), 0.58);
 
                         this.with_transformation(
                             Transformation::rotate(percentage(progress))
@@ -100,17 +98,14 @@ fn orb_rim_image(
 fn cached_image(
     cache: &OnceLock<Result<Arc<RenderImage>, ImageCacheError>>,
     svg: &[u8],
-    cx: &mut App,
+    cx: &App,
 ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
-    Some(
-        cache
-            .get_or_init(|| {
-                cx.svg_renderer()
-                    .render_single_frame(svg, 1.)
-                    .map_err(ImageCacheError::from)
-            })
-            .clone(),
-    )
+    cache.get_or_init(|| {
+        cx.svg_renderer()
+            .render_single_frame(svg, 1.)
+            .map_err(ImageCacheError::from)
+    });
+    cache.get().cloned()
 }
 
 #[cfg(test)]

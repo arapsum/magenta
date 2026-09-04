@@ -1,5 +1,5 @@
-pub(crate) mod orb;
-pub(crate) mod prompt_input;
-pub(crate) mod sidebar;
+mod orb;
+pub mod prompt_input;
+pub mod sidebar;
 pub mod titlebar;
-pub(crate) mod workspace;
+pub mod workspace;

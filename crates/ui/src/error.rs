@@ -56,7 +56,8 @@ pub struct ErrorPresentation {
 
 impl MagentaError {
     /// Returns stable, privacy-safe copy suitable for display to the user.
-    pub fn presentation(&self) -> ErrorPresentation {
+    #[must_use]
+    pub const fn presentation(&self) -> ErrorPresentation {
         match self {
             Self::ThemeLoad { .. } => ErrorPresentation {
                 code: "MAG-THEME-LOAD",
@@ -96,6 +97,7 @@ struct ErrorNotification;
 
 /// Builds a persistent, deduplicated notification from a typed application
 /// error. Raw sources and local paths are never included in the notification.
+#[must_use]
 pub fn notification_for_error(error: &MagentaError) -> Notification {
     let presentation = error.presentation();
     let notification_type = match presentation.severity {
@@ -128,7 +130,11 @@ mod tests {
     struct EmptyView;
 
     impl Render for EmptyView {
-        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        fn render(
+            &mut self,
+            _window: &mut Window,
+            _cx: &mut Context<'_, Self>,
+        ) -> impl IntoElement {
             div()
         }
     }

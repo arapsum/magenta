@@ -16,6 +16,7 @@ pub enum BuiltInTheme {
 }
 
 impl BuiltInTheme {
+    #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::Light => MAGENTA_LIGHT_THEME,
@@ -40,13 +41,15 @@ pub enum ThemeInitOutcome {
 }
 
 impl ThemeInitOutcome {
-    pub fn error(&self) -> Option<&MagentaError> {
+    #[must_use]
+    pub const fn error(&self) -> Option<&MagentaError> {
         match self {
             Self::Applied(_) => None,
             Self::Fallback { error, .. } => Some(error),
         }
     }
 
+    #[must_use]
     pub fn into_error(self) -> Option<MagentaError> {
         match self {
             Self::Applied(_) => None,
@@ -99,12 +102,23 @@ pub fn available(cx: &App) -> Vec<ThemeOption> {
         .collect()
 }
 
+/// Applies one of Magenta's bundled themes.
+///
+/// # Errors
+///
+/// Returns [`MagentaError::ThemeNotFound`] when the bundled theme has not
+/// been registered.
 pub fn apply(theme: BuiltInTheme, cx: &mut App) -> Result<()> {
     apply_named(theme.name(), cx)
 }
 
 /// Applies any registered gpui-component theme by name. A future theme picker
 /// or persisted preference can use the same entry point.
+///
+/// # Errors
+///
+/// Returns [`MagentaError::ThemeNotFound`] when no registered theme has the
+/// requested name.
 pub fn apply_named(name: &str, cx: &mut App) -> Result<()> {
     let name = SharedString::from(name);
     let theme = ThemeRegistry::global(cx)
@@ -119,6 +133,12 @@ pub fn apply_named(name: &str, cx: &mut App) -> Result<()> {
     Ok(())
 }
 
+/// Switches between Magenta's bundled light and dark themes.
+///
+/// # Errors
+///
+/// Returns [`MagentaError::ThemeNotFound`] when the target bundled theme has
+/// not been registered.
 pub fn toggle(cx: &mut App) -> Result<BuiltInTheme> {
     let next = if Theme::global(cx).is_dark() {
         BuiltInTheme::Light

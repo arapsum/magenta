@@ -1,7 +1,7 @@
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use gpui::{
@@ -25,7 +25,7 @@ use crate::{MagentaError, notification_for_error};
 const MAX_ATTACHMENTS: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ImageModel {
+pub enum ImageModel {
     NanoBananaPro,
     NanoBanana,
     Imagen4,
@@ -44,7 +44,7 @@ impl ImageModel {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum EffortLevel {
+pub enum EffortLevel {
     Low,
     Medium,
     High,
@@ -63,7 +63,7 @@ impl EffortLevel {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ReferenceImage {
+struct ReferenceImage {
     id: u64,
     path: PathBuf,
     name: SharedString,
@@ -86,7 +86,7 @@ impl ReferenceImage {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PromptRequest {
+pub struct PromptRequest {
     pub prompt: SharedString,
     pub model: ImageModel,
     pub effort: EffortLevel,
@@ -94,21 +94,21 @@ pub(crate) struct PromptRequest {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum PromptComposerEvent {
+pub enum PromptComposerEvent {
     Submit(PromptRequest),
 }
 
-pub(crate) struct PromptComposer {
+pub struct PromptComposer {
     input: Entity<TextareaState>,
     model: Option<ImageModel>,
     effort: Option<EffortLevel>,
     attachments: Vec<ReferenceImage>,
     attachment_task: Option<Task<()>>,
-    _subscriptions: Vec<Subscription>,
+    subscriptions: Vec<Subscription>,
 }
 
 impl PromptComposer {
-    pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Describe a new image")
@@ -116,7 +116,7 @@ impl PromptComposer {
                 .submit_on_enter(true)
         });
 
-        let _subscriptions = vec![cx.subscribe_in(
+        let subscriptions = vec![cx.subscribe_in(
             &input,
             window,
             |composer, _, event: &InputEvent, window, cx| match event {
@@ -132,8 +132,12 @@ impl PromptComposer {
             effort: None,
             attachments: Vec::new(),
             attachment_task: None,
-            _subscriptions,
+            subscriptions,
         }
+    }
+
+    pub fn focus(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.input.focus_handle(cx).focus(window, cx);
     }
 
     fn has_content(&self, cx: &App) -> bool {
@@ -144,21 +148,21 @@ impl PromptComposer {
         self.has_content(cx) && self.model.is_some() && self.effort.is_some()
     }
 
-    fn select_model(&mut self, model: ImageModel, cx: &mut Context<Self>) {
+    fn select_model(&mut self, model: ImageModel, cx: &mut Context<'_, Self>) {
         if self.model != Some(model) {
             self.model = Some(model);
             cx.notify();
         }
     }
 
-    fn select_effort(&mut self, effort: EffortLevel, cx: &mut Context<Self>) {
+    fn select_effort(&mut self, effort: EffortLevel, cx: &mut Context<'_, Self>) {
         if self.effort != Some(effort) {
             self.effort = Some(effort);
             cx.notify();
         }
     }
 
-    fn choose_attachments(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn choose_attachments(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         if self.attachments.len() >= MAX_ATTACHMENTS {
             window.push_notification(
                 Notification::new()
@@ -222,7 +226,7 @@ impl PromptComposer {
         &mut self,
         paths: Vec<(PathBuf, bool)>,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &mut Context<'_, Self>,
     ) {
         let mut unsupported = 0;
         let mut unreadable = 0;
@@ -274,7 +278,7 @@ impl PromptComposer {
         cx.notify();
     }
 
-    fn remove_attachment(&mut self, path: &PathBuf, cx: &mut Context<Self>) {
+    fn remove_attachment(&mut self, path: &Path, cx: &mut Context<'_, Self>) {
         let before = self.attachments.len();
         self.attachments
             .retain(|attachment| attachment.path != *path);
@@ -300,7 +304,7 @@ impl PromptComposer {
         })
     }
 
-    fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn submit(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
         let Some(request) = self.request(cx) else {
             return;
         };
@@ -315,7 +319,7 @@ impl PromptComposer {
         );
     }
 
-    fn attachment_strip(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn attachment_strip(&self, cx: &Context<'_, Self>) -> impl IntoElement {
         let view = cx.entity();
         let can_add = self.attachments.len() < MAX_ATTACHMENTS;
 
@@ -394,7 +398,7 @@ impl PromptComposer {
             })
     }
 
-    fn model_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn model_menu(&self, cx: &Context<'_, Self>) -> impl IntoElement {
         let selected_model = self.model;
         let selected_effort = self.effort;
         let view = cx.entity();
@@ -459,7 +463,8 @@ impl PromptComposer {
 impl EventEmitter<PromptComposerEvent> for PromptComposer {}
 
 impl Render for PromptComposer {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+        let _ = &self.subscriptions;
         let focused = self.input.read(cx).focus_handle(cx).is_focused(window);
         let ready = self.is_ready(cx);
         let submit_view = cx.entity();

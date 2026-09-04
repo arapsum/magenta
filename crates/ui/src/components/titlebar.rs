@@ -13,7 +13,7 @@ mod linux {
 
     const LINUX_TITLE_BAR_HEIGHT: Pixels = px(28.0);
 
-    pub(crate) fn render(_title: impl IntoElement) -> AnyElement {
+    pub fn render(_title: impl IntoElement) -> AnyElement {
         LinuxTitleBar.into_any_element()
     }
 
@@ -26,7 +26,11 @@ mod linux {
     }
 
     impl Render for TitleBarState {
-        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        fn render(
+            &mut self,
+            _window: &mut Window,
+            _cx: &mut Context<'_, Self>,
+        ) -> impl IntoElement {
             let _ = &self.button_layout_subscription;
             div()
         }
@@ -39,7 +43,7 @@ mod linux {
                 return hidden_title_bar();
             }
 
-            render_title_bar(state, window, cx)
+            render_title_bar(&state, window, cx)
         }
     }
 
@@ -65,7 +69,7 @@ mod linux {
     }
 
     fn render_title_bar(
-        state: Entity<TitleBarState>,
+        state: &Entity<TitleBarState>,
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
@@ -76,7 +80,7 @@ mod linux {
         let left_controls = render_controls("left-window-controls", button_layout.left, window, cx);
         let right_controls =
             render_controls("right-window-controls", button_layout.right, window, cx);
-        let drag_region = drag_region(&state, supports_window_menu, window);
+        let drag_region = drag_region(state, supports_window_menu, window);
 
         div()
             .id("title-bar")
@@ -89,9 +93,9 @@ mod linux {
             .bg(cx.theme().title_bar)
             .border_b_1()
             .border_color(title_bar_border(window, cx))
-            .when_some(left_controls, |this, controls| this.child(controls))
+            .when_some(left_controls, gpui::ParentElement::child)
             .child(drag_region)
-            .when_some(right_controls, |this, controls| this.child(controls))
+            .when_some(right_controls, gpui::ParentElement::child)
             .into_any_element()
     }
 
@@ -106,7 +110,7 @@ mod linux {
     fn drag_region(
         state: &Entity<TitleBarState>,
         supports_window_menu: bool,
-        window: &mut Window,
+        window: &Window,
     ) -> AnyElement {
         let mut drag_region = div()
             .id("title-bar-drag-region")
@@ -145,7 +149,7 @@ mod linux {
 
         if supports_window_menu {
             drag_region = drag_region.on_mouse_down(MouseButton::Right, |event, window, _| {
-                window.show_window_menu(event.position)
+                window.show_window_menu(event.position);
             });
         }
 
@@ -183,7 +187,7 @@ mod linux {
         })
     }
 
-    fn is_supported_control(
+    const fn is_supported_control(
         button: WindowButton,
         supported_controls: WindowControls,
         is_minimizable: bool,
@@ -251,7 +255,7 @@ mod linux {
         is_close: bool,
     }
 
-    fn control_details(button: WindowButton, is_maximised: bool) -> ControlDetails {
+    const fn control_details(button: WindowButton, is_maximised: bool) -> ControlDetails {
         match button {
             WindowButton::Minimize => ControlDetails {
                 icon: IconName::WindowMinimize,
@@ -316,10 +320,10 @@ mod linux {
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) use linux::render;
+pub use linux::render;
 
 #[cfg(not(target_os = "linux"))]
-pub(crate) fn render(title: impl IntoElement) -> AnyElement {
+pub fn render(title: impl IntoElement) -> AnyElement {
     gpui_component::TitleBar::new()
         .child(title)
         .into_any_element()
