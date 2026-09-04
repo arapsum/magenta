@@ -3645,6 +3645,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "magenta-core"
+version = "0.1.0"
+
+[[package]]
 name = "magenta-desktop"
 version = "0.1.0"
 dependencies = [
@@ -3666,6 +3670,7 @@ dependencies = [
  "anyhow",
  "gpui",
  "gpui-component",
+ "magenta-core",
  "thiserror 2.0.20",
  "tracing",
 ]
