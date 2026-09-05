@@ -1,6 +1,7 @@
 mod code_fence;
 pub mod conversation;
 mod inline_code;
+mod markdown;
 mod orb;
 pub mod prompt_input;
 pub mod sidebar;

@@ -22,11 +22,12 @@ use magenta_core::{
 use crate::components::{
     code_fence::{self, ContentSegment},
     inline_code::{self, MarkdownInlineCodePlugin},
+    markdown,
     prompt_input::PromptComposer,
 };
 use crate::{MagentaError, notification_for_error};
 
-pub use model::{DemoCatalog, DemoThread, chat_model_for, summary_for};
+pub use model::{DemoCatalog, DemoThread, summary_for};
 
 const MESSAGE_MAX_WIDTH: gpui::Pixels = px(760.);
 const USER_MESSAGE_MAX_WIDTH: gpui::Pixels = px(560.);
@@ -47,6 +48,7 @@ pub enum ConversationViewEvent {
 struct RenderedMessage {
     message: Message,
     markdown: Option<Entity<TextViewState>>,
+    markdown_source: Option<String>,
     user_segments: Vec<RenderedUserSegment>,
 }
 
@@ -201,12 +203,17 @@ impl ConversationView {
     }
 
     fn rendered_message(message: Message, cx: &mut Context<'_, Self>) -> RenderedMessage {
-        let (markdown, user_segments) = match message.role {
-            MessageRole::Assistant => (
-                Some(cx.new(|cx| TextViewState::markdown(&message.content, cx))),
-                Vec::new(),
-            ),
+        let (markdown, markdown_source, user_segments) = match message.role {
+            MessageRole::Assistant => {
+                let source = markdown::normalize_for_text_view(&message.content);
+                (
+                    Some(cx.new(|cx| TextViewState::markdown(&source, cx))),
+                    Some(source),
+                    Vec::new(),
+                )
+            }
             MessageRole::User => (
+                None,
                 None,
                 code_fence::parse_segments(&message.content)
                     .into_iter()
@@ -227,6 +234,7 @@ impl ConversationView {
         RenderedMessage {
             message,
             markdown,
+            markdown_source,
             user_segments,
         }
     }
@@ -307,9 +315,18 @@ impl ConversationView {
         let rendered = &mut self.messages[index];
         rendered.message.content.push_str(chunk);
         rendered.message.status = MessageStatus::Streaming;
-        if let Some(markdown) = &rendered.markdown {
-            markdown.update(cx, |state, cx| state.push_str(chunk, cx));
+        let normalized = markdown::normalize_for_text_view(&rendered.message.content);
+        if let (Some(markdown), Some(previous)) = (
+            rendered.markdown.as_ref(),
+            rendered.markdown_source.as_ref(),
+        ) {
+            if let Some(delta) = normalized.strip_prefix(previous) {
+                markdown.update(cx, |state, cx| state.push_str(delta, cx));
+            } else {
+                markdown.update(cx, |state, cx| state.set_text(&normalized, cx));
+            }
         }
+        rendered.markdown_source = Some(normalized);
         self.list_state.remeasure_items(index..index + 1);
         cx.emit(ConversationViewEvent::Updated);
         cx.notify();
