@@ -6,7 +6,7 @@ use gpui::{
     Styled as _, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    ActiveTheme as _, Collapsible, Icon, IconName, Selectable as _, Sizable as _, StyledExt as _,
+    ActiveTheme as _, Collapsible, Icon, IconName, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     menu::{DropdownMenu as _, PopupMenuItem},
@@ -40,7 +40,7 @@ pub struct SidebarView {
 }
 
 impl SidebarView {
-    pub fn new(_window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
+    pub fn new(_window: &mut Window, cx: &Context<'_, Self>) -> Self {
         Self {
             collapsed: false,
             conversations: Vec::new(),
@@ -59,7 +59,7 @@ impl SidebarView {
         cx.notify();
     }
 
-    pub(crate) fn is_collapsed(&self) -> bool {
+    pub(crate) const fn is_collapsed(&self) -> bool {
         self.collapsed
     }
 
@@ -96,11 +96,11 @@ impl SidebarView {
             .collect()
     }
 
-    pub(crate) fn history_available(&self) -> bool {
+    pub(crate) const fn history_available(&self) -> bool {
         self.history_status.is_none() && !self.conversations.is_empty()
     }
 
-    fn new_chat(&self, cx: &mut Context<'_, Self>) {
+    fn new_chat(cx: &mut Context<'_, Self>) {
         cx.emit(SidebarEvent::NewChat);
         cx.notify();
     }
@@ -253,7 +253,7 @@ impl SidebarView {
             .into_any_element()
     }
 
-    fn new_chat_button(&self, view: Entity<Self>, _cx: &App) -> AnyElement {
+    fn new_chat_button(view: Entity<Self>, _cx: &App) -> AnyElement {
         Button::new("sidebar-new-chat")
             .primary()
             .accessibility_id("new-chat")
@@ -263,7 +263,7 @@ impl SidebarView {
             .icon(IconName::Plus)
             .label("New chat")
             .on_click(move |_, _window, cx| {
-                view.update(cx, |sidebar, cx| sidebar.new_chat(cx));
+                view.update(cx, |_, cx| Self::new_chat(cx));
             })
             .into_any_element()
     }
@@ -336,8 +336,8 @@ impl SidebarView {
                                 .font_family("monospace")
                                 .text_size(px(11.))
                                 .text_color(cx.theme().muted_foreground.opacity(0.8))
-                                .when(selected, |this| this.invisible())
-                                .group_hover(group_name.clone(), |this| this.invisible())
+                                .when(selected, gpui::Styled::invisible)
+                                .group_hover(group_name.clone(), gpui::Styled::invisible)
                                 .child(updated),
                         )
                     })
@@ -347,7 +347,7 @@ impl SidebarView {
                             .inset_0()
                             .when(!selected, |this| {
                                 this.invisible()
-                                    .group_hover(group_name, |this| this.visible())
+                                    .group_hover(group_name, gpui::Styled::visible)
                             })
                             .child(
                                 Button::new(("conversation-more", id.0))
@@ -469,13 +469,13 @@ impl SidebarView {
         content.into_any_element()
     }
 
-    fn render_content(&self, view: Entity<Self>, window: &Window, cx: &App) -> AnyElement {
+    fn search_button(&self, cx: &App) -> AnyElement {
         let finder_shortcut = if cfg!(target_os = "macos") {
             "⌘K"
         } else {
             "Ctrl K"
         };
-        let search_button = h_flex()
+        h_flex()
             .id("sidebar-search-chats")
             .track_focus(&self.finder_launcher_focus)
             .role(Role::Button)
@@ -520,12 +520,16 @@ impl SidebarView {
             )
             .on_click(move |_, window, cx| {
                 window.dispatch_action(Box::new(OpenConversationFinder), cx);
-            });
+            })
+            .into_any_element()
+    }
+
+    fn render_content(&self, view: Entity<Self>, cx: &App) -> AnyElement {
         let controls = v_flex()
             .w_full()
             .gap(px(8.))
-            .child(self.new_chat_button(view.clone(), cx))
-            .child(search_button);
+            .child(Self::new_chat_button(view.clone(), cx))
+            .child(self.search_button(cx));
         let mut content = v_flex().w_full().gap(px(3.)).child(controls);
 
         if self.history_status.is_some() || self.conversations.is_empty() {
@@ -587,7 +591,6 @@ impl SidebarView {
             );
         }
 
-        let _ = window;
         content.into_any_element()
     }
 }
@@ -740,17 +743,13 @@ impl SidebarItem for SidebarContent {
     fn render(
         self,
         id: impl Into<gpui::ElementId>,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
         v_flex()
             .id(id.into())
             .w_full()
-            .child(
-                self.view
-                    .read(cx)
-                    .render_content(self.view.clone(), window, cx),
-            )
+            .child(self.view.read(cx).render_content(self.view.clone(), cx))
     }
 }
 

@@ -14,7 +14,7 @@ use crate::components::{
 #[must_use]
 pub fn render(
     composer: Entity<PromptComposer>,
-    sidebar: Entity<SidebarView>,
+    sidebar: &Entity<SidebarView>,
     cx: &Context<'_, MainView>,
 ) -> AnyElement {
     let show_recent = sidebar.read(cx).history_available();

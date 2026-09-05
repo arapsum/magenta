@@ -550,7 +550,7 @@ impl PromptComposer {
             }))
     }
 
-    fn attachment_button(&self, cx: &Context<'_, Self>) -> Button {
+    fn attachment_button(cx: &Context<'_, Self>) -> Button {
         let view = cx.entity();
 
         Button::new("prompt-add-image")
@@ -763,7 +763,7 @@ impl Render for PromptComposer {
                     .items_center()
                     .justify_between()
                     .child(h_flex().items_center().when(can_add_attachment, |this| {
-                        this.child(self.attachment_button(cx))
+                        this.child(Self::attachment_button(cx))
                     }))
                     .child(
                         Button::new("prompt-submit")
