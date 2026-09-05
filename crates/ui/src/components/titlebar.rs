@@ -268,7 +268,7 @@ mod linux {
             })
             .on_click(move |_, window, cx| {
                 cx.stop_propagation();
-                activate_control(button, window);
+                activate_control(button, window, cx);
             })
             .child(Icon::new(details.icon).small())
             .into_any_element()
@@ -335,11 +335,11 @@ mod linux {
         })
     }
 
-    fn activate_control(button: WindowButton, window: &mut Window) {
+    fn activate_control(button: WindowButton, window: &mut Window, cx: &mut App) {
         match button {
             WindowButton::Minimize => window.minimize_window(),
             WindowButton::Maximize => window.zoom_window(),
-            WindowButton::Close => window.remove_window(),
+            WindowButton::Close => window.dispatch_action(Box::new(super::CloseWindow), cx),
         }
     }
 }
@@ -353,3 +353,6 @@ pub fn render(title: impl IntoElement) -> AnyElement {
         .child(title)
         .into_any_element()
 }
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[action(namespace = magenta)]
+pub struct CloseWindow;

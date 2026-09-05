@@ -40,8 +40,11 @@ pub enum SidebarEvent {
     NewChat,
     OpenConversation(ConversationId),
     OpenSettings,
+    SetPinned(ConversationId, bool),
+    RetryHistory,
 }
 
+#[cfg(test)]
 pub fn demo_conversations() -> Vec<ConversationSummary> {
     vec![
         ConversationSummary {
@@ -105,6 +108,29 @@ pub fn demo_conversations() -> Vec<ConversationSummary> {
             pinned: false,
         },
     ]
+}
+
+impl From<magenta_core::ConversationSummary> for ConversationSummary {
+    fn from(summary: magenta_core::ConversationSummary) -> Self {
+        let today = chrono::Local::now().date_naive();
+        let date = chrono::DateTime::from_timestamp_millis(summary.updated_at.0)
+            .map(|time| time.with_timezone(&chrono::Local).date_naive());
+        let days = date.map_or(i64::MAX, |date| {
+            today.signed_duration_since(date).num_days()
+        });
+        let period = match days {
+            ..=0 => ConversationPeriod::Today,
+            1 => ConversationPeriod::Yesterday,
+            2..=7 => ConversationPeriod::PreviousSevenDays,
+            _ => ConversationPeriod::Older,
+        };
+        Self {
+            id: summary.id,
+            title: summary.title,
+            period,
+            pinned: summary.pinned,
+        }
+    }
 }
 
 pub(super) fn title_matches(title: &str, search_term: &str) -> bool {

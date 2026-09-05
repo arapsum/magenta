@@ -18,7 +18,6 @@ use magenta_core::ProviderAccount;
 
 use crate::theme;
 
-pub use model::demo_conversations;
 pub use model::{ConversationId, ConversationPeriod, ConversationSummary, SidebarEvent};
 
 use self::{model::title_matches, styles::compact_bevel_light};
@@ -37,6 +36,8 @@ pub struct SidebarView {
     pinned_expanded: bool,
     recency_limit: usize,
     subscriptions: Vec<Subscription>,
+    history_status: Option<&'static str>,
+    history_failed: bool,
 }
 
 impl SidebarView {
@@ -55,12 +56,14 @@ impl SidebarView {
         Self {
             collapsed: false,
             search,
-            conversations: demo_conversations(),
+            conversations: Vec::new(),
             active_conversation: None,
             account: None,
             pinned_expanded: true,
             recency_limit: INITIAL_RECENCY_LIMIT,
             subscriptions,
+            history_status: Some("Loading conversations…"),
+            history_failed: false,
         }
     }
 
@@ -69,30 +72,15 @@ impl SidebarView {
         cx.notify();
     }
 
-    fn new_chat(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        self.active_conversation = None;
+    fn new_chat(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.search
             .update(cx, |search, cx| search.set_value("", window, cx));
         cx.emit(SidebarEvent::NewChat);
         cx.notify();
     }
 
-    fn select_conversation(&mut self, id: ConversationId, cx: &mut Context<'_, Self>) {
-        self.active_conversation = Some(id);
+    fn select_conversation(id: ConversationId, cx: &mut Context<'_, Self>) {
         cx.emit(SidebarEvent::OpenConversation(id));
-        cx.notify();
-    }
-
-    pub fn add_conversation(
-        &mut self,
-        conversation: ConversationSummary,
-        cx: &mut Context<'_, Self>,
-    ) {
-        let id = conversation.id;
-        self.conversations.retain(|item| item.id != id);
-        self.conversations.insert(0, conversation);
-        self.active_conversation = Some(id);
-        self.recency_limit = INITIAL_RECENCY_LIMIT;
         cx.notify();
     }
 
@@ -105,11 +93,36 @@ impl SidebarView {
         cx.notify();
     }
 
-    fn toggle_pinned(&mut self, id: ConversationId, cx: &mut Context<'_, Self>) {
-        if let Some(conversation) = self.conversations.iter_mut().find(|item| item.id == id) {
-            conversation.pinned = !conversation.pinned;
-            cx.notify();
+    fn toggle_pinned(&self, id: ConversationId, cx: &mut Context<'_, Self>) {
+        if let Some(conversation) = self.conversations.iter().find(|item| item.id == id) {
+            cx.emit(SidebarEvent::SetPinned(id, !conversation.pinned));
         }
+    }
+
+    pub(crate) fn set_history(
+        &mut self,
+        summaries: Vec<magenta_core::ConversationSummary>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.conversations = summaries.into_iter().map(Into::into).collect();
+        self.history_status = None;
+        self.history_failed = false;
+        cx.notify();
+    }
+
+    pub(crate) fn set_history_loading(&mut self, failed: bool, cx: &mut Context<'_, Self>) {
+        self.history_failed = failed;
+        self.history_status = Some(if failed {
+            "History could not be loaded."
+        } else {
+            "Loading conversations…"
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn set_active(&mut self, id: Option<ConversationId>, cx: &mut Context<'_, Self>) {
+        self.active_conversation = id;
+        cx.notify();
     }
 
     fn toggle_pinned_expanded(&mut self, cx: &mut Context<'_, Self>) {
@@ -425,7 +438,7 @@ impl SidebarView {
                             .child(conversation.title.clone()),
                     )
                     .on_click(move |_, _, cx| {
-                        select_view.update(cx, |sidebar, cx| sidebar.select_conversation(id, cx));
+                        select_view.update(cx, |_, cx| Self::select_conversation(id, cx));
                     }),
             )
             .child(
@@ -557,6 +570,42 @@ impl SidebarView {
             .into_any_element()
     }
 
+    fn render_history_status(
+        &self,
+        mut content: gpui::Div,
+        view: Entity<Self>,
+        cx: &App,
+    ) -> AnyElement {
+        if let Some(status) = self.history_status {
+            content = content.child(div().p(px(9.)).text_size(px(12.)).child(status));
+            if self.history_failed {
+                let retry_view = view;
+                content = content.child(
+                    Button::new("retry-history")
+                        .ghost()
+                        .label("Retry")
+                        .on_click(move |_, _, cx| {
+                            retry_view.update(cx, |_, cx| cx.emit(SidebarEvent::RetryHistory));
+                        }),
+                );
+            }
+            return content.into_any_element();
+        }
+        if self.conversations.is_empty() {
+            return content
+                .child(
+                    div()
+                        .p(px(9.))
+                        .text_size(px(12.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Your conversations will appear here."),
+                )
+                .into_any_element();
+        }
+
+        content.into_any_element()
+    }
+
     fn render_content(&self, view: Entity<Self>, window: &Window, cx: &App) -> AnyElement {
         let new_chat = self.new_chat_button(view.clone(), cx);
         if self.collapsed {
@@ -581,6 +630,10 @@ impl SidebarView {
             .gap(px(2.))
             .child(new_chat)
             .child(self.render_search_field(window, cx));
+
+        if self.history_status.is_some() || self.conversations.is_empty() {
+            return self.render_history_status(content, view, cx);
+        }
 
         if search_active {
             content = content.child(Self::section_label("Results", None, view.clone(), cx));

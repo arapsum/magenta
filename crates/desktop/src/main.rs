@@ -8,8 +8,8 @@ use gpui::{
 #[cfg(target_os = "linux")]
 use gpui::{WindowBackgroundAppearance, WindowDecorations};
 use gpui_component::Root;
-use magenta_application::{RegenerateMessage, SendMessage};
-use magenta_core::{ChatProvider, ModelCatalog, ProviderAuthenticator};
+use magenta_application::{ConversationHistory, RegenerateMessage, SendMessage};
+use magenta_core::{ChatProvider, ConversationStore, ModelCatalog, ProviderAuthenticator};
 use magenta_providers::OpenAiProvider;
 
 use magenta_ui::{notification_for_error, MagentaError, MainView, Result};
@@ -122,13 +122,25 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     let chat_provider: Arc<dyn ChatProvider> = provider.clone();
     let authenticator: Arc<dyn ProviderAuthenticator> = provider.clone();
     let model_catalog: Arc<dyn ModelCatalog> = provider;
-    let send_message = SendMessage::new(Arc::clone(&chat_provider));
-    let regenerate_message = RegenerateMessage::new(Arc::clone(&chat_provider));
+    let data_dir = dirs::data_local_dir().ok_or_else(|| MagentaError::StorageInitialize {
+        source: magenta_core::StorageError::new(
+            magenta_core::StorageErrorKind::Unavailable,
+            std::io::Error::other("local data directory unavailable"),
+        ),
+    })?;
+    let store: Arc<dyn ConversationStore> =
+        Arc::new(magenta_storage::SqliteConversationStore::new(
+            data_dir.join("magenta/conversations.sqlite3"),
+        ));
+    let send_message = SendMessage::new(Arc::clone(&chat_provider), Arc::clone(&store));
+    let regenerate_message = RegenerateMessage::new(Arc::clone(&chat_provider), Arc::clone(&store));
+    let history = ConversationHistory::new(store);
     cx.open_window(window_options, move |window, cx| {
         let main_view = cx.new(|cx| {
             MainView::new(
                 send_message,
                 regenerate_message,
+                history,
                 Arc::clone(&authenticator),
                 Arc::clone(&model_catalog),
                 window,

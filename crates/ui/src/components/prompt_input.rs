@@ -74,6 +74,7 @@ pub struct PromptComposer {
     model: Option<ModelDescriptor>,
     effort: Option<EffortLevel>,
     generating: bool,
+    storage_ready: bool,
     attachments: Vec<ReferenceImage>,
     attachment_task: Option<Task<()>>,
     preview_task: Option<Task<()>>,
@@ -113,6 +114,7 @@ impl PromptComposer {
             model: None,
             effort: None,
             generating: false,
+            storage_ready: true,
             attachments: Vec::new(),
             attachment_task: None,
             preview_task: None,
@@ -162,14 +164,6 @@ impl PromptComposer {
         cx.notify();
     }
 
-    pub(crate) fn selected_configuration(&self) -> Option<GenerationConfig> {
-        Some(GenerationConfig::new(
-            self.model.as_ref()?.provider.clone(),
-            self.model.as_ref()?.id.clone(),
-            self.effort.clone()?,
-        ))
-    }
-
     pub(crate) fn set_models(&mut self, models: Vec<ModelDescriptor>, cx: &mut Context<'_, Self>) {
         let selected = self.model.as_ref().and_then(|selected| {
             models
@@ -195,6 +189,11 @@ impl PromptComposer {
         }
     }
 
+    pub(crate) fn set_storage_ready(&mut self, ready: bool, cx: &mut Context<'_, Self>) {
+        self.storage_ready = ready;
+        cx.notify();
+    }
+
     pub fn clear_after_submit(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.input.update(cx, |input, cx| {
             input.set_value("", window, cx);
@@ -204,6 +203,23 @@ impl PromptComposer {
         self.clear_code_preview(cx);
         self.attachments.clear();
         cx.notify();
+    }
+
+    pub(crate) fn clear_submitted(
+        &mut self,
+        submitted: &PromptRequest,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let same_prompt = self.input.read(cx).value().trim() == submitted.prompt.as_ref();
+        let same_attachments = self
+            .attachments
+            .iter()
+            .map(|image| &image.path)
+            .eq(submitted.attachments.iter());
+        if same_prompt && same_attachments {
+            self.clear_after_submit(window, cx);
+        }
     }
 
     fn schedule_code_preview(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
@@ -293,7 +309,7 @@ impl PromptComposer {
     }
 
     fn is_ready(&self, cx: &App) -> bool {
-        self.has_content(cx) && self.model.is_some() && self.effort.is_some()
+        self.storage_ready && self.has_content(cx) && self.model.is_some() && self.effort.is_some()
     }
 
     fn select_model(&mut self, model: ModelDescriptor, cx: &mut Context<'_, Self>) {
@@ -826,6 +842,32 @@ mod tests {
         }
     }
 
+    #[gpui::test]
+    fn pending_storage_blocks_submit_and_preserves_newer_draft(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let window = cx.open_window(size(px(900.), px(640.)), PromptComposer::new);
+        window
+            .update(cx, |composer, window, cx| {
+                composer.select_model(model("model", EffortLevel::Medium), cx);
+                composer
+                    .input
+                    .update(cx, |input, cx| input.set_value("First draft", window, cx));
+                let submitted = composer.request(cx).unwrap();
+                composer.set_storage_ready(false, cx);
+                assert!(composer.request(cx).is_none());
+                composer
+                    .input
+                    .update(cx, |input, cx| input.set_value("Newer draft", window, cx));
+                composer.clear_submitted(&submitted, window, cx);
+                assert_eq!(composer.input.read(cx).value().as_ref(), "Newer draft");
+                composer.set_storage_ready(true, cx);
+                let submitted = composer.request(cx).unwrap();
+                composer.clear_submitted(&submitted, window, cx);
+                assert!(composer.input.read(cx).value().is_empty());
+            })
+            .unwrap();
+    }
+
     #[test]
     fn supported_image_extensions_are_case_insensitive() {
         assert!(is_supported_image(std::path::Path::new("reference.PNG")));
@@ -895,11 +937,8 @@ mod tests {
     #[test]
     fn model_options_round_trip_through_core_generation_configuration() {
         let model = model("gpt-5.4", EffortLevel::Medium);
-        let configuration = GenerationConfig::new(
-            model.provider.clone(),
-            model.id.clone(),
-            EffortLevel::Medium,
-        );
+        let configuration =
+            GenerationConfig::new(model.provider.clone(), model.id, EffortLevel::Medium);
 
         assert_eq!(
             configuration.provider,

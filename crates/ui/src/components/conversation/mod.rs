@@ -1,5 +1,3 @@
-mod model;
-
 use futures_util::StreamExt as _;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FollowMode, IntoElement,
@@ -7,7 +5,8 @@ use gpui::{
     Window, div, linear_color_stop, linear_gradient, list, prelude::FluentBuilder as _, px, rems,
 };
 use gpui_component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, WindowExt as _,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
+    WindowExt as _,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     h_flex,
@@ -27,7 +26,11 @@ use crate::components::{
 };
 use crate::{MagentaError, notification_for_error};
 
-pub use model::{DemoCatalog, DemoThread, summary_for};
+#[derive(Clone, Debug)]
+pub struct ConversationThread {
+    pub conversation: Conversation,
+    pub messages: Vec<Message>,
+}
 
 const MESSAGE_MAX_WIDTH: gpui::Pixels = px(760.);
 const USER_MESSAGE_MAX_WIDTH: gpui::Pixels = px(560.);
@@ -40,8 +43,8 @@ struct IncompleteGeneration;
 #[derive(Clone, Debug)]
 pub enum ConversationViewEvent {
     GenerationStarted,
-    GenerationFinished,
-    Updated,
+    GenerationFinished(Message),
+    LoadEarlier,
     Regenerate(MessageId),
 }
 
@@ -68,9 +71,85 @@ pub struct ConversationView {
     generation: u64,
     streaming_message: Option<MessageId>,
     generation_task: Option<Task<()>>,
+    older_cursor: Option<magenta_core::MessageSequence>,
+    has_older: bool,
+    loading_earlier: bool,
+    origins: std::collections::HashMap<MessageId, GenerationConfig>,
 }
 
 impl ConversationView {
+    pub(crate) fn load_page(
+        &mut self,
+        loaded: magenta_core::ConversationPage,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let origins = loaded
+            .page
+            .messages
+            .iter()
+            .map(|item| (item.message.id, item.generation.clone()))
+            .collect();
+        self.load(
+            ConversationThread {
+                conversation: loaded.conversation,
+                messages: loaded
+                    .page
+                    .messages
+                    .into_iter()
+                    .map(|item| item.message)
+                    .collect(),
+            },
+            cx,
+        );
+        self.origins = origins;
+        self.has_older = loaded.page.has_older;
+        self.older_cursor = loaded.page.older_cursor;
+        cx.notify();
+    }
+
+    pub(crate) fn earlier_cursor(&self) -> Option<magenta_core::MessageSequence> {
+        self.has_older.then_some(self.older_cursor).flatten()
+    }
+
+    pub(crate) fn set_loading_earlier(&mut self, loading: bool, cx: &mut Context<'_, Self>) {
+        self.loading_earlier = loading;
+        cx.notify();
+    }
+
+    pub(crate) fn prepend_page(
+        &mut self,
+        page: magenta_core::MessagePage,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let mut anchor = self.list_state.logical_scroll_top();
+        let mut earlier = Vec::new();
+        for item in page.messages {
+            if self
+                .messages
+                .iter()
+                .any(|loaded| loaded.message.id == item.message.id)
+            {
+                continue;
+            }
+            self.origins.insert(item.message.id, item.generation);
+            earlier.push(Self::rendered_message(item.message, cx));
+        }
+        let count = earlier.len();
+        earlier.append(&mut self.messages);
+        self.messages = earlier;
+        self.list_state.splice(0..0, count);
+        anchor.item_ix += count;
+        self.list_state.scroll_to(anchor);
+        self.has_older = page.has_older;
+        self.older_cursor = page.older_cursor;
+        self.loading_earlier = false;
+        cx.notify();
+    }
+
+    pub(crate) const fn conversation(&self) -> Option<&Conversation> {
+        self.conversation.as_ref()
+    }
+
     pub(crate) fn new(
         composer: Entity<PromptComposer>,
         _window: &mut Window,
@@ -85,11 +164,19 @@ impl ConversationView {
             generation: 0,
             streaming_message: None,
             generation_task: None,
+            older_cursor: None,
+            has_older: false,
+            loading_earlier: false,
+            origins: std::collections::HashMap::new(),
         }
     }
 
-    pub(crate) fn load(&mut self, thread: DemoThread, cx: &mut Context<'_, Self>) {
+    pub(crate) fn load(&mut self, thread: ConversationThread, cx: &mut Context<'_, Self>) {
         self.cancel_generation(cx);
+        self.older_cursor = None;
+        self.has_older = false;
+        self.loading_earlier = false;
+        self.origins.clear();
         self.conversation = Some(thread.conversation);
         self.messages = thread
             .messages
@@ -107,6 +194,9 @@ impl ConversationView {
         self.cancel_generation(cx);
         self.conversation = None;
         self.messages.clear();
+        self.origins.clear();
+        self.older_cursor = None;
+        self.has_older = false;
         self.list_state.reset(0);
         cx.notify();
     }
@@ -122,8 +212,9 @@ impl ConversationView {
         }
     }
 
-    pub(crate) fn snapshot(&self) -> Option<DemoThread> {
-        Some(DemoThread {
+    #[cfg(test)]
+    pub(crate) fn snapshot(&self) -> Option<ConversationThread> {
+        Some(ConversationThread {
             conversation: self.conversation.clone()?,
             messages: self
                 .messages
@@ -148,6 +239,10 @@ impl ConversationView {
     ) {
         self.cancel_generation(cx);
         let user = Self::rendered_message(user_message, cx);
+        if let Some(conversation) = &self.conversation {
+            self.origins
+                .insert(assistant_message.id, conversation.generation.clone());
+        }
         let assistant = Self::rendered_message(assistant_message, cx);
         let old_count = self.messages.len();
         let assistant_id = assistant.message.id;
@@ -178,6 +273,10 @@ impl ConversationView {
         };
 
         self.cancel_generation(cx);
+        if let Some(conversation) = &self.conversation {
+            self.origins
+                .insert(assistant_message.id, conversation.generation.clone());
+        }
         let new_assistant_id = assistant_message.id;
         self.messages[index] = Self::rendered_message(assistant_message, cx);
         self.list_state.remeasure_items(index..index + 1);
@@ -189,6 +288,19 @@ impl ConversationView {
 
     pub(crate) fn cancel(&mut self, cx: &mut Context<'_, Self>) {
         self.cancel_generation(cx);
+    }
+
+    pub(crate) fn interrupt_for_shutdown(&mut self, cx: &mut Context<'_, Self>) -> Option<Message> {
+        let id = self.streaming_message.take()?;
+        self.generation = self.generation.wrapping_add(1);
+        self.generation_task.take();
+        let message = self
+            .messages
+            .iter_mut()
+            .find(|message| message.message.id == id)?;
+        message.message.status = MessageStatus::Stopped;
+        cx.notify();
+        Some(message.message.clone())
     }
 
     pub(crate) fn request_regenerate(&self, message_id: MessageId, cx: &mut Context<'_, Self>) {
@@ -328,7 +440,6 @@ impl ConversationView {
         }
         rendered.markdown_source = Some(normalized);
         self.list_state.remeasure_items(index..index + 1);
-        cx.emit(ConversationViewEvent::Updated);
         cx.notify();
     }
 
@@ -352,8 +463,15 @@ impl ConversationView {
             message.message.generation_outcome = Some(outcome);
         }
         self.streaming_message = None;
-        cx.emit(ConversationViewEvent::Updated);
-        cx.emit(ConversationViewEvent::GenerationFinished);
+        if let Some(message) = self
+            .messages
+            .iter()
+            .find(|item| item.message.id == assistant_id)
+        {
+            cx.emit(ConversationViewEvent::GenerationFinished(
+                message.message.clone(),
+            ));
+        }
         cx.notify();
     }
 
@@ -389,8 +507,15 @@ impl ConversationView {
             source: error,
         };
         window.push_notification(notification_for_error(&application_error), cx);
-        cx.emit(ConversationViewEvent::Updated);
-        cx.emit(ConversationViewEvent::GenerationFinished);
+        if let Some(message) = self
+            .messages
+            .iter()
+            .find(|item| item.message.id == assistant_id)
+        {
+            cx.emit(ConversationViewEvent::GenerationFinished(
+                message.message.clone(),
+            ));
+        }
         cx.notify();
     }
 
@@ -409,8 +534,15 @@ impl ConversationView {
         {
             message.message.status = MessageStatus::Stopped;
         }
-        cx.emit(ConversationViewEvent::Updated);
-        cx.emit(ConversationViewEvent::GenerationFinished);
+        if let Some(message) = self
+            .messages
+            .iter()
+            .find(|item| item.message.id == assistant_id)
+        {
+            cx.emit(ConversationViewEvent::GenerationFinished(
+                message.message.clone(),
+            ));
+        }
         cx.notify();
     }
 
@@ -522,10 +654,18 @@ impl ConversationView {
     }
 
     fn render_assistant_header(&self, message: &Message, cx: &App) -> AnyElement {
-        let model_label = self.conversation.as_ref().map_or_else(
-            || "Model".to_owned(),
-            |conversation| conversation.generation.model.0.clone(),
-        );
+        let model_label = self
+            .origins
+            .get(&message.id)
+            .or_else(|| {
+                self.conversation
+                    .as_ref()
+                    .map(|conversation| &conversation.generation)
+            })
+            .map_or_else(
+                || "Model".to_owned(),
+                |generation| generation.model.0.clone(),
+            );
         let label = match message.status {
             MessageStatus::Stopped => format!("{model_label} · stopped"),
             MessageStatus::Failed => format!("{model_label} · failed"),
@@ -666,6 +806,23 @@ impl Render for ConversationView {
             .bg(cx.theme().tokens.background.background)
             .text_color(cx.theme().foreground)
             .child(conversation_ambient_light(cx))
+            .when(self.has_older, |this| {
+                this.child(
+                    Button::new("load-earlier-messages")
+                        .ghost()
+                        .small()
+                        .label(if self.loading_earlier {
+                            "Loading earlier messages…"
+                        } else {
+                            "Load earlier messages"
+                        })
+                        .disabled(self.loading_earlier)
+                        .accessibility_id("load-earlier-messages")
+                        .on_click(
+                            cx.listener(|_, _, _, cx| cx.emit(ConversationViewEvent::LoadEarlier)),
+                        ),
+                )
+            })
             .child(
                 list(list_state, move |index, window, cx| {
                     view.read(cx)
@@ -758,6 +915,103 @@ mod tests {
         }
     }
 
+    fn stored_page(range: std::ops::Range<u64>) -> magenta_core::MessagePage {
+        let has_older = range.start > 0;
+        let messages = range
+            .map(|id| magenta_core::StoredMessage {
+                message: message(id, MessageRole::Assistant, MessageStatus::Complete),
+                sequence: magenta_core::MessageSequence(i64::try_from(id).unwrap()),
+                created_at: magenta_core::Timestamp(0),
+                generation: conversation().generation,
+            })
+            .collect::<Vec<_>>();
+        magenta_core::MessagePage {
+            older_cursor: messages.first().map(|message| message.sequence),
+            messages,
+            has_older,
+        }
+    }
+
+    #[gpui::test]
+    fn prepending_history_preserves_visible_message_and_offset(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
+            let composer = cx.new(|cx| PromptComposer::new(window, cx));
+            ConversationView::new(composer, window, cx)
+        });
+        window
+            .update(cx, |view, _, cx| {
+                view.load_page(
+                    magenta_core::ConversationPage {
+                        conversation: conversation(),
+                        page: stored_page(50..100),
+                    },
+                    cx,
+                );
+                view.list_state.scroll_to(gpui::ListOffset {
+                    item_ix: 10,
+                    offset_in_item: px(7.),
+                });
+                view.prepend_page(stored_page(0..50), cx);
+                let anchor = view.list_state.logical_scroll_top();
+                assert_eq!(anchor.item_ix, 60);
+                assert_eq!(anchor.offset_in_item, px(7.));
+                assert_eq!(view.messages[anchor.item_ix].message.id, MessageId(60));
+                assert!(!view.has_older);
+                view.prepend_page(stored_page(0..50), cx);
+                assert_eq!(view.messages.len(), 100);
+                assert_eq!(view.list_state.logical_scroll_top().item_ix, 60);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn stream_deltas_do_not_emit_persistence_events(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let saved = Rc::new(RefCell::new(Vec::new()));
+        let events = Rc::clone(&saved);
+        let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
+            let composer = cx.new(|cx| PromptComposer::new(window, cx));
+            ConversationView::new(composer, window, cx)
+        });
+        let subscription = window
+            .update(cx, |view, window, cx| {
+                let subscription = cx.subscribe(&cx.entity(), move |_, _, event, _| {
+                    if let ConversationViewEvent::GenerationFinished(message) = event {
+                        events.borrow_mut().push(message.clone());
+                    }
+                });
+                view.load(
+                    ConversationThread {
+                        conversation: conversation(),
+                        messages: Vec::new(),
+                    },
+                    cx,
+                );
+                view.start_generation(
+                    message(1, MessageRole::User, MessageStatus::Complete),
+                    message(2, MessageRole::Assistant, MessageStatus::Streaming),
+                    ProviderId::new("test"),
+                    Box::pin(stream::pending()),
+                    window,
+                    cx,
+                );
+                for _ in 0..100 {
+                    view.push_stream_chunk(view.generation, MessageId(2), "x", cx);
+                }
+                subscription
+            })
+            .unwrap();
+        cx.run_until_parked();
+        assert!(saved.borrow().is_empty());
+        window.update(cx, |view, _, cx| view.cancel(cx)).unwrap();
+        cx.run_until_parked();
+        assert_eq!(saved.borrow().len(), 1);
+        assert_eq!(saved.borrow()[0].content.len(), 100);
+        assert_eq!(saved.borrow()[0].status, MessageStatus::Stopped);
+        drop(subscription);
+    }
+
     fn message(id: u64, role: MessageRole, status: MessageStatus) -> Message {
         Message {
             id: MessageId::new(id),
@@ -798,13 +1052,13 @@ mod tests {
 
         window
             .update(cx, |view, _, cx| {
-                let thread = DemoCatalog::new()
-                    .thread(magenta_core::ConversationId::new(1))
-                    .cloned()
-                    .expect("the first demo thread should exist");
+                let thread = ConversationThread {
+                    conversation: conversation(),
+                    messages: vec![message(1, MessageRole::User, MessageStatus::Complete)],
+                };
                 view.load(thread, cx);
                 assert!(view.snapshot().is_some_and(|thread| {
-                    thread.conversation.id == magenta_core::ConversationId::new(1)
+                    thread.conversation.id == magenta_core::ConversationId::new(77)
                         && !thread.messages.is_empty()
                 }));
             })
@@ -869,7 +1123,7 @@ mod tests {
         window
             .update(cx, |view, window, cx| {
                 view.load(
-                    DemoThread {
+                    ConversationThread {
                         conversation: conversation(),
                         messages: Vec::new(),
                     },
@@ -927,7 +1181,7 @@ mod tests {
             .update(cx, |_, window, cx| {
                 view.update(cx, |view, cx| {
                     view.load(
-                        DemoThread {
+                        ConversationThread {
                             conversation: conversation(),
                             messages: Vec::new(),
                         },
@@ -969,7 +1223,7 @@ mod tests {
         window
             .update(cx, |view, window, cx| {
                 view.load(
-                    DemoThread {
+                    ConversationThread {
                         conversation: conversation(),
                         messages: Vec::new(),
                     },
@@ -1016,7 +1270,7 @@ mod tests {
         window
             .update(cx, |view, window, cx| {
                 view.load(
-                    DemoThread {
+                    ConversationThread {
                         conversation: conversation(),
                         messages: Vec::new(),
                     },

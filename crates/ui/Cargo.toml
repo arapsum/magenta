@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+chrono.workspace = true
 anyhow.workspace = true
 futures-util.workspace = true
 magenta-application.workspace = true
@@ -14,4 +15,5 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+futures-channel.workspace = true
 gpui = { workspace = true, features = ["test-support"] }

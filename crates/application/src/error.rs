@@ -1,45 +1,15 @@
-use magenta_core::{ConversationId, MessageId};
+use magenta_core::StorageError;
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error)]
 pub enum SendMessageError {
     #[error("the prompt cannot be empty")]
     EmptyPrompt,
-
-    #[error("the user and assistant message IDs must be different")]
-    DuplicateMessageIds,
-
-    #[error("a new message ID is already present in the conversation history")]
-    MessageIdAlreadyUsed,
-
-    #[error("conversation history contains a message from another conversation")]
-    HistoryConversationMismatch {
-        expected: ConversationId,
-        actual: ConversationId,
-        message: MessageId,
-    },
+    #[error("could not persist the message turn")]
+    Storage(#[from] StorageError),
 }
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error)]
 pub enum RegenerateMessageError {
-    #[error("the response to regenerate was not found")]
-    TargetNotFound { target: MessageId },
-
-    #[error("only assistant responses can be regenerated")]
-    TargetNotAssistant { target: MessageId },
-
-    #[error("a response cannot be regenerated while it is still streaming")]
-    TargetStillStreaming { target: MessageId },
-
-    #[error("the replacement assistant message ID is already in use")]
-    MessageIdAlreadyUsed { message: MessageId },
-
-    #[error("conversation history contains a message from another conversation")]
-    HistoryConversationMismatch {
-        expected: ConversationId,
-        actual: ConversationId,
-        message: MessageId,
-    },
-
-    #[error("the response has no preceding user message to regenerate from")]
-    MissingUserContext { target: MessageId },
+    #[error("could not prepare a persisted response replacement")]
+    Storage(#[from] StorageError),
 }

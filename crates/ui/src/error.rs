@@ -11,6 +11,21 @@ use magenta_core::{ProviderError, ProviderId};
 /// exposing raw error messages in the interface.
 #[derive(Debug, thiserror::Error)]
 pub enum MagentaError {
+    #[error("failed to initialize conversation storage")]
+    StorageInitialize {
+        #[source]
+        source: magenta_core::StorageError,
+    },
+    #[error("failed to load conversation history")]
+    StorageLoad {
+        #[source]
+        source: magenta_core::StorageError,
+    },
+    #[error("failed to save conversation history")]
+    StorageWrite {
+        #[source]
+        source: magenta_core::StorageError,
+    },
     #[error("failed to load theme definitions")]
     ThemeLoad {
         #[source]
@@ -80,6 +95,24 @@ impl MagentaError {
     #[must_use]
     pub const fn presentation(&self) -> ErrorPresentation {
         match self {
+            Self::StorageInitialize { .. } => ErrorPresentation {
+                code: "MAG-STORAGE-INIT",
+                severity: ErrorSeverity::Error,
+                title: "History unavailable",
+                message: "Magenta could not open local history. Retry from the sidebar before sending messages.",
+            },
+            Self::StorageLoad { .. } => ErrorPresentation {
+                code: "MAG-STORAGE-LOAD",
+                severity: ErrorSeverity::Error,
+                title: "History could not be loaded",
+                message: "Your current conversation was kept. Try opening the conversation again.",
+            },
+            Self::StorageWrite { .. } => ErrorPresentation {
+                code: "MAG-STORAGE-WRITE",
+                severity: ErrorSeverity::Error,
+                title: "Changes could not be saved",
+                message: "Your response is still visible. Retry saving before leaving this conversation.",
+            },
             Self::ThemeLoad { .. } => ErrorPresentation {
                 code: "MAG-THEME-LOAD",
                 severity: ErrorSeverity::Warning,
@@ -239,9 +272,10 @@ mod tests {
                 source: SendMessageError::EmptyPrompt,
             },
             MagentaError::RegenerateMessage {
-                source: RegenerateMessageError::TargetNotFound {
-                    target: magenta_core::MessageId::new(42),
-                },
+                source: RegenerateMessageError::Storage(magenta_core::StorageError::new(
+                    magenta_core::StorageErrorKind::NotFound,
+                    std::io::Error::other("missing response"),
+                )),
             },
         ];
 
