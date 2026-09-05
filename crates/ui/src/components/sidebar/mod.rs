@@ -1,80 +1,106 @@
 mod model;
-mod styles;
 
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, Focusable as _,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, Styled as _, Subscription,
-    Window, div, linear_color_stop, linear_gradient, prelude::FluentBuilder as _, px,
+    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     ActiveTheme as _, Collapsible, Icon, IconName, Selectable as _, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{Input, InputEvent, InputState},
+    menu::{DropdownMenu as _, PopupMenuItem},
     sidebar::{Sidebar, SidebarCollapsible, SidebarItem},
     v_flex,
 };
 use magenta_core::ProviderAccount;
 
+use crate::app::OpenConversationFinder;
 use crate::theme;
 
 pub use model::{ConversationId, ConversationPeriod, ConversationSummary, SidebarEvent};
 
-use self::{model::title_matches, styles::compact_bevel_light};
+use self::model::title_matches;
 
-const EXPANDED_WIDTH: gpui::Pixels = px(252.);
-const ROW_HEIGHT: gpui::Pixels = px(34.);
+const EXPANDED_WIDTH: gpui::Pixels = px(260.);
+const ROW_HEIGHT: gpui::Pixels = px(30.);
 const INITIAL_RECENCY_LIMIT: usize = 6;
 const RECENCY_PAGE_SIZE: usize = 6;
 
 pub struct SidebarView {
     collapsed: bool,
-    search: Entity<InputState>,
     conversations: Vec<ConversationSummary>,
     active_conversation: Option<ConversationId>,
+    finder_launcher_focus: FocusHandle,
     account: Option<ProviderAccount>,
     pinned_expanded: bool,
     recency_limit: usize,
-    subscriptions: Vec<Subscription>,
     history_status: Option<&'static str>,
     history_failed: bool,
 }
 
 impl SidebarView {
-    pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search conversations"));
-        let subscriptions =
-            vec![
-                cx.subscribe_in(&search, window, |sidebar, _, event: &InputEvent, _, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        sidebar.recency_limit = INITIAL_RECENCY_LIMIT;
-                        cx.notify();
-                    }
-                }),
-            ];
-
+    pub fn new(_window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
         Self {
             collapsed: false,
-            search,
             conversations: Vec::new(),
             active_conversation: None,
+            finder_launcher_focus: cx.focus_handle(),
             account: None,
             pinned_expanded: true,
             recency_limit: INITIAL_RECENCY_LIMIT,
-            subscriptions,
             history_status: Some("Loading conversations…"),
             history_failed: false,
         }
     }
 
-    fn toggle_collapsed(&mut self, cx: &mut Context<'_, Self>) {
+    pub(crate) fn toggle_collapsed(&mut self, cx: &mut Context<'_, Self>) {
         self.collapsed = !self.collapsed;
         cx.notify();
     }
 
-    fn new_chat(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        self.search
-            .update(cx, |search, cx| search.set_value("", window, cx));
+    pub(crate) fn is_collapsed(&self) -> bool {
+        self.collapsed
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_conversation(&self) -> Option<ConversationId> {
+        self.active_conversation
+    }
+    pub(crate) fn focus_finder_launcher(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.finder_launcher_focus.focus(window, cx);
+    }
+
+    pub(crate) fn matching_conversations(
+        &self,
+        query: &str,
+    ) -> Vec<(ConversationId, SharedString, SharedString)> {
+        self.conversations
+            .iter()
+            .filter(|conversation| title_matches(&conversation.title, query))
+            .map(|conversation| {
+                (
+                    conversation.id,
+                    conversation.title.clone().into(),
+                    conversation.updated.clone().into(),
+                )
+            })
+            .collect()
+    }
+
+    pub(crate) fn recent_conversations(&self) -> Vec<(ConversationId, SharedString)> {
+        self.conversations
+            .iter()
+            .take(3)
+            .map(|conversation| (conversation.id, conversation.title.clone().into()))
+            .collect()
+    }
+
+    pub(crate) fn history_available(&self) -> bool {
+        self.history_status.is_none() && !self.conversations.is_empty()
+    }
+
+    fn new_chat(&self, cx: &mut Context<'_, Self>) {
         cx.emit(SidebarEvent::NewChat);
         cx.notify();
     }
@@ -93,9 +119,13 @@ impl SidebarView {
         cx.notify();
     }
 
-    fn toggle_pinned(&self, id: ConversationId, cx: &mut Context<'_, Self>) {
-        if let Some(conversation) = self.conversations.iter().find(|item| item.id == id) {
-            cx.emit(SidebarEvent::SetPinned(id, !conversation.pinned));
+    fn set_pinned(&self, id: ConversationId, pinned: bool, cx: &mut Context<'_, Self>) {
+        if self
+            .conversations
+            .iter()
+            .any(|conversation| conversation.id == id)
+        {
+            cx.emit(SidebarEvent::SetPinned(id, pinned));
         }
     }
 
@@ -139,66 +169,6 @@ impl SidebarView {
         cx.emit(SidebarEvent::OpenSettings);
     }
 
-    fn search_term(&self, cx: &App) -> String {
-        self.search.read(cx).value().trim().to_lowercase()
-    }
-
-    fn matches_search(&self, conversation: &ConversationSummary, cx: &App) -> bool {
-        title_matches(&conversation.title, &self.search_term(cx))
-    }
-
-    fn visible_recency(&self, cx: &App) -> Vec<&ConversationSummary> {
-        self.conversations
-            .iter()
-            .filter(|item| !item.pinned && self.matches_search(item, cx))
-            .collect()
-    }
-
-    fn render_header(&self, view: &Entity<Self>, cx: &App) -> AnyElement {
-        let collapsed = self.collapsed;
-        let toggle_view = view.clone();
-        let toggle_label = if collapsed {
-            "Expand sidebar"
-        } else {
-            "Collapse sidebar"
-        };
-        let toggle_icon = if collapsed {
-            IconName::PanelLeftOpen
-        } else {
-            IconName::PanelLeftClose
-        };
-
-        h_flex()
-            .w_full()
-            .h(px(62.))
-            .items_center()
-            .justify_between()
-            .border_b_1()
-            .border_color(cx.theme().sidebar_border)
-            .when(!collapsed, |this| {
-                this.child(
-                    div()
-                        .text_size(px(21.))
-                        .font_semibold()
-                        .text_color(cx.theme().foreground)
-                        .child("magenta"),
-                )
-            })
-            .when(collapsed, gpui::Styled::justify_center)
-            .child(
-                Button::new("sidebar-toggle")
-                    .ghost()
-                    .small()
-                    .icon(toggle_icon)
-                    .tooltip(toggle_label)
-                    .accessibility_id("toggle-sidebar")
-                    .on_click(move |_, _, cx| {
-                        toggle_view.update(cx, Self::toggle_collapsed);
-                    }),
-            )
-            .into_any_element()
-    }
-
     fn render_footer(&self, view: Entity<Self>, cx: &App) -> AnyElement {
         let settings_view = view.clone();
         let ProfileDetails {
@@ -217,46 +187,25 @@ impl SidebarView {
         } else {
             "Use dark theme"
         };
-
-        if self.collapsed {
-            return h_flex()
-                .w_full()
-                .justify_center()
-                .child(
-                    Button::new("local-profile")
-                        .ghost()
-                        .size(px(32.))
-                        .p_0()
-                        .rounded_full()
-                        .bg(cx.theme().primary.opacity(0.18))
-                        .text_color(cx.theme().primary)
-                        .label(initial)
-                        .tooltip(tooltip)
-                        .on_click(move |_, _, cx| {
-                            settings_view.update(cx, |_, cx| Self::open_settings(cx));
-                        }),
-                )
-                .into_any_element();
-        }
-
         let theme_view = view;
+
         h_flex()
             .w_full()
             .items_center()
             .gap(px(8.))
-            .p(px(9.))
-            .rounded(px(10.))
+            .p(px(8.))
             .border_1()
-            .border_color(cx.theme().border.opacity(0.72))
-            .bg(cx.theme().secondary.opacity(0.58))
+            .border_color(cx.theme().sidebar_border)
+            .rounded(px(8.))
+            .bg(cx.theme().sidebar_accent.opacity(0.35))
             .child(
                 Button::new("local-profile")
                     .ghost()
                     .size(px(28.))
                     .p_0()
                     .rounded_full()
-                    .bg(cx.theme().primary.opacity(0.24))
-                    .text_color(cx.theme().primary)
+                    .bg(cx.theme().sidebar_accent)
+                    .text_color(cx.theme().sidebar_accent_foreground)
                     .label(initial)
                     .tooltip(tooltip)
                     .on_click(move |_, _, cx| {
@@ -304,66 +253,17 @@ impl SidebarView {
             .into_any_element()
     }
 
-    fn new_chat_button(&self, view: Entity<Self>, cx: &App) -> AnyElement {
-        let active = self.active_conversation.is_none();
-        let mut bevel_top = cx.theme().button_hover;
-        bevel_top.s *= 0.34;
-        let mut bevel_bottom = cx.theme().button;
-        bevel_bottom.s *= 0.24;
-        bevel_bottom.l = (bevel_bottom.l + 0.025).min(1.);
-        let collapsed = self.collapsed;
-
+    fn new_chat_button(&self, view: Entity<Self>, _cx: &App) -> AnyElement {
         Button::new("sidebar-new-chat")
+            .primary()
             .accessibility_id("new-chat")
             .w_full()
-            .h(px(34.))
-            .px(px(10.))
-            .rounded(px(8.))
-            .border_1()
-            .border_color(if active {
-                cx.theme().input.opacity(0.88)
-            } else {
-                cx.theme().sidebar_border.opacity(0.78)
-            })
-            .bg(if active {
-                linear_gradient(
-                    180.,
-                    linear_color_stop(bevel_top.opacity(0.98), 0.),
-                    linear_color_stop(bevel_bottom.opacity(0.99), 1.),
-                )
-            } else {
-                linear_gradient(
-                    180.,
-                    linear_color_stop(cx.theme().secondary.opacity(0.5), 0.),
-                    linear_color_stop(cx.theme().secondary.opacity(0.34), 1.),
-                )
-            })
-            .selected(active)
-            .when(active, |this| {
-                this.shadow(styles::illuminated_button_shadow(cx))
-                    .child(compact_bevel_light(cx))
-            })
-            .text_color(cx.theme().foreground)
-            .when(collapsed, |this| {
-                this.size(px(32.))
-                    .p_0()
-                    .rounded(px(8.))
-                    .icon(IconName::Plus)
-                    .tooltip("New chat")
-            })
-            .when(!collapsed, |this| {
-                this.child(
-                    h_flex()
-                        .relative()
-                        .w_full()
-                        .items_center()
-                        .gap(px(10.))
-                        .child(Icon::new(IconName::Plus).size_4())
-                        .child(div().text_size(px(13.)).font_medium().child("New chat")),
-                )
-            })
-            .on_click(move |_, window, cx| {
-                view.update(cx, |sidebar, cx| sidebar.new_chat(window, cx));
+            .h(px(32.))
+            .rounded(px(7.))
+            .icon(IconName::Plus)
+            .label("New chat")
+            .on_click(move |_, _window, cx| {
+                view.update(cx, |sidebar, cx| sidebar.new_chat(cx));
             })
             .into_any_element()
     }
@@ -377,64 +277,45 @@ impl SidebarView {
         let selected = self.active_conversation == Some(conversation.id);
         let id = conversation.id;
         let select_view = view.clone();
-        let pin_view = view;
-        let star = if conversation.pinned {
-            IconName::StarFill
-        } else {
-            IconName::Star
-        };
-        let pin_label = if conversation.pinned {
-            "Unpin conversation"
-        } else {
-            "Pin conversation"
-        };
-        let mut bevel_top = cx.theme().button_hover;
-        bevel_top.s *= 0.34;
-        let mut bevel_bottom = cx.theme().button;
-        bevel_bottom.s *= 0.24;
-        bevel_bottom.l = (bevel_bottom.l + 0.025).min(1.);
+        let menu_view = view;
+        let next_pinned = !conversation.pinned;
+        let menu_label = if next_pinned { "Pin" } else { "Unpin" };
+        let group_name: SharedString = format!("conversation-row-{}", id.0).into();
+        let metadata = (!conversation.pinned).then(|| conversation.updated.clone());
 
         h_flex()
             .relative()
+            .group(group_name.clone())
             .w_full()
             .h(ROW_HEIGHT)
             .items_center()
-            .gap(px(2.))
-            .rounded(px(7.))
+            .rounded(px(6.))
             .when(selected, |this| {
-                this.border_1()
-                    .border_color(cx.theme().input.opacity(0.88))
-                    .bg(linear_gradient(
-                        180.,
-                        linear_color_stop(bevel_top.opacity(0.98), 0.),
-                        linear_color_stop(bevel_bottom.opacity(0.99), 1.),
-                    ))
-                    .shadow(styles::illuminated_button_shadow(cx))
-                    .child(compact_bevel_light(cx))
+                this.bg(cx.theme().sidebar_accent)
+                    .text_color(cx.theme().sidebar_accent_foreground)
             })
+            .hover(|this| this.bg(cx.theme().sidebar_accent))
             .child(
                 Button::new(("conversation", id.0))
                     .ghost()
-                    .selected(selected)
                     .accessibility_id(format!("conversation-{}", id.0))
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .px(px(9.))
-                    .rounded(px(7.))
+                    .px(px(8.))
+                    .rounded(px(6.))
                     .text_color(if selected {
                         cx.theme().sidebar_accent_foreground
                     } else {
-                        cx.theme().sidebar_foreground.opacity(0.88)
+                        cx.theme().sidebar_foreground
                     })
-                    .when(selected, |this| this.bg(cx.theme().transparent))
                     .child(
                         div()
                             .w_full()
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .text_ellipsis()
-                            .text_size(px(12.))
+                            .text_size(px(13.))
                             .child(conversation.title.clone()),
                     )
                     .on_click(move |_, _, cx| {
@@ -442,20 +323,55 @@ impl SidebarView {
                     }),
             )
             .child(
-                Button::new(("pin-conversation", id.0))
-                    .ghost()
-                    .small()
-                    .icon(star)
-                    .tooltip(pin_label)
-                    .accessibility_id(format!("pin-conversation-{}", id.0))
-                    .text_color(if conversation.pinned {
-                        cx.theme().primary.opacity(0.88)
-                    } else {
-                        cx.theme().muted_foreground.opacity(0.48)
+                div()
+                    .relative()
+                    .flex_none()
+                    .size(px(28.))
+                    .when_some(metadata, |this, updated| {
+                        this.child(
+                            h_flex()
+                                .absolute()
+                                .inset_0()
+                                .justify_center()
+                                .font_family("monospace")
+                                .text_size(px(11.))
+                                .text_color(cx.theme().muted_foreground.opacity(0.8))
+                                .when(selected, |this| this.invisible())
+                                .group_hover(group_name.clone(), |this| this.invisible())
+                                .child(updated),
+                        )
                     })
-                    .on_click(move |_, _, cx| {
-                        pin_view.update(cx, |sidebar, cx| sidebar.toggle_pinned(id, cx));
-                    }),
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .when(!selected, |this| {
+                                this.invisible()
+                                    .group_hover(group_name, |this| this.visible())
+                            })
+                            .child(
+                                Button::new(("conversation-more", id.0))
+                                    .ghost()
+                                    .xsmall()
+                                    .size(px(28.))
+                                    .p_0()
+                                    .icon(IconName::Ellipsis)
+                                    .tooltip(format!("{menu_label} conversation"))
+                                    .accessibility_id(format!("conversation-more-{}", id.0))
+                                    .text_color(cx.theme().muted_foreground)
+                                    .dropdown_menu(move |menu, window, _cx| {
+                                        let action_view = menu_view.clone();
+                                        menu.item(PopupMenuItem::new(menu_label).on_click(
+                                            window.listener_for(
+                                                &action_view,
+                                                move |sidebar, _, _, cx| {
+                                                    sidebar.set_pinned(id, next_pinned, cx);
+                                                },
+                                            ),
+                                        ))
+                                    }),
+                            ),
+                    ),
             )
             .into_any_element()
     }
@@ -475,9 +391,9 @@ impl SidebarView {
                     .px(px(8.))
                     .pb(px(4.))
                     .text_size(px(10.))
-                    .font_medium()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(title)
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground.opacity(0.8))
+                    .child(title.to_uppercase())
                     .into_any_element()
             },
             |expanded| {
@@ -502,7 +418,12 @@ impl SidebarView {
                                 })
                                 .xsmall(),
                             )
-                            .child(div().text_size(px(10.)).font_medium().child(title)),
+                            .child(
+                                div()
+                                    .text_size(px(10.))
+                                    .font_semibold()
+                                    .child(title.to_uppercase()),
+                            ),
                     )
                     .on_click(move |_, _, cx| {
                         label_view.update(cx, Self::toggle_pinned_expanded);
@@ -510,64 +431,6 @@ impl SidebarView {
                     .into_any_element()
             },
         )
-    }
-
-    fn render_search_field(&self, window: &Window, cx: &App) -> AnyElement {
-        let search_focused = self.search.read(cx).focus_handle(cx).is_focused(window);
-        let search_border = if search_focused {
-            cx.theme().primary.opacity(0.62)
-        } else {
-            cx.theme().sidebar_border.opacity(0.92)
-        };
-        let search_background = if search_focused {
-            cx.theme().secondary.opacity(0.92)
-        } else {
-            cx.theme().secondary.opacity(0.58)
-        };
-
-        div()
-            .pt(px(16.))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .h(px(33.))
-                    .w_full()
-                    .rounded(px(8.))
-                    .border_1()
-                    .border_color(search_border)
-                    .bg(search_background)
-                    .when(search_focused, |this| {
-                        this.shadow(vec![
-                            gpui::BoxShadow::new(
-                                px(0.),
-                                px(2.),
-                                cx.theme().background.opacity(0.36),
-                            )
-                            .blur_radius(px(5.)),
-                            gpui::BoxShadow::new(px(0.), px(0.), cx.theme().primary.opacity(0.1))
-                                .blur_radius(px(4.)),
-                        ])
-                    })
-                    .child(
-                        Input::new(&self.search)
-                            .appearance(false)
-                            .small()
-                            .w_full()
-                            .px(px(9.))
-                            .cleanable(true)
-                            .accessibility_id("search-conversations")
-                            .aria_label("Search conversations")
-                            .prefix(Icon::new(IconName::Search).small().text_color(
-                                if search_focused {
-                                    cx.theme().primary
-                                } else {
-                                    cx.theme().muted_foreground
-                                },
-                            )),
-                    ),
-            )
-            .into_any_element()
     }
 
     fn render_history_status(
@@ -607,57 +470,73 @@ impl SidebarView {
     }
 
     fn render_content(&self, view: Entity<Self>, window: &Window, cx: &App) -> AnyElement {
-        let new_chat = self.new_chat_button(view.clone(), cx);
-        if self.collapsed {
-            return v_flex()
-                .w_full()
-                .items_center()
-                .gap(px(10.))
-                .child(new_chat)
-                .into_any_element();
-        }
-
-        let term = self.search_term(cx);
-        let search_active = !term.is_empty();
-        let pinned: Vec<_> = self
-            .conversations
-            .iter()
-            .filter(|item| item.pinned)
-            .collect();
-        let recency = self.visible_recency(cx);
-        let mut content = v_flex()
+        let finder_shortcut = if cfg!(target_os = "macos") {
+            "⌘K"
+        } else {
+            "Ctrl K"
+        };
+        let search_button = h_flex()
+            .id("sidebar-search-chats")
+            .track_focus(&self.finder_launcher_focus)
+            .role(Role::Button)
+            .aria_label("Search chats")
+            .tab_stop(true)
+            .cursor_pointer()
             .w_full()
-            .gap(px(2.))
-            .child(new_chat)
-            .child(self.render_search_field(window, cx));
+            .h(px(32.))
+            .px(px(10.))
+            .gap(px(7.))
+            .rounded(px(8.))
+            .border_1()
+            .border_color(cx.theme().input)
+            .bg(cx.theme().background)
+            .text_color(cx.theme().muted_foreground)
+            .hover(|this| this.bg(cx.theme().muted.opacity(0.6)))
+            .child(Icon::new(IconName::Search).xsmall())
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(px(13.))
+                    .child("Search chats"),
+            )
+            .child(
+                h_flex()
+                    .h(px(18.))
+                    .min_w(if cfg!(target_os = "macos") {
+                        px(24.)
+                    } else {
+                        px(38.)
+                    })
+                    .justify_center()
+                    .px(px(5.))
+                    .rounded(px(5.))
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().sidebar)
+                    .text_size(px(10.))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(finder_shortcut),
+            )
+            .on_click(move |_, window, cx| {
+                window.dispatch_action(Box::new(OpenConversationFinder), cx);
+            });
+        let controls = v_flex()
+            .w_full()
+            .gap(px(8.))
+            .child(self.new_chat_button(view.clone(), cx))
+            .child(search_button);
+        let mut content = v_flex().w_full().gap(px(3.)).child(controls);
 
         if self.history_status.is_some() || self.conversations.is_empty() {
             return self.render_history_status(content, view, cx);
         }
 
-        if search_active {
-            content = content.child(Self::section_label("Results", None, view.clone(), cx));
-            if recency.is_empty() && pinned.iter().all(|item| !self.matches_search(item, cx)) {
-                content = content.child(
-                    div()
-                        .px(px(9.))
-                        .py(px(8.))
-                        .text_size(px(12.))
-                        .text_color(cx.theme().muted_foreground)
-                        .child("No conversations match your search."),
-                );
-            } else {
-                for item in self
-                    .conversations
-                    .iter()
-                    .filter(|item| self.matches_search(item, cx))
-                {
-                    content = content.child(self.conversation_row(item, view.clone(), cx));
-                }
-            }
-            return content.into_any_element();
-        }
-
+        let pinned: Vec<_> = self
+            .conversations
+            .iter()
+            .filter(|item| item.pinned)
+            .collect();
         if !pinned.is_empty() {
             content = content.child(Self::section_label(
                 "Pinned",
@@ -672,6 +551,11 @@ impl SidebarView {
             }
         }
 
+        let recency: Vec<_> = self
+            .conversations
+            .iter()
+            .filter(|item| !item.pinned)
+            .collect();
         let limited_recency: Vec<_> = recency.iter().take(self.recency_limit).copied().collect();
         for period in ConversationPeriod::ALL {
             let grouped: Vec<_> = limited_recency
@@ -694,7 +578,7 @@ impl SidebarView {
                 Button::new("show-more-conversations")
                     .ghost()
                     .w_full()
-                    .h(px(31.))
+                    .h(px(30.))
                     .px(px(8.))
                     .rounded(px(6.))
                     .text_color(cx.theme().muted_foreground)
@@ -703,6 +587,7 @@ impl SidebarView {
             );
         }
 
+        let _ = window;
         content.into_any_element()
     }
 }
@@ -871,16 +756,13 @@ impl SidebarItem for SidebarContent {
 
 impl Render for SidebarView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-        let _ = &self.subscriptions;
         let view = cx.entity();
         Sidebar::new("magenta-sidebar")
             .w(EXPANDED_WIDTH)
-            .collapsible(SidebarCollapsible::Icon)
-            .collapsed(self.collapsed)
-            .header(self.render_header(&view, cx))
+            .collapsible(SidebarCollapsible::None)
             .child(SidebarContent {
                 view: view.clone(),
-                collapsed: self.collapsed,
+                collapsed: false,
             })
             .footer(self.render_footer(view, cx))
     }

@@ -31,6 +31,7 @@ impl ConversationPeriod {
 pub struct ConversationSummary {
     pub id: ConversationId,
     pub title: String,
+    pub updated: String,
     pub period: ConversationPeriod,
     pub pinned: bool,
 }
@@ -50,60 +51,70 @@ pub fn demo_conversations() -> Vec<ConversationSummary> {
         ConversationSummary {
             id: ConversationId(1),
             title: "Designing Magenta's provider boundary".to_owned(),
+            updated: "3d".to_owned(),
             period: ConversationPeriod::PreviousSevenDays,
             pinned: true,
         },
         ConversationSummary {
             id: ConversationId(2),
             title: "Native Markdown rendering".to_owned(),
+            updated: "5d".to_owned(),
             period: ConversationPeriod::PreviousSevenDays,
             pinned: true,
         },
         ConversationSummary {
             id: ConversationId(3),
             title: "Reducing idle memory usage".to_owned(),
+            updated: "2h".to_owned(),
             period: ConversationPeriod::Today,
             pinned: false,
         },
         ConversationSummary {
             id: ConversationId(4),
             title: "Streaming responses in GPUI".to_owned(),
+            updated: "5h".to_owned(),
             period: ConversationPeriod::Today,
             pinned: false,
         },
         ConversationSummary {
             id: ConversationId(5),
             title: "SQLite conversation schema".to_owned(),
+            updated: "1d".to_owned(),
             period: ConversationPeriod::Yesterday,
             pinned: false,
         },
         ConversationSummary {
             id: ConversationId(6),
             title: "Keyboard shortcut map".to_owned(),
+            updated: "1d".to_owned(),
             period: ConversationPeriod::Yesterday,
             pinned: false,
         },
         ConversationSummary {
             id: ConversationId(7),
             title: "Cross-provider model mapping".to_owned(),
+            updated: "3d".to_owned(),
             period: ConversationPeriod::PreviousSevenDays,
             pinned: false,
         },
         ConversationSummary {
             id: ConversationId(8),
             title: "Accessible code blocks".to_owned(),
+            updated: "5d".to_owned(),
             period: ConversationPeriod::PreviousSevenDays,
             pinned: false,
         },
         ConversationSummary {
             id: ConversationId(9),
             title: "Linux window integration".to_owned(),
+            updated: "8d".to_owned(),
             period: ConversationPeriod::Older,
             pinned: false,
         },
         ConversationSummary {
             id: ConversationId(10),
             title: "Conversation persistence boundaries".to_owned(),
+            updated: "12d".to_owned(),
             period: ConversationPeriod::Older,
             pinned: false,
         },
@@ -112,11 +123,13 @@ pub fn demo_conversations() -> Vec<ConversationSummary> {
 
 impl From<magenta_core::ConversationSummary> for ConversationSummary {
     fn from(summary: magenta_core::ConversationSummary) -> Self {
-        let today = chrono::Local::now().date_naive();
-        let date = chrono::DateTime::from_timestamp_millis(summary.updated_at.0)
-            .map(|time| time.with_timezone(&chrono::Local).date_naive());
-        let days = date.map_or(i64::MAX, |date| {
-            today.signed_duration_since(date).num_days()
+        let now = chrono::Local::now();
+        let updated_at = chrono::DateTime::from_timestamp_millis(summary.updated_at.0)
+            .map(|time| time.with_timezone(&chrono::Local));
+        let days = updated_at.as_ref().map_or(i64::MAX, |updated_at| {
+            now.date_naive()
+                .signed_duration_since(updated_at.date_naive())
+                .num_days()
         });
         let period = match days {
             ..=0 => ConversationPeriod::Today,
@@ -124,9 +137,19 @@ impl From<magenta_core::ConversationSummary> for ConversationSummary {
             2..=7 => ConversationPeriod::PreviousSevenDays,
             _ => ConversationPeriod::Older,
         };
+        let elapsed_minutes = updated_at.as_ref().map_or(i64::MAX, |updated_at| {
+            now.signed_duration_since(*updated_at).num_minutes().max(0)
+        });
+        let updated = match elapsed_minutes {
+            0 => "now".to_owned(),
+            1..=59 => format!("{elapsed_minutes}m"),
+            60..=1439 => format!("{}h", elapsed_minutes / 60),
+            _ => format!("{}d", elapsed_minutes / 1_440),
+        };
         Self {
             id: summary.id,
             title: summary.title,
+            updated,
             period,
             pinned: summary.pinned,
         }
