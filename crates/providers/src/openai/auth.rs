@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use url::Url;
 
-use crate::http;
+use super::http;
 
 pub fn openai_provider() -> ProviderId {
     ProviderId::new("openai")

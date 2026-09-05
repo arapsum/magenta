@@ -1,3 +1,8 @@
+mod auth;
+mod http;
+mod sse;
+mod wire;
+
 use std::{sync::Arc, time::Duration};
 
 use futures_util::{
@@ -14,14 +19,13 @@ use reqwest_client::ReqwestClient;
 use serde_json::Value;
 use url::Url;
 
-use crate::{
-    http,
-    openai_auth::{OpenAiAuth, openai_provider},
-    openai_wire::{
+use self::{
+    auth::{OpenAiAuth, openai_provider},
+    sse::EventDecoder,
+    wire::{
         ModelsResponse, ResponseError, ResponsesRequest, StreamEvent, model_descriptors,
         parse_finish_reason, usage,
     },
-    sse::EventDecoder,
 };
 
 const CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
