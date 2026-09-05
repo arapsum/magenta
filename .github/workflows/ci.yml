@@ -54,6 +54,7 @@ jobs:
             clang \
             cmake \
             libasound2-dev \
+            libdbus-1-dev \
             libfontconfig-dev \
             libgit2-dev \
             libglib2.0-dev \
@@ -102,6 +103,7 @@ jobs:
             clang \
             cmake \
             libasound2-dev \
+            libdbus-1-dev \
             libfontconfig-dev \
             libgit2-dev \
             libglib2.0-dev \
