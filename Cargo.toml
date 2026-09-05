@@ -15,9 +15,15 @@ edition = "2024"
 
 [workspace.dependencies]
 anyhow = "1"
+async-lock = "3"
+async-net = "2"
+async-stream = "0.3"
+base64 = "0.22"
 dirs = "6"
 futures-core = "0.3"
-futures-util = "0.3"
+futures-util = { version = "0.3", features = ["io"] }
+http_client = { git = "https://github.com/zed-industries/zed" }
+keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service"] }
 magenta-application = { path = "crates/application" }
 magenta-core = { path = "crates/core" }
 magenta-providers = { path = "crates/providers" }
@@ -30,8 +36,14 @@ gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
 ] }
 gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "49229371e095bfd2ca77d336b5972b16956f0a87" }
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "49229371e095bfd2ca77d336b5972b16956f0a87" }
+reqwest_client = { git = "https://github.com/zed-industries/zed" }
+rand = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
 smol = "2"
 thiserror = "2"
 tracing = "0.1"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"

@@ -9,8 +9,8 @@ use gpui::{
 use gpui::{WindowBackgroundAppearance, WindowDecorations};
 use gpui_component::Root;
 use magenta_application::{RegenerateMessage, SendMessage};
-use magenta_core::ChatProvider;
-use magenta_providers::DemoProvider;
+use magenta_core::{ChatProvider, ModelCatalog, ProviderAuthenticator};
+use magenta_providers::OpenAiProvider;
 
 use magenta_ui::{notification_for_error, MagentaError, MainView, Result};
 
@@ -118,11 +118,23 @@ const fn exit_code(launch_failed: bool) -> ExitCode {
 
 fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     let window_options = main_window_options(cx);
-    let provider: Arc<dyn ChatProvider> = Arc::new(DemoProvider::default());
-    let send_message = SendMessage::new(Arc::clone(&provider));
-    let regenerate_message = RegenerateMessage::new(Arc::clone(&provider));
+    let provider = Arc::new(OpenAiProvider::new());
+    let chat_provider: Arc<dyn ChatProvider> = provider.clone();
+    let authenticator: Arc<dyn ProviderAuthenticator> = provider.clone();
+    let model_catalog: Arc<dyn ModelCatalog> = provider;
+    let send_message = SendMessage::new(Arc::clone(&chat_provider));
+    let regenerate_message = RegenerateMessage::new(Arc::clone(&chat_provider));
     cx.open_window(window_options, move |window, cx| {
-        let main_view = cx.new(|cx| MainView::new(send_message, regenerate_message, window, cx));
+        let main_view = cx.new(|cx| {
+            MainView::new(
+                send_message,
+                regenerate_message,
+                Arc::clone(&authenticator),
+                Arc::clone(&model_catalog),
+                window,
+                cx,
+            )
+        });
         cx.new(|cx| Root::new(main_view, window, cx))
     })
     .map_err(|source| MagentaError::WindowOpen { source })

@@ -5,4 +5,6 @@ edition.workspace = true
 
 [dependencies]
 futures-core.workspace = true
+futures-util.workspace = true
+serde.workspace = true
 thiserror.workspace = true
