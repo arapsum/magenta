@@ -2,7 +2,7 @@ use futures_util::StreamExt as _;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FollowMode, IntoElement,
     ListAlignment, ListSizingBehavior, ListState, ParentElement as _, Render, Styled as _, Task,
-    Window, div, linear_color_stop, linear_gradient, list, prelude::FluentBuilder as _, px, rems,
+    Window, div, list, prelude::FluentBuilder as _, px, rems,
 };
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
@@ -144,10 +144,6 @@ impl ConversationView {
         self.older_cursor = page.older_cursor;
         self.loading_earlier = false;
         cx.notify();
-    }
-
-    pub(crate) const fn conversation(&self) -> Option<&Conversation> {
-        self.conversation.as_ref()
     }
 
     pub(crate) fn new(
@@ -639,11 +635,7 @@ impl ConversationView {
                     .rounded(px(12.))
                     .border_1()
                     .border_color(cx.theme().input.opacity(0.72))
-                    .bg(linear_gradient(
-                        160.,
-                        linear_color_stop(cx.theme().button_hover.opacity(0.68), 0.),
-                        linear_color_stop(cx.theme().button.opacity(0.82), 1.),
-                    ))
+                    .bg(cx.theme().secondary)
                     .text_size(px(13.))
                     .line_height(px(20.))
                     .text_color(cx.theme().foreground)
@@ -677,15 +669,9 @@ impl ConversationView {
             .items_center()
             .gap(px(8.))
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(px(20.))
-                    .rounded_full()
-                    .bg(cx.theme().primary.opacity(0.16))
-                    .text_color(cx.theme().primary)
-                    .child(Icon::new(IconName::Bot).xsmall()),
+                Icon::new(IconName::Bot)
+                    .xsmall()
+                    .text_color(cx.theme().muted_foreground),
             )
             .child(
                 div()
@@ -805,7 +791,6 @@ impl Render for ConversationView {
             .min_w_0()
             .bg(cx.theme().tokens.background.background)
             .text_color(cx.theme().foreground)
-            .child(conversation_ambient_light(cx))
             .when(self.has_older, |this| {
                 this.child(
                     Button::new("load-earlier-messages")
@@ -835,25 +820,11 @@ impl Render for ConversationView {
             )
             .child(
                 div()
-                    .relative()
                     .flex_none()
                     .w_full()
                     .px(px(24.))
                     .pt(px(10.))
                     .pb(px(18.))
-                    .child(
-                        div()
-                            .absolute()
-                            .top(px(-42.))
-                            .left_0()
-                            .right_0()
-                            .h(px(48.))
-                            .bg(linear_gradient(
-                                180.,
-                                linear_color_stop(cx.theme().background.opacity(0.), 0.),
-                                linear_color_stop(cx.theme().background, 1.),
-                            )),
-                    )
                     .child(
                         div()
                             .w_full()
@@ -863,22 +834,6 @@ impl Render for ConversationView {
                     ),
             )
     }
-}
-
-fn conversation_ambient_light(cx: &Context<'_, ConversationView>) -> AnyElement {
-    div()
-        .absolute()
-        .top(px(-170.))
-        .right(px(-90.))
-        .size(px(520.))
-        .rounded_full()
-        .bg(linear_gradient(
-            145.,
-            linear_color_stop(cx.theme().primary.opacity(0.08), 0.),
-            linear_color_stop(cx.theme().background.opacity(0.), 1.),
-        ))
-        .opacity(0.68)
-        .into_any_element()
 }
 
 #[cfg(test)]

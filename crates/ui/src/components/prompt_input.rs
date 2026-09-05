@@ -6,10 +6,10 @@ use std::{
 };
 
 use gpui::{
-    App, AppContext as _, Context, Entity, EventEmitter, Focusable as _, InteractiveElement as _,
-    IntoElement, ObjectFit, ParentElement as _, PathPromptOptions, Render, SharedString,
-    Styled as _, StyledImage as _, Subscription, Task, Window, div, img, linear_color_stop,
-    linear_gradient, prelude::FluentBuilder as _, px, rems,
+    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, Focusable as _,
+    InteractiveElement as _, IntoElement, ObjectFit, ParentElement as _, PathPromptOptions, Render,
+    SharedString, Styled as _, StyledImage as _, Subscription, Task, Window, div, img,
+    prelude::FluentBuilder as _, px, rems,
 };
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt,
@@ -86,7 +86,7 @@ impl PromptComposer {
     pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Message Magenta")
+                .placeholder("Ask anything")
                 .auto_grow(2, 5)
                 .submit_on_enter(true)
         });
@@ -495,7 +495,6 @@ impl PromptComposer {
 
     fn attachment_strip(&self, cx: &Context<'_, Self>) -> impl IntoElement {
         let view = cx.entity();
-        let can_add = self.attachments.len() < MAX_ATTACHMENTS;
 
         h_flex()
             .h(px(36.))
@@ -549,34 +548,37 @@ impl PromptComposer {
                             }),
                     )
             }))
-            .when(can_add, |this| {
-                let add_view = view.clone();
-                this.child(
-                    Button::new("prompt-add-image")
-                        .ghost()
-                        .accessibility_id("prompt-add-image")
-                        .tooltip("Add images")
-                        .size(px(34.))
-                        .p_0()
-                        .rounded(px(7.))
-                        .border_1()
-                        .border_color(cx.theme().border.opacity(0.88))
-                        .bg(cx.theme().muted.opacity(0.72))
-                        .icon(IconName::GalleryVerticalEnd)
-                        .on_click(move |_, window, cx| {
-                            add_view.update(cx, |composer, cx| {
-                                composer.choose_attachments(window, cx);
-                            });
-                        }),
-                )
+    }
+
+    fn attachment_button(&self, cx: &Context<'_, Self>) -> Button {
+        let view = cx.entity();
+
+        Button::new("prompt-add-image")
+            .ghost()
+            .accessibility_id("prompt-add-image")
+            .tooltip("Add photos")
+            .size(px(30.))
+            .p_0()
+            .rounded_full()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().background)
+            .icon(IconName::Plus)
+            .on_click(move |_, window, cx| {
+                view.update(cx, |composer, cx| {
+                    composer.choose_attachments(window, cx);
+                });
             })
     }
 
-    fn model_menu(&self, cx: &Context<'_, Self>) -> impl IntoElement {
+    pub(crate) fn model_selector(&self, view: Entity<Self>, _cx: &App) -> AnyElement {
         let selected_model = self.model.clone();
         let selected_effort = self.effort.clone();
         let models = self.models.clone();
-        let view = cx.entity();
+        let selected_model_id = selected_model.as_ref().map(|model| model.id.clone());
+        let efforts = selected_model
+            .as_ref()
+            .map_or_else(Vec::new, |model| model.supported_efforts.clone());
         let trigger_label: SharedString = match (selected_model.as_ref(), selected_effort.as_ref())
         {
             (None, None) => "Choose model".into(),
@@ -586,10 +588,6 @@ impl PromptComposer {
                 format!("{}  ·  {}", model.display_name, effort.label()).into()
             }
         };
-        let selected_model_id = selected_model.as_ref().map(|model| model.id.clone());
-        let efforts = selected_model
-            .as_ref()
-            .map_or_else(Vec::new, |model| model.supported_efforts.clone());
 
         option_button("prompt-model", trigger_label, IconName::Bot)
             .accessibility_id("prompt-model-and-effort-selector")
@@ -643,6 +641,7 @@ impl PromptComposer {
                     }
                 })
             })
+            .into_any_element()
     }
 
     fn code_preview(&self, cx: &Context<'_, Self>) -> impl IntoElement {
@@ -714,32 +713,33 @@ impl Render for PromptComposer {
         let ready = self.is_ready(cx) && !self.generating;
         let submit_view = cx.entity();
         let generating = self.generating;
+        let can_add_attachment = self.attachments.len() < MAX_ATTACHMENTS;
 
         v_flex()
             .w_full()
-            .min_h(px(112.))
-            .p(px(10.))
-            .gap(px(8.))
+            .max_w(px(608.))
+            .mx_auto()
+            .min_h(px(90.))
+            .p(px(12.))
+            .gap(px(6.))
             .justify_between()
-            .rounded(px(9.))
+            .rounded(px(22.))
             .border_1()
             .border_color(if focused {
-                cx.theme().ring.opacity(0.74)
+                cx.theme().ring.opacity(0.9)
             } else {
-                cx.theme().border.opacity(0.76)
+                cx.theme().border.opacity(0.82)
             })
-            .bg(linear_gradient(
-                145.,
-                linear_color_stop(cx.theme().button.opacity(0.98), 0.),
-                linear_color_stop(cx.theme().secondary.opacity(0.84), 1.),
-            ))
-            .shadow_lg()
+            .bg(cx.theme().popover)
+            .shadow_sm()
             .child(
                 v_flex()
                     .flex_1()
                     .min_h_0()
                     .gap(px(7.))
-                    .child(self.attachment_strip(cx))
+                    .when(!self.attachments.is_empty(), |this| {
+                        this.child(self.attachment_strip(cx))
+                    })
                     .when(!self.preview_source.is_empty(), |this| {
                         this.child(self.code_preview(cx))
                     })
@@ -750,19 +750,21 @@ impl Render for PromptComposer {
                             .aria_label("Chat message composer")
                             .w_full()
                             .flex_1()
-                            .min_h(px(38.))
+                            .min_h(px(30.))
                             .p_0()
-                            .text_size(px(12.))
-                            .line_height(px(18.)),
+                            .text_size(px(14.))
+                            .line_height(px(20.)),
                     ),
             )
             .child(
                 h_flex()
                     .w_full()
+                    .h(px(30.))
                     .items_center()
                     .justify_between()
-                    .gap(px(10.))
-                    .child(h_flex().min_w_0().gap(px(5.)).child(self.model_menu(cx)))
+                    .child(h_flex().items_center().when(can_add_attachment, |this| {
+                        this.child(self.attachment_button(cx))
+                    }))
                     .child(
                         Button::new("prompt-submit")
                             .when(generating, ButtonVariants::secondary)
@@ -780,7 +782,7 @@ impl Render for PromptComposer {
                             } else {
                                 "Add a message before sending"
                             })
-                            .size(px(36.))
+                            .size(px(30.))
                             .p_0()
                             .rounded_full()
                             .icon(if generating {
