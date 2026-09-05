@@ -8,6 +8,7 @@ mod generation;
 mod identifiers;
 mod message;
 mod models;
+mod storage;
 
 pub use auth::{
     AuthenticationFuture, AuthorizationSession, ProviderAccount, ProviderAuthenticator,
@@ -21,3 +22,8 @@ pub use generation::{
 pub use identifiers::{ConversationId, MessageId, ModelId, ProviderId};
 pub use message::{Attachment, Message, MessageRole, MessageStatus};
 pub use models::{ModelCatalog, ModelCatalogFuture, ModelDescriptor};
+pub use storage::{
+    BeginTurn, ConversationPage, ConversationStore, ConversationSummary, MessagePage,
+    MessageSequence, PreparedTurn, StorageError, StorageErrorKind, StorageFuture, StoredMessage,
+    Timestamp,
+};

@@ -18,7 +18,7 @@ impl MessageId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ModelId(pub String);
 
 impl ModelId {
@@ -28,7 +28,7 @@ impl ModelId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ProviderId(pub String);
 
 impl ProviderId {

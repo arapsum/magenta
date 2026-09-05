@@ -1,6 +1,7 @@
 use std::pin::Pin;
 
 use futures_core::Stream;
+use serde::{Deserialize, Serialize};
 
 use super::{
     error::ProviderError,
@@ -8,7 +9,7 @@ use super::{
     message::Message,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EffortLevel {
     None,
     Minimal,
@@ -88,7 +89,7 @@ fn display_label(value: &str) -> String {
         .join(" ")
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GenerationConfig {
     pub provider: ProviderId,
     pub model: ModelId,
@@ -119,7 +120,7 @@ pub enum GenerationEvent {
     Completed(GenerationOutcome),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GenerationOutcome {
     pub finish_reason: FinishReason,
     pub usage: Option<TokenUsage>,
@@ -135,7 +136,7 @@ impl GenerationOutcome {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FinishReason {
     Stop,
     Length,
@@ -144,7 +145,7 @@ pub enum FinishReason {
     Other(String),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
