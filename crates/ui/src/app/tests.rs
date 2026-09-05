@@ -1,9 +1,10 @@
+use parking_lot::Mutex;
 use std::{
     cell::RefCell,
     collections::VecDeque,
     rc::Rc,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
@@ -13,12 +14,13 @@ use gpui_component::Root;
 use magenta_application::{ConversationHistory, RegenerateMessage, SendMessage};
 use magenta_core::*;
 
-use super::{MainView, history::Operation};
+use super::{MainView, OpenConversationFinder, history::Operation};
 
 #[derive(Default)]
 struct TestPorts {
     fail_initialize: AtomicBool,
     fail_save: AtomicBool,
+    summaries: Mutex<Vec<ConversationSummary>>,
     loads: Mutex<VecDeque<StorageFuture<ConversationPage>>>,
     saves: Mutex<Vec<Message>>,
     requests: AtomicUsize,
@@ -42,14 +44,11 @@ impl ConversationStore for TestPorts {
         }
     }
     fn summaries(&self) -> StorageFuture<Vec<ConversationSummary>> {
-        Box::pin(async { Ok(Vec::new()) })
+        let summaries = self.summaries.lock().clone();
+        Box::pin(async move { Ok(summaries) })
     }
     fn load(&self, _: ConversationId) -> StorageFuture<ConversationPage> {
-        self.loads
-            .lock()
-            .unwrap()
-            .pop_front()
-            .unwrap_or_else(failure)
+        self.loads.lock().pop_front().unwrap_or_else(failure)
     }
     fn earlier(&self, _: ConversationId, _: MessageSequence) -> StorageFuture<MessagePage> {
         failure()
@@ -61,7 +60,7 @@ impl ConversationStore for TestPorts {
         failure()
     }
     fn finalize(&self, message: Message) -> StorageFuture<()> {
-        self.saves.lock().unwrap().push(message);
+        self.saves.lock().push(message);
         if self.fail_save.load(Ordering::SeqCst) {
             failure()
         } else {
@@ -117,6 +116,16 @@ fn page(id: u64) -> ConversationPage {
     }
 }
 
+fn summary(id: u64, title: &str) -> ConversationSummary {
+    ConversationSummary {
+        id: ConversationId(id),
+        title: title.to_owned(),
+        pinned: false,
+        created_at: Timestamp(0),
+        updated_at: Timestamp(id as i64),
+    }
+}
+
 fn setup(cx: &mut TestAppContext, ports: Arc<TestPorts>) -> (WindowHandle<Root>, Entity<MainView>) {
     cx.update(gpui_component::init);
     let slot = Rc::new(RefCell::new(None));
@@ -167,12 +176,10 @@ fn stale_and_failed_loads_keep_the_correct_selection(cx: &mut TestAppContext) {
     ports
         .loads
         .lock()
-        .unwrap()
         .push_back(Box::pin(async move { receiver.await.unwrap() }));
     ports
         .loads
         .lock()
-        .unwrap()
         .push_back(Box::pin(async { Ok(page(2)) }));
     let (window, view) = setup(cx, ports);
     cx.run_until_parked();
@@ -261,8 +268,94 @@ fn failed_finalization_retains_response_until_retry_before_navigation(cx: &mut T
         assert!(main.unsaved.is_none());
         assert!(main.active_conversation.is_none());
     });
+    assert_eq!(ports.saves.lock().as_slice(), &[response.clone(), response]);
+}
+#[gpui::test]
+fn finder_filters_persisted_history_and_opens_selected_conversation(cx: &mut TestAppContext) {
+    let ports = Arc::new(TestPorts::default());
+    ports.summaries.lock().extend([
+        summary(1, "Design notes"),
+        summary(2, "Streaming responses"),
+    ]);
+    ports
+        .loads
+        .lock()
+        .push_back(Box::pin(async { Ok(page(2)) }));
+
+    let (window, view) = setup(cx, ports);
+    cx.run_until_parked();
+
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.dispatch_action(OpenConversationFinder);
+    visual.run_until_parked();
+    assert!(view.read_with(cx, |main, _| main.finder_open));
+    visual.simulate_input("responses");
+    visual.run_until_parked();
+
+    let result_bounds = visual
+        .debug_bounds("finder-conversation-2")
+        .expect("the filtered conversation should be rendered");
+    visual.simulate_click(result_bounds.center(), gpui::Modifiers::default());
+    visual.run_until_parked();
+
+    view.read_with(cx, |main, _| {
+        assert!(!main.finder_open);
+        assert_eq!(main.active_conversation, Some(ConversationId(2)));
+    });
+    let sidebar = view.read_with(cx, |main, _| main.sidebar.clone());
     assert_eq!(
-        ports.saves.lock().unwrap().as_slice(),
-        &[response.clone(), response]
+        sidebar.read_with(cx, |sidebar, _| sidebar.active_conversation()),
+        Some(ConversationId(2))
     );
+}
+
+#[gpui::test]
+fn closing_finder_clears_query_without_changing_selection(cx: &mut TestAppContext) {
+    let ports = Arc::new(TestPorts::default());
+    ports.summaries.lock().push(summary(1, "Design notes"));
+
+    let (window, view) = setup(cx, ports);
+    cx.run_until_parked();
+
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.dispatch_action(OpenConversationFinder);
+    visual.run_until_parked();
+    assert!(view.read_with(cx, |main, _| main.finder_open));
+    visual.simulate_input("notes");
+    visual.run_until_parked();
+    visual.simulate_keystrokes("escape");
+    visual.run_until_parked();
+
+    view.read_with(cx, |main, app| {
+        assert!(!main.finder_open);
+        assert!(main.finder_input.read(app).value().is_empty());
+        assert!(main.active_conversation.is_none());
+    });
+}
+
+#[gpui::test]
+fn finder_arrow_navigation_opens_highlighted_conversation(cx: &mut TestAppContext) {
+    let ports = Arc::new(TestPorts::default());
+    ports.summaries.lock().extend([
+        summary(1, "Design notes"),
+        summary(2, "Streaming responses"),
+    ]);
+    ports
+        .loads
+        .lock()
+        .push_back(Box::pin(async { Ok(page(2)) }));
+
+    let (window, view) = setup(cx, ports);
+    cx.run_until_parked();
+
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.dispatch_action(OpenConversationFinder);
+    visual.run_until_parked();
+    visual.simulate_keystrokes("down enter");
+    visual.run_until_parked();
+
+    view.read_with(cx, |main, _| {
+        assert!(!main.finder_open);
+        assert_eq!(main.active_conversation, Some(ConversationId(2)));
+    });
 }

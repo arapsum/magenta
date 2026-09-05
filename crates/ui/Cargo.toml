@@ -17,3 +17,4 @@ tracing.workspace = true
 [dev-dependencies]
 futures-channel.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
+parking_lot.workspace = true

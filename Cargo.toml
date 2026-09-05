@@ -34,6 +34,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 chrono = "0.4"
 tempfile = "3"
 magenta-ui = { path = "crates/ui" }
+parking_lot = "0.12"
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
   "font-kit",
