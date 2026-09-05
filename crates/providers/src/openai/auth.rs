@@ -735,21 +735,21 @@ mod tests {
             .collect::<std::collections::HashMap<_, _>>();
 
         assert_eq!(
-            query.get("client_id").map(|value| value.as_ref()),
+            query.get("client_id").map(std::convert::AsRef::as_ref),
             Some(OAUTH_CLIENT_ID)
         );
         assert_eq!(
-            query.get("redirect_uri").map(|value| value.as_ref()),
+            query.get("redirect_uri").map(std::convert::AsRef::as_ref),
             Some(redirect_uri().as_str())
         );
         assert_eq!(
             query
                 .get("code_challenge_method")
-                .map(|value| value.as_ref()),
+                .map(std::convert::AsRef::as_ref),
             Some("S256")
         );
         assert_eq!(
-            query.get("state").map(|value| value.as_ref()),
+            query.get("state").map(std::convert::AsRef::as_ref),
             Some("state")
         );
         assert!(
@@ -761,7 +761,7 @@ mod tests {
 
     #[test]
     fn token_claims_preserve_account_metadata() {
-        let header = URL_SAFE_NO_PAD.encode(br#"{}"#);
+        let header = URL_SAFE_NO_PAD.encode(br"{}");
         let payload = URL_SAFE_NO_PAD.encode(
             serde_json::to_vec(&serde_json::json!({
                 "https://api.openai.com/profile": {

@@ -55,6 +55,19 @@ enum LoadState<T> {
 
 ## Diagnostics
 
+Conversation storage failures use `StorageError` in `core`, with operation
+errors propagated through the application layer. `MAG-STORAGE-INIT`,
+`MAG-STORAGE-LOAD`, and `MAG-STORAGE-WRITE` provide distinct UI recovery paths.
+Initialization failure disables sending until retry succeeds. A failed read
+keeps the previous selection; a failed response save keeps the visible text
+and blocks navigation until Retry succeeds. Pinning changes appear only after
+their write succeeds.
+
+Storage notifications expose no SQL, paths, or message contents. Storage UI
+logs use stable operation/error codes rather than raw SQLite diagnostics,
+which can contain stored text. Do not connect persistence to streamed text
+delta events: persist turn creation and terminal responses only.
+
 Diagnostics initialize before fallible application setup. Production defaults
 record Magenta information and warnings from GPUI; `RUST_LOG` can increase
 development verbosity. Logs rotate daily with seven files retained in the

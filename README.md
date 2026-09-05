@@ -9,12 +9,10 @@ experience for remote AI providers without turning a chat client into a
 browser tab in a desktop wrapper. Magenta is intended to be fast at idle,
 careful with memory, and pleasant to use for long-lived conversations.
 
-> **Status:** Magenta is in the interface-foundation stage. It does not yet
-> connect to a remote AI provider or persist conversations. The current
-> application is an interactive native shell with in-memory demo conversations
-> and a deterministic provider adapter for shaping the chat experience. The
-> headless application workflows now prepare both send and regeneration
-> operations independently of GPUI.
+> **Status:** Magenta supports ChatGPT sign-in, OpenAI streaming, and local
+> SQLite conversation history. Conversations survive restarts, including their
+> model, effort, pinned state, and completed, stopped, or failed responses.
+> The application remains experimental; Linux is the platform exercised here.
 
 The visual language takes inspiration from the
 [Mogonta AI Chat Workspace UI design](https://dribbble.com/shots/27203662-Mogonta-AI-Chat-Workspace-UI-Design).
@@ -61,30 +59,30 @@ The product is guided by a few constraints:
   bundled theme cannot be loaded.
 - A responsive, collapsible chat sidebar with:
   - New Chat state;
-  - searchable representative conversation history;
+  - searchable persisted conversation titles;
   - pinned conversations and grouped recent history;
-  - local pin/unpin, selection, expansion, and “Show more” interactions;
+  - durable pin/unpin, selection, expansion, and “Show more” interactions;
   - an active-selection bevel that moves from New Chat to the selected
     conversation;
   - a local profile/settings entry point and a theme toggle.
 - Empty workspace with Magenta’s animated glass orb and ambient surface.
-- Native multiline prompt composer with model/effort selection, image
--  attachment validation and previews, a disabled-until-ready submission
-  state, and a circular send/stop control. This remains a UI prototype; it
-  does not make network requests.
-- A conversation surface backed by provider-independent core types and
-  representative in-memory fixtures for every sidebar conversation.
+- Native multiline prompt composer with model-specific effort selection,
+  attachment validation and previews, fenced-code previews, and a circular
+  send/stop control. OpenAI currently accepts text messages only.
+- ChatGPT browser sign-in, OS-keyring credentials, account restoration,
+  model discovery, and real OpenAI response streaming.
+- A conversation surface backed by provider-independent core types and SQLite.
 - Conversation selection, new-thread creation, rich Markdown responses,
-  code-block copy actions, response regeneration, cancellable demo streaming,
-  provider failure handling, and safe local synchronization back into the demo
-  catalog.
+  code-block copy actions, response regeneration, cancellable streaming,
+  provider failure handling, and per-response model attribution.
 - Focused `SendMessage` and `RegenerateMessage` application workflows that
-  validate conversation history, allocate provider-neutral messages, and
-  invoke the provider without depending on GPUI. The UI still owns its
-  transitional in-memory ID allocator while the demo catalog is active.
-- A `ChatProvider` port in `core` with a deterministic `DemoProvider` adapter
-  in `providers`; the UI consumes ordered start, text-delta, and completion
-  events rather than fake response content or provider-specific payloads.
+  commit message turns before invoking the provider, loading complete context
+  from storage independently of the visible message page.
+- `ChatProvider` and `ConversationStore` ports in `core`, implemented by the
+  provider and storage crates. A deterministic `DemoProvider` remains available
+  for tests; production history starts empty.
+- Asynchronous history loading, 50-message pages with “Load earlier messages,”
+  preserved scroll position, and recoverable save failures.
 - Generation completion metadata on assistant messages, including normalized
   finish reasons and optional input/output token usage. GPUI owns the active
   stream task, so cancelling or superseding a response drops the stream and
@@ -96,15 +94,13 @@ The product is guided by a few constraints:
 
 ## Not implemented yet
 
-- Remote provider integrations or model discovery.
-- Remote provider streaming, cancellation, retry, and usage accounting.
-- SQLite conversation persistence, search indexing, or pagination.
-- Secure credential storage.
-- Durable conversation create, rename, delete, and search workflows.
+- Additional provider integrations.
+- Full-text search indexing and automatic context-budget management.
+- Conversation rename and delete workflows.
 - Attachment rendering and persistence beyond the present composer prototype.
-- Rich provider events such as reasoning, tool calls, citations, and usage.
+- Rich provider events such as reasoning, tool calls, and citations.
 
-## Planned architecture
+## Architecture
 
 The workspace intentionally starts small:
 
@@ -113,8 +109,9 @@ crates/
 ├── application # headless application workflows such as sending a message
 ├── core        # provider-independent values, ports, events, and errors
 ├── desktop     # executable, diagnostics, platform/window composition
-├── providers   # provider adapters; currently the deterministic demo provider
-└── ui          # GPUI app shell, components, themes, and demo views
+├── providers   # OpenAI adapter and deterministic test provider
+├── storage     # SQLite adapter, migrations, and record conversion
+└── ui          # GPUI app shell, components, themes, and active conversation
 ```
 
 The current dependency direction is intentionally small:
@@ -125,21 +122,44 @@ desktop
 │   └── core
 ├── providers
 │   └── core
+├── storage
+│   └── core
 └── ui
     ├── application
     │   └── core
     └── core
 ```
 
-The demo conversation catalog and its transitional ID allocator currently live
-in `ui` so the interaction can be designed with fake data. The provider port
-and generation events live in `core`, while `providers` owns the deterministic
-adapter that supplies the current local stream. The `application` crate now
-owns provider-facing preparation for both sending and regenerating messages:
-it receives domain values, returns a pending generation, and leaves stream
-lifecycle, cancellation, stale-result rejection, and rendering to the UI.
-Future storage and remote-provider adapters will depend on `core`; `core` must
-not depend on GPUI, HTTP, SQLite, or a specific model API.
+`desktop` constructs the adapters and injects them into application workflows.
+`application` coordinates durable turns and provider requests; `ui` owns stream
+lifecycle, cancellation, loaded pages, and rendering. SQLite allocates IDs and
+message sequences. `core` has no dependency on GPUI, HTTP, or SQLite.
+
+## Local conversation history
+
+History is stored at `<platform-local-data>/magenta/conversations.sqlite3`.
+On Linux this is normally `~/.local/share/magenta/conversations.sqlite3`, with
+`XDG_DATA_HOME` respected. The database contains plaintext message content,
+generation configuration, usage metadata, timestamps, pins, and attachment
+references. Credentials remain in the OS keyring. Attachment references do not
+copy or preserve the original files, and missing files do not block loading.
+
+SQLite uses bundled native libraries, WAL mode, foreign keys, a five-second
+busy timeout, and transactional schema migrations. Blocking database work runs
+off the GPUI thread. A send commits the user message and an assistant placeholder
+before the provider starts. Completion, stop, and failure each save the final
+response; individual streamed chunks do not cause database writes.
+
+Normal window closure waits for a pending response save. After an abrupt exit,
+unfinished placeholders recover as stopped; text streamed since the turn began
+may be lost. Failed saves retain the visible response and offer Retry before
+navigation. Existing in-memory demo history is not imported.
+
+The sidebar loads lightweight summaries and filters titles locally. Opening a
+thread loads its latest 50 messages. Earlier pages load on demand, and leaving a
+thread releases its rendered messages. Provider context currently includes all
+completed messages preceding the response, even when they are outside the
+loaded page; token-budget truncation and page eviction are future work.
 
 ## Requirements
 
@@ -225,11 +245,10 @@ recovery, privacy, and asynchronous-work conventions.
 
 ## Roadmap
 
-1. Complete visual and keyboard/accessibility QA for the conversation surface.
-2. Implement one streaming remote provider behind the existing, contract-tested port.
-3. Add local SQLite persistence with a lightweight conversation index and
-   paged message loading.
-4. Add provider settings, secure credential storage, and durable attachments.
+1. Continue visual and keyboard/accessibility QA for the conversation surface.
+2. Add conversation rename/delete and full-text history search.
+3. Bound provider context and evict distant loaded message pages.
+4. Add durable attachments and additional providers.
 
 ## Contributing
 

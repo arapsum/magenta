@@ -3,7 +3,7 @@ use magenta_core::{
     ChatProvider, GenerationEvent, GenerationOutcome, GenerationRequest, ProviderError,
 };
 
-pub(crate) fn assert_success_contract(
+pub fn assert_success_contract(
     provider: &dyn ChatProvider,
     request: GenerationRequest,
     expected_text: &str,
@@ -36,7 +36,7 @@ pub(crate) fn assert_success_contract(
     outcome.expect("a successful stream must complete exactly once")
 }
 
-pub(crate) fn assert_failure_contract(
+pub fn assert_failure_contract(
     provider: &dyn ChatProvider,
     request: GenerationRequest,
 ) -> ProviderError {
