@@ -505,14 +505,14 @@ impl ConversationView {
     }
 
     fn render_assistant_header(&self, message: &Message, cx: &App) -> AnyElement {
-        let model_label = self
-            .conversation
-            .as_ref()
-            .map_or("Model", |conversation| chat_model_for(conversation).label());
+        let model_label = self.conversation.as_ref().map_or_else(
+            || "Model".to_owned(),
+            |conversation| conversation.generation.model.0.clone(),
+        );
         let label = match message.status {
             MessageStatus::Stopped => format!("{model_label} · stopped"),
             MessageStatus::Failed => format!("{model_label} · failed"),
-            MessageStatus::Complete | MessageStatus::Streaming => model_label.to_owned(),
+            MessageStatus::Complete | MessageStatus::Streaming => model_label,
         };
 
         h_flex()

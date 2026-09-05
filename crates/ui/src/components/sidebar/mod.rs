@@ -14,6 +14,7 @@ use gpui_component::{
     sidebar::{Sidebar, SidebarCollapsible, SidebarItem},
     v_flex,
 };
+use magenta_core::ProviderAccount;
 
 use crate::theme;
 
@@ -32,6 +33,7 @@ pub struct SidebarView {
     search: Entity<InputState>,
     conversations: Vec<ConversationSummary>,
     active_conversation: Option<ConversationId>,
+    account: Option<ProviderAccount>,
     pinned_expanded: bool,
     recency_limit: usize,
     subscriptions: Vec<Subscription>,
@@ -55,6 +57,7 @@ impl SidebarView {
             search,
             conversations: demo_conversations(),
             active_conversation: None,
+            account: None,
             pinned_expanded: true,
             recency_limit: INITIAL_RECENCY_LIMIT,
             subscriptions,
@@ -90,6 +93,15 @@ impl SidebarView {
         self.conversations.insert(0, conversation);
         self.active_conversation = Some(id);
         self.recency_limit = INITIAL_RECENCY_LIMIT;
+        cx.notify();
+    }
+
+    pub(crate) fn set_account(
+        &mut self,
+        account: Option<ProviderAccount>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.account = account;
         cx.notify();
     }
 
@@ -176,6 +188,12 @@ impl SidebarView {
 
     fn render_footer(&self, view: Entity<Self>, cx: &App) -> AnyElement {
         let settings_view = view.clone();
+        let ProfileDetails {
+            name,
+            detail,
+            initial,
+            tooltip,
+        } = profile_details(self.account.as_ref());
         let theme_icon = if cx.theme().is_dark() {
             IconName::Sun
         } else {
@@ -199,8 +217,8 @@ impl SidebarView {
                         .rounded_full()
                         .bg(cx.theme().primary.opacity(0.18))
                         .text_color(cx.theme().primary)
-                        .label("A")
-                        .tooltip("Local profile and settings")
+                        .label(initial)
+                        .tooltip(tooltip)
                         .on_click(move |_, _, cx| {
                             settings_view.update(cx, |_, cx| Self::open_settings(cx));
                         }),
@@ -226,8 +244,8 @@ impl SidebarView {
                     .rounded_full()
                     .bg(cx.theme().primary.opacity(0.24))
                     .text_color(cx.theme().primary)
-                    .label("A")
-                    .tooltip("Local profile and settings")
+                    .label(initial)
+                    .tooltip(tooltip)
                     .on_click(move |_, _, cx| {
                         settings_view.update(cx, |_, cx| Self::open_settings(cx));
                     }),
@@ -237,12 +255,23 @@ impl SidebarView {
                     .flex_1()
                     .min_w_0()
                     .gap(px(1.))
-                    .child(div().text_size(px(12.)).font_medium().child("Adleio"))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .font_medium()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .child(name),
+                    )
                     .child(
                         div()
                             .text_size(px(10.))
                             .text_color(cx.theme().muted_foreground)
-                            .child("Local profile"),
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .child(detail),
                     ),
             )
             .child(
@@ -622,6 +651,131 @@ impl SidebarView {
         }
 
         content.into_any_element()
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ProfileDetails {
+    name: String,
+    detail: String,
+    initial: String,
+    tooltip: String,
+}
+
+fn profile_details(account: Option<&ProviderAccount>) -> ProfileDetails {
+    let Some(account) = account else {
+        return ProfileDetails {
+            name: "Adleio".to_owned(),
+            detail: "Local profile".to_owned(),
+            initial: "A".to_owned(),
+            tooltip: "Local profile and settings".to_owned(),
+        };
+    };
+
+    let name = account
+        .name
+        .clone()
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .or_else(|| account.email.as_deref().and_then(email_display_name))
+        .or_else(|| account.email.clone())
+        .unwrap_or_else(|| "ChatGPT account".to_owned());
+    let detail = account
+        .email
+        .clone()
+        .or_else(|| account.plan.clone())
+        .unwrap_or_else(|| "OpenAI account".to_owned());
+    let initial = name.chars().next().map_or_else(
+        || "O".to_owned(),
+        |character| character.to_uppercase().collect(),
+    );
+    let tooltip = account.email.clone().map_or_else(
+        || "OpenAI account and settings".to_owned(),
+        |email| format!("{name} · {email}"),
+    );
+
+    ProfileDetails {
+        name,
+        detail,
+        initial,
+        tooltip,
+    }
+}
+
+fn email_display_name(email: &str) -> Option<String> {
+    let local_part = email.split('@').next()?.trim();
+    let parts = local_part
+        .split(['.', '_', '-'])
+        .filter(|part| !part.is_empty())
+        .map(capitalize)
+        .collect::<Vec<_>>();
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
+fn capitalize(value: &str) -> String {
+    let mut characters = value.chars();
+    let Some(first) = characters.next() else {
+        return String::new();
+    };
+
+    let mut capitalized = first.to_uppercase().collect::<String>();
+    capitalized.push_str(characters.as_str());
+    capitalized
+}
+
+#[cfg(test)]
+mod tests {
+    use magenta_core::{ProviderAccount, ProviderId};
+
+    use super::{ProfileDetails, profile_details};
+
+    #[test]
+    fn signed_out_profile_keeps_the_local_fallback() {
+        assert_eq!(
+            profile_details(None),
+            ProfileDetails {
+                name: "Adleio".to_owned(),
+                detail: "Local profile".to_owned(),
+                initial: "A".to_owned(),
+                tooltip: "Local profile and settings".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn connected_profile_uses_name_email_and_initial() {
+        let account = ProviderAccount {
+            provider: ProviderId::new("openai"),
+            name: Some("Jacob Cooper".to_owned()),
+            email: Some("jacob@example.com".to_owned()),
+            plan: Some("plus".to_owned()),
+        };
+
+        assert_eq!(
+            profile_details(Some(&account)),
+            ProfileDetails {
+                name: "Jacob Cooper".to_owned(),
+                detail: "jacob@example.com".to_owned(),
+                initial: "J".to_owned(),
+                tooltip: "Jacob Cooper · jacob@example.com".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn connected_profile_derives_a_friendly_name_when_claims_have_no_name() {
+        let account = ProviderAccount {
+            provider: ProviderId::new("openai"),
+            name: None,
+            email: Some("jacob.cooper@example.com".to_owned()),
+            plan: Some("plus".to_owned()),
+        };
+
+        let details = profile_details(Some(&account));
+
+        assert_eq!(details.name, "Jacob Cooper");
+        assert_eq!(details.detail, "jacob.cooper@example.com");
+        assert_eq!(details.initial, "J");
     }
 }
 

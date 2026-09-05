@@ -1,11 +1,8 @@
+use crate::components::sidebar::{ConversationPeriod, ConversationSummary};
 use magenta_application::MessageIds;
 use magenta_core::{
-    Conversation, ConversationId, EffortLevel, Message, MessageId, MessageRole, MessageStatus,
-};
-
-use crate::components::{
-    prompt_input::ChatModel,
-    sidebar::{ConversationPeriod, ConversationSummary},
+    Conversation, ConversationId, EffortLevel, GenerationConfig, Message, MessageId, MessageRole,
+    MessageStatus, ModelId, ProviderId,
 };
 
 #[derive(Clone, Debug)]
@@ -30,12 +27,11 @@ impl DemoCatalog {
             .into_iter()
             .enumerate()
             .map(|(index, summary)| {
-                let model = demo_model(index);
                 let effort = demo_effort(index);
                 let conversation = Conversation {
                     id: summary.id,
                     title: summary.title,
-                    generation: model.generation_config(effort),
+                    generation: demo_generation(index, effort),
                 };
                 let messages = fixture_messages(
                     conversation.id,
@@ -114,11 +110,6 @@ pub fn summary_for(conversation: &Conversation) -> ConversationSummary {
     }
 }
 
-#[must_use]
-pub fn chat_model_for(conversation: &Conversation) -> ChatModel {
-    ChatModel::from_generation(&conversation.generation)
-}
-
 fn fixture_messages(
     conversation_id: ConversationId,
     title: &str,
@@ -190,12 +181,13 @@ fn fixture_response(title: &str, index: usize) -> String {
     }
 }
 
-const fn demo_model(index: usize) -> ChatModel {
-    match index % 3 {
-        0 => ChatModel::Sonnet,
-        1 => ChatModel::Gpt,
-        _ => ChatModel::GeminiPro,
-    }
+fn demo_generation(index: usize, effort: EffortLevel) -> GenerationConfig {
+    let model = match index % 3 {
+        0 => "gpt-5.4",
+        1 => "gpt-5.3-codex",
+        _ => "gpt-5-mini",
+    };
+    GenerationConfig::new(ProviderId::new("openai"), ModelId::new(model), effort)
 }
 
 const fn demo_effort(index: usize) -> EffortLevel {

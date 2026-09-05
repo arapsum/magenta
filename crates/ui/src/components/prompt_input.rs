@@ -23,65 +23,11 @@ use gpui_component::{
     v_flex,
 };
 
-use magenta_core::{EffortLevel, GenerationConfig, ModelId, ProviderId};
+use magenta_core::{EffortLevel, GenerationConfig, ModelDescriptor};
 
 use crate::{MagentaError, components::code_fence, notification_for_error};
 
 const MAX_ATTACHMENTS: usize = 4;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ChatModel {
-    Sonnet,
-    Gpt,
-    GeminiPro,
-}
-
-impl ChatModel {
-    const ALL: [Self; 3] = [Self::Sonnet, Self::Gpt, Self::GeminiPro];
-
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Sonnet => "Sonnet",
-            Self::Gpt => "GPT",
-            Self::GeminiPro => "Gemini Pro",
-        }
-    }
-
-    pub(crate) const fn id(self) -> &'static str {
-        match self {
-            Self::Sonnet => "sonnet",
-            Self::Gpt => "gpt",
-            Self::GeminiPro => "gemini-pro",
-        }
-    }
-
-    const fn provider_id(self) -> &'static str {
-        match self {
-            Self::Sonnet => "anthropic",
-            Self::Gpt => "openai",
-            Self::GeminiPro => "google",
-        }
-    }
-
-    pub(crate) fn generation_config(self, effort: EffortLevel) -> GenerationConfig {
-        GenerationConfig::new(
-            ProviderId::new(self.provider_id()),
-            ModelId::new(self.id()),
-            effort,
-        )
-    }
-
-    pub(crate) fn from_generation(configuration: &GenerationConfig) -> Self {
-        match (
-            configuration.provider.0.as_str(),
-            configuration.model.0.as_str(),
-        ) {
-            ("openai", "gpt") => Self::Gpt,
-            ("google", "gemini-pro") => Self::GeminiPro,
-            _ => Self::Sonnet,
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ReferenceImage {
@@ -124,7 +70,8 @@ pub struct PromptComposer {
     preview: Entity<TextViewState>,
     preview_source: String,
     preview_line_count: usize,
-    model: Option<ChatModel>,
+    models: Vec<ModelDescriptor>,
+    model: Option<ModelDescriptor>,
     effort: Option<EffortLevel>,
     generating: bool,
     attachments: Vec<ReferenceImage>,
@@ -162,8 +109,9 @@ impl PromptComposer {
             preview,
             preview_source: String::new(),
             preview_line_count: 0,
-            model: Some(ChatModel::Sonnet),
-            effort: Some(EffortLevel::Medium),
+            models: Vec::new(),
+            model: None,
+            effort: None,
             generating: false,
             attachments: Vec::new(),
             attachment_task: None,
@@ -182,8 +130,61 @@ impl PromptComposer {
         configuration: &GenerationConfig,
         cx: &mut Context<'_, Self>,
     ) {
-        self.model = Some(ChatModel::from_generation(configuration));
-        self.effort = Some(configuration.effort);
+        let model = self
+            .models
+            .iter()
+            .find(|model| {
+                model.provider.eq(&configuration.provider) && model.id.eq(&configuration.model)
+            })
+            .cloned()
+            .or_else(|| self.models.first().cloned())
+            .unwrap_or_else(|| ModelDescriptor {
+                provider: configuration.provider.clone(),
+                id: configuration.model.clone(),
+                display_name: configuration.model.0.clone(),
+                description: None,
+                priority: 0,
+                default_effort: configuration.effort.clone(),
+                supported_efforts: EffortLevel::ALL.to_vec(),
+            });
+        let uses_requested_model = if model.provider == configuration.provider {
+            model.id == configuration.model
+        } else {
+            false
+        };
+        self.effort = model
+            .supported_efforts
+            .contains(&configuration.effort)
+            .then_some(configuration.effort.clone())
+            .filter(|_| uses_requested_model)
+            .or_else(|| Some(model.default_effort.clone()));
+        self.model = Some(model);
+        cx.notify();
+    }
+
+    pub(crate) fn selected_configuration(&self) -> Option<GenerationConfig> {
+        Some(GenerationConfig::new(
+            self.model.as_ref()?.provider.clone(),
+            self.model.as_ref()?.id.clone(),
+            self.effort.clone()?,
+        ))
+    }
+
+    pub(crate) fn set_models(&mut self, models: Vec<ModelDescriptor>, cx: &mut Context<'_, Self>) {
+        let selected = self.model.as_ref().and_then(|selected| {
+            models
+                .iter()
+                .find(|model| model.provider == selected.provider && model.id == selected.id)
+                .cloned()
+        });
+        self.models = models;
+        self.model = selected.or_else(|| self.models.first().cloned());
+        let current_effort = self.effort.clone();
+        self.effort = self.model.as_ref().map(|model| {
+            current_effort
+                .filter(|effort| model.supported_efforts.contains(effort))
+                .unwrap_or_else(|| model.default_effort.clone())
+        });
         cx.notify();
     }
 
@@ -295,15 +296,21 @@ impl PromptComposer {
         self.has_content(cx) && self.model.is_some() && self.effort.is_some()
     }
 
-    fn select_model(&mut self, model: ChatModel, cx: &mut Context<'_, Self>) {
-        if self.model != Some(model) {
+    fn select_model(&mut self, model: ModelDescriptor, cx: &mut Context<'_, Self>) {
+        if self.model.as_ref() != Some(&model) {
+            self.effort = Some(model.default_effort.clone());
             self.model = Some(model);
             cx.notify();
         }
     }
 
     fn select_effort(&mut self, effort: EffortLevel, cx: &mut Context<'_, Self>) {
-        if self.effort != Some(effort) {
+        if self
+            .model
+            .as_ref()
+            .is_some_and(|model| model.supported_efforts.contains(&effort))
+            && self.effort.as_ref() != Some(&effort)
+        {
             self.effort = Some(effort);
             cx.notify();
         }
@@ -439,11 +446,11 @@ impl PromptComposer {
             return None;
         }
 
-        let model = self.model?;
-        let effort = self.effort?;
+        let model = self.model.as_ref()?;
+        let effort = self.effort.clone()?;
         Some(PromptRequest {
             prompt: self.input.read(cx).value().trim().to_owned().into(),
-            generation: model.generation_config(effort),
+            generation: GenerationConfig::new(model.provider.clone(), model.id.clone(), effort),
             attachments: self
                 .attachments
                 .iter()
@@ -550,32 +557,39 @@ impl PromptComposer {
     }
 
     fn model_menu(&self, cx: &Context<'_, Self>) -> impl IntoElement {
-        let selected_model = self.model;
-        let selected_effort = self.effort;
+        let selected_model = self.model.clone();
+        let selected_effort = self.effort.clone();
+        let models = self.models.clone();
         let view = cx.entity();
-        let trigger_label: SharedString = match (selected_model, selected_effort) {
+        let trigger_label: SharedString = match (selected_model.as_ref(), selected_effort.as_ref())
+        {
             (None, None) => "Choose model".into(),
-            (Some(model), None) => format!("{}  ·  Choose effort", model.label()).into(),
+            (Some(model), None) => format!("{}  ·  Choose effort", model.display_name).into(),
             (None, Some(effort)) => format!("Choose model  ·  {}", effort.label()).into(),
             (Some(model), Some(effort)) => {
-                format!("{}  ·  {}", model.label(), effort.label()).into()
+                format!("{}  ·  {}", model.display_name, effort.label()).into()
             }
         };
+        let selected_model_id = selected_model.as_ref().map(|model| model.id.clone());
+        let efforts = selected_model
+            .as_ref()
+            .map_or_else(Vec::new, |model| model.supported_efforts.clone());
 
         option_button("prompt-model", trigger_label, IconName::Bot)
             .accessibility_id("prompt-model-and-effort-selector")
             .dropdown_menu(move |menu, window, cx| {
-                let menu = ChatModel::ALL.into_iter().fold(
-                    menu.min_w(px(210.)).label("Models"),
+                let menu = models.clone().into_iter().fold(
+                    menu.min_w(px(230.)).label("Models"),
                     |menu, model| {
                         let select_view = view.clone();
+                        let model_for_click = model.clone();
                         menu.item(
-                            PopupMenuItem::new(model.label())
-                                .checked(selected_model == Some(model))
+                            PopupMenuItem::new(model.display_name.clone())
+                                .checked(selected_model_id.as_ref() == Some(&model.id))
                                 .on_click(window.listener_for(
                                     &select_view,
                                     move |composer, _, _, cx| {
-                                        composer.select_model(model, cx);
+                                        composer.select_model(model_for_click.clone(), cx);
                                     },
                                 )),
                         )
@@ -583,30 +597,35 @@ impl PromptComposer {
                 );
 
                 let effort_view = view.clone();
-                let effort_label = selected_effort.map_or_else(
+                let effort_label = selected_effort.as_ref().map_or_else(
                     || "Effort".to_owned(),
                     |effort| format!("Effort  ·  {}", effort.label()),
                 );
 
-                menu.separator()
-                    .submenu(effort_label, window, cx, move |menu, window, _| {
-                        EffortLevel::ALL.into_iter().fold(
+                menu.separator().submenu(effort_label, window, cx, {
+                    let efforts = efforts.clone();
+                    let selected_effort = selected_effort.clone();
+                    move |menu, window, _| {
+                        efforts.clone().into_iter().fold(
                             menu.min_w(px(150.)).label("Effort level"),
                             |menu, effort| {
                                 let select_view = effort_view.clone();
+                                let effort_for_click = effort.clone();
                                 menu.item(
                                     PopupMenuItem::new(effort.label())
-                                        .checked(selected_effort == Some(effort))
+                                        .checked(selected_effort.as_ref() == Some(&effort))
                                         .on_click(window.listener_for(
                                             &select_view,
                                             move |composer, _, _, cx| {
-                                                composer.select_effort(effort, cx);
+                                                composer
+                                                    .select_effort(effort_for_click.clone(), cx);
                                             },
                                         )),
                                 )
                             },
                         )
-                    })
+                    }
+                })
             })
     }
 
@@ -795,6 +814,18 @@ mod tests {
 
     use super::*;
 
+    fn model(id: &str, default_effort: EffortLevel) -> ModelDescriptor {
+        ModelDescriptor {
+            provider: magenta_core::ProviderId::new("openai"),
+            id: magenta_core::ModelId::new(id),
+            display_name: id.to_owned(),
+            description: None,
+            priority: 0,
+            default_effort,
+            supported_efforts: EffortLevel::ALL.to_vec(),
+        }
+    }
+
     #[test]
     fn supported_image_extensions_are_case_insensitive() {
         assert!(is_supported_image(std::path::Path::new("reference.PNG")));
@@ -816,7 +847,9 @@ mod tests {
                 composer.input.update(cx, |input, cx| {
                     input.set_value("   ", window, cx);
                 });
-                composer.select_model(ChatModel::Sonnet, cx);
+                let model = model("gpt-5.4", EffortLevel::Medium);
+                composer.set_models(vec![model.clone()], cx);
+                composer.select_model(model, cx);
                 composer.select_effort(EffortLevel::Medium, cx);
                 assert!(!composer.is_ready(cx));
 
@@ -838,13 +871,21 @@ mod tests {
                 composer.input.update(cx, |input, cx| {
                     input.set_value("  A quiet cyan horizon  ", window, cx);
                 });
-                composer.select_model(ChatModel::GeminiPro, cx);
+                let model = model("gpt-5.4", EffortLevel::High);
+                composer.set_models(vec![model.clone()], cx);
+                composer.select_model(model, cx);
                 composer.select_effort(EffortLevel::High, cx);
 
                 let request = composer.request(cx).expect("the request should be ready");
                 assert_eq!(request.prompt.as_ref(), "A quiet cyan horizon");
-                assert_eq!(request.generation.provider, ProviderId::new("google"));
-                assert_eq!(request.generation.model, ModelId::new("gemini-pro"));
+                assert_eq!(
+                    request.generation.provider,
+                    magenta_core::ProviderId::new("openai")
+                );
+                assert_eq!(
+                    request.generation.model,
+                    magenta_core::ModelId::new("gpt-5.4")
+                );
                 assert_eq!(request.generation.effort, EffortLevel::High);
                 assert!(request.attachments.is_empty());
             })
@@ -853,25 +894,75 @@ mod tests {
 
     #[test]
     fn model_options_round_trip_through_core_generation_configuration() {
-        for model in ChatModel::ALL {
-            let configuration = model.generation_config(EffortLevel::Medium);
+        let model = model("gpt-5.4", EffortLevel::Medium);
+        let configuration = GenerationConfig::new(
+            model.provider.clone(),
+            model.id.clone(),
+            EffortLevel::Medium,
+        );
 
-            assert_eq!(ChatModel::from_generation(&configuration), model);
-            assert_eq!(configuration.effort, EffortLevel::Medium);
-        }
+        assert_eq!(
+            configuration.provider,
+            magenta_core::ProviderId::new("openai")
+        );
+        assert_eq!(configuration.model, magenta_core::ModelId::new("gpt-5.4"));
+        assert_eq!(configuration.effort, EffortLevel::Medium);
+    }
+
+    #[gpui::test]
+    fn selecting_a_model_uses_only_its_advertised_efforts(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let window = cx.open_window(size(px(720.), px(420.)), PromptComposer::new);
+        let openai = ModelDescriptor {
+            supported_efforts: vec![EffortLevel::Low, EffortLevel::Medium, EffortLevel::XHigh],
+            default_effort: EffortLevel::XHigh,
+            ..model("gpt-5.6-luna", EffortLevel::Medium)
+        };
+        let gemini_effort = EffortLevel::from_wire("thinking_budget")
+            .expect("provider-specific effort should be valid");
+        let gemini = ModelDescriptor {
+            provider: magenta_core::ProviderId::new("gemini"),
+            id: magenta_core::ModelId::new("gemini-2.5-pro"),
+            display_name: "Gemini Pro".to_owned(),
+            description: None,
+            priority: 0,
+            default_effort: gemini_effort.clone(),
+            supported_efforts: vec![gemini_effort.clone()],
+        };
+
+        window
+            .update(cx, |composer, _, cx| {
+                composer.set_models(vec![openai.clone(), gemini.clone()], cx);
+                composer.select_model(openai, cx);
+                composer.select_effort(EffortLevel::XHigh, cx);
+                assert_eq!(composer.effort, Some(EffortLevel::XHigh));
+
+                composer.select_model(gemini, cx);
+
+                assert_eq!(composer.effort, Some(gemini_effort));
+            })
+            .expect("the composer test window should remain open");
     }
 
     #[gpui::test]
     fn core_configuration_restores_the_composer_selection(cx: &mut TestAppContext) {
         cx.update(gpui_component::init);
         let window = cx.open_window(size(px(720.), px(420.)), PromptComposer::new);
-        let configuration = ChatModel::Gpt.generation_config(EffortLevel::High);
+        let configuration = GenerationConfig::new(
+            magenta_core::ProviderId::new("openai"),
+            magenta_core::ModelId::new("gpt-5.4"),
+            EffortLevel::High,
+        );
 
         window
             .update(cx, |composer, _, cx| {
+                composer.set_models(vec![model("gpt-5.4", EffortLevel::Medium)], cx);
                 composer.set_configuration(&configuration, cx);
 
-                assert_eq!(composer.model, Some(ChatModel::Gpt));
+                assert_eq!(
+                    composer.model.as_ref().map(|model| &model.id),
+                    Some(&configuration.model)
+                );
                 assert_eq!(composer.effort, Some(EffortLevel::High));
             })
             .expect("the composer test window should remain open");
