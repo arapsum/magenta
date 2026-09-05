@@ -5,7 +5,7 @@ use magenta_application::{
 };
 use magenta_core::{Attachment, ConversationId, Message, MessageId, MessageStatus};
 
-use super::{AccountState, MainView};
+use super::{AccountState, CloseState, MainView, PanelState, StorageState};
 use crate::{
     MagentaError,
     components::{conversation::ConversationThread, prompt_input::PromptRequest},
@@ -44,12 +44,12 @@ impl MainView {
                 main.history_task = None;
                 match result {
                     Ok(summaries) => {
-                        main.storage_ready = true;
+                        main.storage_ready = StorageState::Ready;
                         main.sidebar
                             .update(cx, |sidebar, cx| sidebar.set_history(summaries, cx));
                     }
                     Err(source) => {
-                        main.storage_ready = false;
+                        main.storage_ready = StorageState::Failed;
                         main.sidebar
                             .update(cx, |sidebar, cx| sidebar.set_history_loading(true, cx));
                         Self::present_storage_error(
@@ -91,7 +91,7 @@ impl MainView {
         window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if !self.storage_ready {
+        if !self.storage_ready.is_ready() {
             return;
         }
         self.deferred_navigation = Some(id.map_or(Navigation::New, Navigation::Conversation));
@@ -205,7 +205,7 @@ impl MainView {
         cx: &mut Context<'_, Self>,
     ) {
         if !matches!(self.account_state, AccountState::Connected(_)) {
-            self.account_panel_open = true;
+            self.account_panel_open = PanelState::Open;
             cx.notify();
             return;
         }
@@ -299,7 +299,7 @@ impl MainView {
             );
         });
         self.refresh_summaries(window, cx);
-        if self.deferred_navigation.is_some() || self.close_requested {
+        if self.deferred_navigation.is_some() || self.close_requested.is_requested() {
             self.cancel_generation(cx);
         }
     }
@@ -341,7 +341,8 @@ impl MainView {
                                 cx,
                             );
                         });
-                        if main.deferred_navigation.is_some() || main.close_requested {
+                        if main.deferred_navigation.is_some() || main.close_requested.is_requested()
+                        {
                             main.cancel_generation(cx);
                         }
                     }
@@ -386,12 +387,12 @@ impl MainView {
                         main.unsaved = None;
                         main.refresh_summaries(window, cx);
                         main.continue_navigation(window, cx);
-                        if main.close_requested {
+                        if main.close_requested.is_requested() {
                             window.remove_window();
                         }
                     }
                     Err(source) => {
-                        main.close_requested = false;
+                        main.close_requested = CloseState::Open;
                         Self::present_storage_error(
                             &MagentaError::StorageWrite { source },
                             window,
@@ -442,7 +443,7 @@ impl MainView {
                 }
                 main.continue_navigation(window, cx);
                 main.update_composer_availability(cx);
-                if main.close_requested {
+                if main.close_requested.is_requested() {
                     window.remove_window();
                 }
             });
@@ -450,7 +451,7 @@ impl MainView {
     }
 
     fn can_write(&self, cx: &Context<'_, Self>) -> bool {
-        self.storage_ready
+        self.storage_ready.is_ready()
             && self.operation == Operation::Idle
             && self.unsaved.is_none()
             && self.loading_conversation.is_none()
@@ -472,12 +473,12 @@ impl MainView {
             return false;
         }
         if self.conversation.read(cx).is_streaming() {
-            self.close_requested = true;
+            self.close_requested = CloseState::Requested;
             self.cancel_generation(cx);
             return false;
         }
         if self.operation != Operation::Idle {
-            self.close_requested = true;
+            self.close_requested = CloseState::Requested;
             return false;
         }
         true

@@ -14,7 +14,7 @@ use gpui_component::Root;
 use magenta_application::{ConversationHistory, RegenerateMessage, SendMessage};
 use magenta_core::*;
 
-use super::{MainView, OpenConversationFinder, history::Operation};
+use super::{MainView, OpenConversationFinder, PanelState, StorageState, history::Operation};
 
 #[derive(Default)]
 struct TestPorts {
@@ -156,7 +156,7 @@ fn initialization_failure_can_be_retried_without_demo_history(cx: &mut TestAppCo
     let (window, view) = setup(cx, ports.clone());
     cx.run_until_parked();
     view.read_with(cx, |main, _| {
-        assert!(!main.storage_ready);
+        assert_eq!(main.storage_ready, StorageState::Failed);
         assert!(main.active_conversation.is_none());
     });
     ports.fail_initialize.store(false, Ordering::SeqCst);
@@ -166,7 +166,7 @@ fn initialization_failure_can_be_retried_without_demo_history(cx: &mut TestAppCo
         })
         .unwrap();
     cx.run_until_parked();
-    assert!(view.read_with(cx, |main, _| main.storage_ready));
+    assert!(view.read_with(cx, |main, _| main.storage_ready.is_ready()));
 }
 
 #[gpui::test]
@@ -288,7 +288,7 @@ fn finder_filters_persisted_history_and_opens_selected_conversation(cx: &mut Tes
     let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
     visual.dispatch_action(OpenConversationFinder);
     visual.run_until_parked();
-    assert!(view.read_with(cx, |main, _| main.finder_open));
+    assert!(view.read_with(cx, |main, _| main.finder_open.is_open()));
     visual.simulate_input("responses");
     visual.run_until_parked();
 
@@ -299,7 +299,7 @@ fn finder_filters_persisted_history_and_opens_selected_conversation(cx: &mut Tes
     visual.run_until_parked();
 
     view.read_with(cx, |main, _| {
-        assert!(!main.finder_open);
+        assert_eq!(main.finder_open, PanelState::Closed);
         assert_eq!(main.active_conversation, Some(ConversationId(2)));
     });
     let sidebar = view.read_with(cx, |main, _| main.sidebar.clone());
@@ -320,14 +320,14 @@ fn closing_finder_clears_query_without_changing_selection(cx: &mut TestAppContex
     let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
     visual.dispatch_action(OpenConversationFinder);
     visual.run_until_parked();
-    assert!(view.read_with(cx, |main, _| main.finder_open));
+    assert!(view.read_with(cx, |main, _| main.finder_open.is_open()));
     visual.simulate_input("notes");
     visual.run_until_parked();
     visual.simulate_keystrokes("escape");
     visual.run_until_parked();
 
     view.read_with(cx, |main, app| {
-        assert!(!main.finder_open);
+        assert_eq!(main.finder_open, PanelState::Closed);
         assert!(main.finder_input.read(app).value().is_empty());
         assert!(main.active_conversation.is_none());
     });
@@ -355,7 +355,7 @@ fn finder_arrow_navigation_opens_highlighted_conversation(cx: &mut TestAppContex
     visual.run_until_parked();
 
     view.read_with(cx, |main, _| {
-        assert!(!main.finder_open);
+        assert_eq!(main.finder_open, PanelState::Closed);
         assert_eq!(main.active_conversation, Some(ConversationId(2)));
     });
 }

@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, FocusHandle, Focusable as _, KeyBinding,
-    MouseButton, Render, Role, StatefulInteractiveElement as _, Subscription, Task, Window, div,
-    prelude::*, px,
+    MouseButton, Render, Role, SharedString, StatefulInteractiveElement as _, Subscription, Task,
+    Window, div, prelude::*, px,
 };
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
@@ -29,11 +29,11 @@ use crate::components::{
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
 #[action(namespace = magenta)]
-pub(crate) struct OpenConversationFinder;
+pub struct OpenConversationFinder;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
 #[action(namespace = magenta)]
-pub(crate) struct CloseConversationFinder;
+pub struct CloseConversationFinder;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
 #[action(namespace = magenta)]
@@ -61,7 +61,7 @@ pub struct MainView {
     authenticator: Arc<dyn ProviderAuthenticator>,
     model_catalog: Arc<dyn ModelCatalog>,
     history: ConversationHistory,
-    storage_ready: bool,
+    storage_ready: StorageState,
     operation: history::Operation,
     operation_task: Option<Task<()>>,
     history_task: Option<Task<()>>,
@@ -71,11 +71,11 @@ pub struct MainView {
     loading_conversation: Option<ConversationId>,
     deferred_navigation: Option<history::Navigation>,
     unsaved: Option<magenta_core::Message>,
-    close_requested: bool,
+    close_requested: CloseState,
     active_conversation: Option<ConversationId>,
     account_state: AccountState,
-    account_panel_open: bool,
-    finder_open: bool,
+    account_panel_open: PanelState,
+    finder_open: PanelState,
     finder_input: Entity<InputState>,
     finder_selected: usize,
     focus_handle: FocusHandle,
@@ -91,6 +91,53 @@ enum AccountState {
     WaitingForBrowser,
     Connected(ProviderAccount),
     Failed(String),
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum StorageState {
+    #[default]
+    Loading,
+    Ready,
+    Failed,
+}
+
+impl StorageState {
+    const fn is_ready(self) -> bool {
+        matches!(self, Self::Ready)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum CloseState {
+    #[default]
+    Open,
+    Requested,
+}
+
+impl CloseState {
+    const fn is_requested(self) -> bool {
+        matches!(self, Self::Requested)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum PanelState {
+    #[default]
+    Closed,
+    Open,
+}
+
+impl PanelState {
+    const fn is_open(self) -> bool {
+        matches!(self, Self::Open)
+    }
+
+    const fn toggled(self) -> Self {
+        match self {
+            Self::Closed => Self::Open,
+            Self::Open => Self::Closed,
+        }
+    }
 }
 
 impl MainView {
@@ -117,9 +164,69 @@ impl MainView {
             KeyBinding::new("enter", ConfirmFinderResult, Some("ConversationFinder")),
         ]);
         composer.update(cx, |composer, cx| composer.set_storage_ready(false, cx));
-        let subscriptions = vec![
+        let subscriptions = Self::subscribe_to_children(
+            &composer,
+            &sidebar,
+            &conversation,
+            &finder_input,
+            window,
+            cx,
+        );
+
+        let mut main = Self {
+            sidebar,
+            composer,
+            conversation,
+            send_message,
+            regenerate_message,
+            authenticator,
+            model_catalog,
+            history,
+            storage_ready: StorageState::Loading,
+            operation: history::Operation::Idle,
+            operation_task: None,
+            history_task: None,
+            load_task: None,
+            page_task: None,
+            load_generation: 0,
+            loading_conversation: None,
+            deferred_navigation: None,
+            unsaved: None,
+            close_requested: CloseState::Open,
+            active_conversation: None,
+            account_state: AccountState::Restoring,
+            account_panel_open: PanelState::Closed,
+            finder_open: PanelState::Closed,
+            finder_input,
+            finder_selected: 0,
+            focus_handle,
+            account_task: None,
+            model_task: None,
+            subscriptions,
+        };
+        main.load_history(window, cx);
+        let weak = cx.weak_entity();
+        window.on_window_should_close(cx, move |window, cx| {
+            weak.update(cx, |main, cx| main.request_close(window, cx))
+                .unwrap_or(true)
+        });
+        main.subscriptions
+            .push(cx.on_app_quit(Self::prepare_shutdown));
+        main.restore_account(window, cx);
+        main
+    }
+
+    fn subscribe_to_children(
+        composer: &Entity<PromptComposer>,
+        sidebar: &Entity<SidebarView>,
+        conversation: &Entity<ConversationView>,
+        finder_input: &Entity<InputState>,
+        window: &Window,
+        cx: &mut Context<'_, Self>,
+    ) -> Vec<Subscription> {
+        vec![
             cx.subscribe_in(
-                &composer,
+                composer,
                 window,
                 |main, _, event: &PromptComposerEvent, window, cx| match event {
                     PromptComposerEvent::Submit(request) => main.submit(request, window, cx),
@@ -127,7 +234,7 @@ impl MainView {
                 },
             ),
             cx.subscribe_in(
-                &sidebar,
+                sidebar,
                 window,
                 |main, _, event: &SidebarEvent, window, cx| match event {
                     SidebarEvent::NewChat => {
@@ -150,13 +257,13 @@ impl MainView {
                     SidebarEvent::RetryHistory => main.load_history(window, cx),
                     SidebarEvent::OpenSettings => {
                         tracing::info!(operation = "sidebar.open_settings", "settings requested");
-                        main.account_panel_open = !main.account_panel_open;
+                        main.account_panel_open = main.account_panel_open.toggled();
                         cx.notify();
                     }
                 },
             ),
             cx.subscribe_in(
-                &conversation,
+                conversation,
                 window,
                 |main, _, event: &ConversationViewEvent, window, cx| match event {
                     ConversationViewEvent::GenerationStarted => {
@@ -173,7 +280,7 @@ impl MainView {
                 },
             ),
             cx.subscribe_in(
-                &finder_input,
+                finder_input,
                 window,
                 |main, _, event: &InputEvent, _, cx| {
                     if matches!(event, InputEvent::Change) {
@@ -182,49 +289,7 @@ impl MainView {
                     }
                 },
             ),
-        ];
-
-        let mut main = Self {
-            sidebar,
-            composer,
-            conversation,
-            send_message,
-            regenerate_message,
-            authenticator,
-            model_catalog,
-            history,
-            storage_ready: false,
-            operation: history::Operation::Idle,
-            operation_task: None,
-            history_task: None,
-            load_task: None,
-            page_task: None,
-            load_generation: 0,
-            loading_conversation: None,
-            deferred_navigation: None,
-            unsaved: None,
-            close_requested: false,
-            active_conversation: None,
-            account_state: AccountState::Restoring,
-            account_panel_open: false,
-            finder_open: false,
-            finder_input,
-            finder_selected: 0,
-            focus_handle,
-            account_task: None,
-            model_task: None,
-            subscriptions,
-        };
-        main.load_history(window, cx);
-        let weak = cx.weak_entity();
-        window.on_window_should_close(cx, move |window, cx| {
-            weak.update(cx, |main, cx| main.request_close(window, cx))
-                .unwrap_or(true)
-        });
-        main.subscriptions
-            .push(cx.on_app_quit(Self::prepare_shutdown));
-        main.restore_account(window, cx);
-        main
+        ]
     }
 
     fn restore_account(&mut self, window: &Window, cx: &Context<'_, Self>) {
@@ -456,7 +521,7 @@ impl MainView {
                     .tooltip("Close account panel")
                     .on_click(move |_, _, cx| {
                         view.update(cx, |main, cx| {
-                            main.account_panel_open = false;
+                            main.account_panel_open = PanelState::Closed;
                             cx.notify();
                         });
                     }),
@@ -490,7 +555,7 @@ impl MainView {
     }
 
     fn move_finder_selection(&mut self, offset: isize, cx: &mut Context<'_, Self>) {
-        if !self.finder_open {
+        if !self.finder_open.is_open() {
             return;
         }
 
@@ -501,13 +566,14 @@ impl MainView {
             .matching_conversations(query.trim())
             .len()
             + 1;
-        self.finder_selected =
-            (self.finder_selected as isize + offset).rem_euclid(count as isize) as usize;
+        self.finder_selected = (self.finder_selected.cast_signed() + offset)
+            .rem_euclid(count.cast_signed())
+            .cast_unsigned();
         cx.notify();
     }
 
     fn confirm_finder_selection(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if !self.finder_open {
+        if !self.finder_open.is_open() {
             return;
         }
 
@@ -520,7 +586,7 @@ impl MainView {
         }
     }
     fn open_finder(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        self.finder_open = true;
+        self.finder_open = PanelState::Open;
         self.finder_selected = 0;
         self.finder_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
@@ -533,11 +599,11 @@ impl MainView {
     }
 
     fn close_finder(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if !self.finder_open {
+        if !self.finder_open.is_open() {
             return;
         }
 
-        self.finder_open = false;
+        self.finder_open = PanelState::Closed;
         self.finder_selected = 0;
         self.finder_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
@@ -568,16 +634,151 @@ impl MainView {
             .update(cx, |composer, cx| composer.focus(window, cx));
     }
 
-    fn finder_overlay(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let query = self.finder_input.read(cx).value().trim().to_owned();
-        let matches = self.sidebar.read(cx).matching_conversations(&query);
-        let has_matches = !matches.is_empty();
-        let view = cx.entity();
-        let backdrop_view = view.clone();
-        let action_index = matches.len();
+    fn finder_conversation_row(
+        id: ConversationId,
+        title: SharedString,
+        updated: SharedString,
+        selected: bool,
+        view: Entity<Self>,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let accessibility_label = title.to_string();
+        h_flex()
+            .id(("finder-conversation", id.0))
+            .debug_selector(move || format!("finder-conversation-{}", id.0))
+            .role(Role::ListBoxOption)
+            .aria_label(accessibility_label)
+            .aria_selected(selected)
+            .cursor_pointer()
+            .w_full()
+            .h(px(40.))
+            .px(px(10.))
+            .gap(px(12.))
+            .rounded(px(8.))
+            .when(selected, |this| {
+                this.bg(cx.theme().accent)
+                    .text_color(cx.theme().accent_foreground)
+            })
+            .hover(|this| this.bg(cx.theme().accent))
+            .child(
+                div()
+                    .relative()
+                    .flex_none()
+                    .size(px(14.))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(1.))
+                            .left(px(1.))
+                            .size(px(11.))
+                            .rounded(px(3.))
+                            .border_1()
+                            .border_color(cx.theme().muted_foreground),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .bottom(px(0.))
+                            .left(px(3.))
+                            .size(px(3.))
+                            .border_l_1()
+                            .border_b_1()
+                            .border_color(cx.theme().muted_foreground),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .font_medium()
+                    .text_size(px(13.))
+                    .child(title),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .font_family("monospace")
+                    .text_size(px(11.))
+                    .text_color(cx.theme().muted_foreground.opacity(0.8))
+                    .child(updated),
+            )
+            .on_click(move |_, window, cx| {
+                view.update(cx, |main, cx| {
+                    main.select_finder_result(id, window, cx);
+                });
+            })
+            .into_any_element()
+    }
 
-        let mut result_rows = v_flex().w_full().when(has_matches, |this| {
-            this.child(
+    fn finder_new_chat_row(
+        selected: bool,
+        view: Entity<Self>,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        h_flex()
+            .id("finder-new-chat")
+            .role(Role::ListBoxOption)
+            .aria_label("New chat")
+            .aria_selected(selected)
+            .cursor_pointer()
+            .w_full()
+            .h(px(40.))
+            .px(px(10.))
+            .gap(px(12.))
+            .rounded(px(8.))
+            .when(selected, |this| {
+                this.bg(cx.theme().accent)
+                    .text_color(cx.theme().accent_foreground)
+            })
+            .hover(|this| this.bg(cx.theme().accent))
+            .child(
+                Icon::new(IconName::Plus)
+                    .xsmall()
+                    .text_color(cx.theme().muted_foreground),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .font_medium()
+                    .text_size(px(13.))
+                    .child("New chat"),
+            )
+            .child(
+                div()
+                    .font_family("monospace")
+                    .text_size(px(11.))
+                    .text_color(cx.theme().muted_foreground.opacity(0.8))
+                    .child(if cfg!(target_os = "macos") {
+                        "⌘N"
+                    } else {
+                        "Ctrl N"
+                    }),
+            )
+            .on_click(move |_, window, cx| {
+                view.update(cx, |main, cx| {
+                    main.new_chat_from_finder(window, cx);
+                });
+            })
+            .into_any_element()
+    }
+
+    fn finder_results(
+        &self,
+        query: &str,
+        matches: Vec<(ConversationId, SharedString, SharedString)>,
+        view: Entity<Self>,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let has_matches = !matches.is_empty();
+        let action_index = matches.len();
+        let mut result_rows = v_flex().w_full();
+        if has_matches {
+            result_rows = result_rows.child(
                 h_flex()
                     .h(px(28.))
                     .px(px(10.))
@@ -585,82 +786,17 @@ impl MainView {
                     .text_size(px(10.))
                     .text_color(cx.theme().muted_foreground.opacity(0.8))
                     .child("CHATS"),
-            )
-        });
-        for (index, (id, title, updated)) in matches.into_iter().enumerate() {
-            let result_view = view.clone();
-            let selected = self.finder_selected == index;
-            let accessibility_label = title.to_string();
-            result_rows = result_rows.child(
-                h_flex()
-                    .id(("finder-conversation", id.0))
-                    .debug_selector(move || format!("finder-conversation-{}", id.0))
-                    .role(Role::ListBoxOption)
-                    .aria_label(accessibility_label)
-                    .aria_selected(selected)
-                    .cursor_pointer()
-                    .w_full()
-                    .h(px(40.))
-                    .px(px(10.))
-                    .gap(px(12.))
-                    .rounded(px(8.))
-                    .when(selected, |this| {
-                        this.bg(cx.theme().accent)
-                            .text_color(cx.theme().accent_foreground)
-                    })
-                    .hover(|this| this.bg(cx.theme().accent))
-                    .child(
-                        div()
-                            .relative()
-                            .flex_none()
-                            .size(px(14.))
-                            .text_color(cx.theme().muted_foreground)
-                            .child(
-                                div()
-                                    .absolute()
-                                    .top(px(1.))
-                                    .left(px(1.))
-                                    .size(px(11.))
-                                    .rounded(px(3.))
-                                    .border_1()
-                                    .border_color(cx.theme().muted_foreground),
-                            )
-                            .child(
-                                div()
-                                    .absolute()
-                                    .bottom(px(0.))
-                                    .left(px(3.))
-                                    .size(px(3.))
-                                    .border_l_1()
-                                    .border_b_1()
-                                    .border_color(cx.theme().muted_foreground),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .font_medium()
-                            .text_size(px(13.))
-                            .child(title),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .font_family("monospace")
-                            .text_size(px(11.))
-                            .text_color(cx.theme().muted_foreground.opacity(0.8))
-                            .child(updated),
-                    )
-                    .on_click(move |_, window, cx| {
-                        result_view.update(cx, |main, cx| {
-                            main.select_finder_result(id, window, cx);
-                        });
-                    }),
             );
+        }
+        for (index, (id, title, updated)) in matches.into_iter().enumerate() {
+            result_rows = result_rows.child(Self::finder_conversation_row(
+                id,
+                title,
+                updated,
+                self.finder_selected == index,
+                view.clone(),
+                cx,
+            ));
         }
         if !has_matches {
             result_rows = result_rows.child(
@@ -679,66 +815,25 @@ impl MainView {
             );
         }
 
-        let new_chat_view = view.clone();
-        let selected_action = self.finder_selected == action_index;
-        result_rows = result_rows
-            .child(
-                h_flex()
-                    .h(px(28.))
-                    .px(px(10.))
-                    .font_semibold()
-                    .text_size(px(10.))
-                    .text_color(cx.theme().muted_foreground.opacity(0.8))
-                    .child("ACTIONS"),
-            )
-            .child(
-                h_flex()
-                    .id("finder-new-chat")
-                    .role(Role::ListBoxOption)
-                    .aria_label("New chat")
-                    .aria_selected(selected_action)
-                    .cursor_pointer()
-                    .w_full()
-                    .h(px(40.))
-                    .px(px(10.))
-                    .gap(px(12.))
-                    .rounded(px(8.))
-                    .when(selected_action, |this| {
-                        this.bg(cx.theme().accent)
-                            .text_color(cx.theme().accent_foreground)
-                    })
-                    .hover(|this| this.bg(cx.theme().accent))
-                    .child(
-                        Icon::new(IconName::Plus)
-                            .xsmall()
-                            .text_color(cx.theme().muted_foreground),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .font_medium()
-                            .text_size(px(13.))
-                            .child("New chat"),
-                    )
-                    .child(
-                        div()
-                            .font_family("monospace")
-                            .text_size(px(11.))
-                            .text_color(cx.theme().muted_foreground.opacity(0.8))
-                            .child(if cfg!(target_os = "macos") {
-                                "⌘N"
-                            } else {
-                                "Ctrl N"
-                            }),
-                    )
-                    .on_click(move |_, window, cx| {
-                        new_chat_view.update(cx, |main, cx| {
-                            main.new_chat_from_finder(window, cx);
-                        });
-                    }),
-            );
+        result_rows = result_rows.child(
+            h_flex()
+                .h(px(28.))
+                .px(px(10.))
+                .font_semibold()
+                .text_size(px(10.))
+                .text_color(cx.theme().muted_foreground.opacity(0.8))
+                .child("ACTIONS"),
+        );
+        result_rows
+            .child(Self::finder_new_chat_row(
+                self.finder_selected == action_index,
+                view,
+                cx,
+            ))
+            .into_any_element()
+    }
 
+    fn finder_popover(&self, result_rows: AnyElement, cx: &Context<'_, Self>) -> AnyElement {
         let keycap = |label: &'static str| {
             h_flex()
                 .h(px(18.))
@@ -753,7 +848,7 @@ impl MainView {
                 .text_size(px(10.))
                 .child(label)
         };
-        let popover = v_flex()
+        v_flex()
             .id("conversation-finder-dialog")
             .key_context("ConversationFinder")
             .role(Role::Dialog)
@@ -807,7 +902,16 @@ impl MainView {
                     .text_color(cx.theme().muted_foreground)
                     .child(h_flex().gap(px(5.)).child(keycap("↑↓")).child("Navigate"))
                     .child(h_flex().gap(px(5.)).child(keycap("↵")).child("Open")),
-            );
+            )
+            .into_any_element()
+    }
+
+    fn finder_overlay(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let query = self.finder_input.read(cx).value().trim().to_owned();
+        let matches = self.sidebar.read(cx).matching_conversations(&query);
+        let view = cx.entity();
+        let result_rows = self.finder_results(&query, matches, view.clone(), cx);
+        let popover = self.finder_popover(result_rows, cx);
 
         div()
             .id("conversation-finder-overlay")
@@ -819,7 +923,7 @@ impl MainView {
                     .inset_0()
                     .bg(cx.theme().background.opacity(0.72))
                     .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                        backdrop_view.update(cx, |main, cx| main.close_finder(window, cx));
+                        view.update(cx, |main, cx| main.close_finder(window, cx));
                     }),
             )
             .child(
@@ -873,28 +977,68 @@ impl MainView {
             )
             .into_any_element()
     }
-}
 
-impl Render for MainView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-        let _ = &self.subscriptions;
-        let content: AnyElement = if self.active_conversation.is_some() {
+    fn conversation_content(&self, cx: &Context<'_, Self>) -> AnyElement {
+        if self.active_conversation.is_some() {
             self.conversation.clone().into_any_element()
         } else {
-            workspace::render(self.composer.clone(), self.sidebar.clone(), cx)
-        };
-        let narrow = window.viewport_size().width < px(696.);
-        let sidebar_collapsed = self.sidebar.read(cx).is_collapsed();
-        let show_sidebar = !narrow && !sidebar_collapsed;
+            workspace::render(self.composer.clone(), &self.sidebar, cx)
+        }
+    }
 
+    fn main_panel(&self, content: AnyElement, narrow: bool, cx: &Context<'_, Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .child(titlebar::render(self.titlebar_controls(cx)))
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .when(narrow, gpui::Styled::p_0)
+                    .when(!narrow, |this| this.p(px(12.)))
+                    .child(
+                        div()
+                            .flex()
+                            .size_full()
+                            .min_h_0()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .rounded(px(16.))
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().tokens.background.background)
+                            .when(narrow, |this| {
+                                this.rounded(px(0.))
+                                    .border_0()
+                                    .border_color(cx.theme().transparent)
+                            })
+                            .child(content),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_frame(
+        &self,
+        content: AnyElement,
+        narrow: bool,
+        show_sidebar: bool,
+        cx: &Context<'_, Self>,
+    ) -> impl IntoElement {
         div()
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(|main, _: &OpenConversationFinder, window, cx| {
-                main.open_finder(window, cx)
+                main.open_finder(window, cx);
             }))
             .on_action(
                 cx.listener(|main, _: &CloseConversationFinder, window, cx| {
-                    main.close_finder(window, cx)
+                    main.close_finder(window, cx);
                 }),
             )
             .on_action(cx.listener(|main, _: &SelectNextFinderResult, _, cx| {
@@ -917,43 +1061,10 @@ impl Render for MainView {
             .size_full()
             .bg(cx.theme().tokens.background.background)
             .when(show_sidebar, |this| this.child(self.sidebar.clone()))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h_0()
-                    .min_w_0()
-                    .child(titlebar::render(self.titlebar_controls(cx)))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_1()
-                            .min_h_0()
-                            .min_w_0()
-                            .when(narrow, |this| this.p_0())
-                            .when(!narrow, |this| this.p(px(12.)))
-                            .child(
-                                div()
-                                    .flex()
-                                    .size_full()
-                                    .min_h_0()
-                                    .min_w_0()
-                                    .overflow_hidden()
-                                    .rounded(px(16.))
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .bg(cx.theme().tokens.background.background)
-                                    .when(narrow, |this| {
-                                        this.rounded(px(0.))
-                                            .border_0()
-                                            .border_color(cx.theme().transparent)
-                                    })
-                                    .child(content),
-                            ),
-                    ),
-            )
-            .when(self.finder_open, |this| this.child(self.finder_overlay(cx)))
+            .child(self.main_panel(content, narrow, cx))
+            .when(self.finder_open.is_open(), |this| {
+                this.child(self.finder_overlay(cx))
+            })
             .when(self.loading_conversation.is_some(), |this| {
                 this.child(
                     div()
@@ -980,8 +1091,19 @@ impl Render for MainView {
                     )
                 },
             )
-            .when(self.account_panel_open, |this| {
+            .when(self.account_panel_open.is_open(), |this| {
                 this.child(self.account_panel(cx))
             })
+    }
+}
+
+impl Render for MainView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+        let _ = &self.subscriptions;
+        let content = self.conversation_content(cx);
+        let narrow = window.viewport_size().width < px(696.);
+        let sidebar_collapsed = self.sidebar.read(cx).is_collapsed();
+        let show_sidebar = !narrow && !sidebar_collapsed;
+        self.render_frame(content, narrow, show_sidebar, cx)
     }
 }
