@@ -5,6 +5,7 @@ members = [
     "crates/core",
     "crates/desktop",
     "crates/providers",
+    "crates/storage",
     "crates/ui",
 ]
 default-members = ["crates/desktop"]
@@ -21,12 +22,17 @@ async-stream = "0.3"
 base64 = "0.22"
 dirs = "6"
 futures-core = "0.3"
+futures-channel = "0.3"
 futures-util = { version = "0.3", features = ["io"] }
 http_client = { git = "https://github.com/zed-industries/zed" }
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service"] }
 magenta-application = { path = "crates/application" }
 magenta-core = { path = "crates/core" }
 magenta-providers = { path = "crates/providers" }
+magenta-storage = { path = "crates/storage" }
+rusqlite = { version = "0.37", features = ["bundled"] }
+chrono = "0.4"
+tempfile = "3"
 magenta-ui = { path = "crates/ui" }
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
