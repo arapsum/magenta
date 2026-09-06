@@ -12,6 +12,7 @@ struct Fence {
 /// Fenced code is copied byte-for-byte so formatting inside code blocks remains
 /// intact.
 pub(super) fn normalize_for_text_view(source: &str) -> String {
+    let source = super::math::normalize_delimiters(source);
     let mut normalized = String::with_capacity(source.len());
     let mut active_fence = None;
 

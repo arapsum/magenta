@@ -1,3 +1,5 @@
+use std::{collections::HashMap, sync::Arc};
+
 use futures_util::StreamExt as _;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FollowMode, IntoElement,
@@ -22,6 +24,7 @@ use crate::components::{
     code_fence::{self, ContentSegment},
     inline_code::{self, MarkdownInlineCodePlugin},
     markdown,
+    math::{self, FormulaKey, MarkdownMathPlugin, MathCache},
     prompt_input::PromptComposer,
 };
 use crate::{MagentaError, notification_for_error};
@@ -74,7 +77,9 @@ pub struct ConversationView {
     older_cursor: Option<magenta_core::MessageSequence>,
     has_older: bool,
     loading_earlier: bool,
-    origins: std::collections::HashMap<MessageId, GenerationConfig>,
+    origins: HashMap<MessageId, GenerationConfig>,
+    math_cache: Arc<MathCache>,
+    math_tasks: HashMap<FormulaKey, Task<()>>,
 }
 
 type ConversationContext<'a> = Context<'a, ConversationView>;
@@ -145,6 +150,7 @@ impl ConversationView {
         self.has_older = page.has_older;
         self.older_cursor = page.older_cursor;
         self.loading_earlier = false;
+        self.queue_math_for_messages(0..self.messages.len(), cx);
         cx.notify();
     }
 
@@ -165,7 +171,9 @@ impl ConversationView {
             older_cursor: None,
             has_older: false,
             loading_earlier: false,
-            origins: std::collections::HashMap::new(),
+            origins: HashMap::new(),
+            math_cache: Arc::new(MathCache::default()),
+            math_tasks: HashMap::new(),
         }
     }
 
@@ -181,6 +189,7 @@ impl ConversationView {
             .into_iter()
             .map(|message| Self::rendered_message(message, cx))
             .collect();
+        self.queue_math_for_messages(0..self.messages.len(), cx);
         self.list_state
             .reset_with_uniform_height(self.messages.len(), px(96.));
         self.list_state.set_follow_mode(FollowMode::Normal);
@@ -352,6 +361,59 @@ impl ConversationView {
         }
     }
 
+    fn queue_math_for_messages(
+        &mut self,
+        indices: impl IntoIterator<Item = usize>,
+        cx: &Context<'_, Self>,
+    ) {
+        for index in indices {
+            let Some(message) = self.messages.get(index) else {
+                continue;
+            };
+            if message.message.role != MessageRole::Assistant {
+                continue;
+            }
+            for key in math::formulas(&message.message.content) {
+                self.queue_math_render(key, cx);
+            }
+        }
+    }
+
+    fn queue_math_render(&mut self, key: FormulaKey, cx: &Context<'_, Self>) {
+        if !self.math_cache.begin(key.clone()) {
+            return;
+        }
+
+        let cache = self.math_cache.clone();
+        let render_key = key.clone();
+        let task_key = key.clone();
+        self.math_tasks.insert(
+            key,
+            cx.spawn(async move |view, cx| {
+                let result = cx
+                    .background_spawn(async move { math::render_formula(&render_key) })
+                    .await;
+                _ = view.update(cx, |view, cx| {
+                    cache.complete(task_key.clone(), result);
+                    view.math_tasks.remove(&task_key);
+                    view.refresh_math_messages(cx);
+                });
+            }),
+        );
+    }
+
+    fn refresh_math_messages(&mut self, cx: &mut Context<'_, Self>) {
+        for message in &mut self.messages {
+            let (Some(markdown), Some(source)) = (&message.markdown, &message.markdown_source)
+            else {
+                continue;
+            };
+            markdown.update(cx, |state, cx| state.set_text(source, cx));
+        }
+        self.list_state.remeasure_items(0..self.messages.len());
+        cx.notify();
+    }
+
     fn begin_stream(
         &mut self,
         assistant_id: MessageId,
@@ -440,6 +502,7 @@ impl ConversationView {
             }
         }
         rendered.markdown_source = Some(normalized);
+        self.queue_math_for_messages([index], cx);
         self.list_state.remeasure_items(index..index + 1);
         cx.notify();
     }
@@ -742,6 +805,7 @@ impl ConversationView {
                 this.child(
                     TextView::new(markdown)
                         .selectable(true)
+                        .plugin(MarkdownMathPlugin::new(self.math_cache.clone()))
                         .plugin(MarkdownInlineCodePlugin)
                         .style(style)
                         .w_full()
