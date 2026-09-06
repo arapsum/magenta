@@ -1,15 +1,88 @@
 use gpui::{AnyElement, Context, Entity, IntoElement, ParentElement as _, Styled as _, div, px};
 use gpui_component::{
-    ActiveTheme as _, IconName, StyledExt as _,
+    ActiveTheme as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
-    v_flex,
+    h_flex, v_flex,
 };
 
 use crate::app::MainView;
 use crate::components::{
     prompt_input::PromptComposer,
-    sidebar::{SidebarEvent, SidebarView},
+    sidebar::{ConversationSummary, SidebarEvent, SidebarView},
 };
+
+fn render_recent_row(
+    conversation: ConversationSummary,
+    sidebar: &Entity<SidebarView>,
+    cx: &Context<'_, MainView>,
+) -> AnyElement {
+    let id = conversation.id;
+    let row_sidebar = sidebar.clone();
+
+    Button::new(("workspace-recent", id.0))
+        .ghost()
+        .w_full()
+        .h(px(58.))
+        .px(px(12.))
+        .rounded(px(8.))
+        .child(
+            h_flex()
+                .w_full()
+                .items_start()
+                .gap(px(12.))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .items_start()
+                        .gap(px(2.))
+                        .child(
+                            div()
+                                .w_full()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_size(px(14.))
+                                .text_color(cx.theme().foreground)
+                                .child(conversation.title),
+                        )
+                        .child(
+                            div()
+                                .w_full()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_size(px(12.))
+                                .line_height(px(16.))
+                                .text_color(cx.theme().muted_foreground)
+                                .child(conversation.preview),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(px(11.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child(conversation.updated),
+                ),
+        )
+        .on_click(move |_, _, cx| {
+            row_sidebar.update(cx, |_, cx| cx.emit(SidebarEvent::OpenConversation(id)));
+        })
+        .into_any_element()
+}
+
+fn render_recent_rows(
+    conversations: Vec<ConversationSummary>,
+    sidebar: &Entity<SidebarView>,
+    cx: &Context<'_, MainView>,
+) -> AnyElement {
+    let mut rows = v_flex().w_full().gap(px(3.));
+    for conversation in conversations {
+        rows = rows.child(render_recent_row(conversation, sidebar, cx));
+    }
+    rows.into_any_element()
+}
 
 #[must_use]
 pub fn render(
@@ -23,28 +96,11 @@ pub fn render(
     } else {
         Vec::new()
     };
-    let sidebar_view = sidebar.clone();
-    let mut recent_rows = v_flex().w_full().gap(px(3.));
-    for (id, title) in recent {
-        let row_sidebar = sidebar_view.clone();
-        recent_rows = recent_rows.child(
-            Button::new(("workspace-recent", id.0))
-                .ghost()
-                .w_full()
-                .h(px(36.))
-                .px(px(10.))
-                .rounded(px(7.))
-                .icon(IconName::ChevronRight)
-                .label(title)
-                .on_click(move |_, _, cx| {
-                    row_sidebar.update(cx, |_, cx| cx.emit(SidebarEvent::OpenConversation(id)));
-                }),
-        );
-    }
+    let recent_rows = render_recent_rows(recent, sidebar, cx);
 
     let mut copy = v_flex()
         .w_full()
-        .max_w(px(560.))
+        .max_w(px(648.))
         .items_start()
         .gap(px(8.))
         .child(
@@ -59,17 +115,17 @@ pub fn render(
                 .text_size(px(13.))
                 .line_height(px(20.))
                 .text_color(cx.theme().muted_foreground)
-                .child("Continue a conversation or start a new one."),
+                .child("Nothing here yet. Ask anything, or pick up a thread."),
         );
     if show_recent {
         copy = copy
             .child(
                 div()
-                    .mt(px(12.))
+                    .mt(px(30.))
                     .text_size(px(10.))
                     .font_medium()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Recent conversations"),
+                    .child("CONTINUE"),
             )
             .child(recent_rows);
     }

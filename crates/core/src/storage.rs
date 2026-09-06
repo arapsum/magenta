@@ -14,6 +14,7 @@ pub struct MessageSequence(pub i64);
 pub struct ConversationSummary {
     pub id: ConversationId,
     pub title: String,
+    pub preview: String,
     pub pinned: bool,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,

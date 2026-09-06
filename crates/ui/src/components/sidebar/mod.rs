@@ -227,12 +227,15 @@ impl SidebarView {
             .collect()
     }
 
-    pub(crate) fn recent_conversations(&self) -> Vec<(ConversationId, SharedString)> {
+    pub(crate) fn recent_conversations(&self) -> Vec<ConversationSummary> {
+        self.conversations.iter().take(3).cloned().collect()
+    }
+
+    pub(crate) fn title_for(&self, id: ConversationId) -> Option<String> {
         self.conversations
             .iter()
-            .take(3)
-            .map(|conversation| (conversation.id, conversation.title.clone().into()))
-            .collect()
+            .find(|conversation| conversation.id == id)
+            .map(|conversation| conversation.title.clone())
     }
 
     pub(crate) const fn history_available(&self) -> bool {

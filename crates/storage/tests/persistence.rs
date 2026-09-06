@@ -53,6 +53,10 @@ fn reopen_preserves_messages_configuration_metadata_and_pins() {
         reopened.initialize().await.unwrap();
         let summaries = reopened.summaries().await.unwrap();
         assert_eq!(summaries.len(), 1);
+        assert_eq!(
+            summaries[0].preview,
+            "Explain `λ`\n```rust\nfn main() {}\n```"
+        );
         assert!(summaries[0].pinned);
         assert!(summaries[0].updated_at >= summaries[0].created_at);
         let loaded = reopened.load(id).await.unwrap();

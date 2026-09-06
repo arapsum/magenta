@@ -108,9 +108,26 @@ impl ConversationStore for SqliteConversationStore {
             let mut statement = connection
                 .prepare(
                     r"
-                        SELECT id, title, pinned, created_at, updated_at
-                        FROM conversations
-                        ORDER BY updated_at DESC, id DESC
+                        SELECT
+                            id,
+                            title,
+                            COALESCE(
+                                (
+                                    SELECT substr(trim(message.content), 1, 240)
+                                    FROM messages AS message
+                                    WHERE message.conversation_id = conversation.id
+                                      AND message.role = 'user'
+                                      AND trim(message.content) <> ''
+                                    ORDER BY message.sequence DESC
+                                    LIMIT 1
+                                ),
+                                ''
+                            ) AS preview,
+                            pinned,
+                            created_at,
+                            updated_at
+                        FROM conversations AS conversation
+                        ORDER BY conversation.updated_at DESC, conversation.id DESC
                     ",
                 )
                 .map_err(database_error)?;
@@ -119,9 +136,10 @@ impl ConversationStore for SqliteConversationStore {
                     Ok(ConversationSummary {
                         id: ConversationId(row.get(0)?),
                         title: row.get(1)?,
-                        pinned: row.get(2)?,
-                        created_at: Timestamp(row.get(3)?),
-                        updated_at: Timestamp(row.get(4)?),
+                        preview: row.get(2)?,
+                        pinned: row.get(3)?,
+                        created_at: Timestamp(row.get(4)?),
+                        updated_at: Timestamp(row.get(5)?),
                     })
                 })
                 .map_err(database_error)?;

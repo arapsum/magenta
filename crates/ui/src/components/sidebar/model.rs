@@ -31,6 +31,7 @@ impl ConversationPeriod {
 pub struct ConversationSummary {
     pub id: ConversationId,
     pub title: String,
+    pub preview: String,
     pub updated: String,
     pub period: ConversationPeriod,
     pub pinned: bool,
@@ -46,6 +47,7 @@ pub enum SidebarEvent {
     SignOut,
     ToggleTheme,
     SetPinned(ConversationId, bool),
+    DeleteConversation(ConversationId),
     RetryHistory,
 }
 
@@ -55,6 +57,7 @@ pub fn demo_conversations() -> Vec<ConversationSummary> {
         ConversationSummary {
             id: ConversationId(1),
             title: "Designing Magenta's provider boundary".to_owned(),
+            preview: "How should the provider boundary stay extensible?".to_owned(),
             updated: "3d".to_owned(),
             period: ConversationPeriod::PreviousSevenDays,
             pinned: true,
@@ -62,6 +65,7 @@ pub fn demo_conversations() -> Vec<ConversationSummary> {
         ConversationSummary {
             id: ConversationId(2),
             title: "Native Markdown rendering".to_owned(),
+            preview: "How can Markdown render natively in GPUI?".to_owned(),
             updated: "5d".to_owned(),
             period: ConversationPeriod::PreviousSevenDays,
             pinned: true,
@@ -69,6 +73,7 @@ pub fn demo_conversations() -> Vec<ConversationSummary> {
         ConversationSummary {
             id: ConversationId(3),
             title: "Reducing idle memory usage".to_owned(),
+            preview: "What should remain resident while Magenta is idle?".to_owned(),
             updated: "2h".to_owned(),
             period: ConversationPeriod::Today,
             pinned: false,
@@ -76,6 +81,7 @@ pub fn demo_conversations() -> Vec<ConversationSummary> {
         ConversationSummary {
             id: ConversationId(4),
             title: "Streaming responses in GPUI".to_owned(),
+            preview: "How should streaming updates invalidate the view?".to_owned(),
             updated: "5h".to_owned(),
             period: ConversationPeriod::Today,
             pinned: false,
@@ -83,6 +89,7 @@ pub fn demo_conversations() -> Vec<ConversationSummary> {
         ConversationSummary {
             id: ConversationId(5),
             title: "SQLite conversation schema".to_owned(),
+            preview: "Which conversation fields belong in SQLite?".to_owned(),
             updated: "1d".to_owned(),
             period: ConversationPeriod::Yesterday,
             pinned: false,
@@ -90,6 +97,7 @@ pub fn demo_conversations() -> Vec<ConversationSummary> {
         ConversationSummary {
             id: ConversationId(6),
             title: "Keyboard shortcut map".to_owned(),
+            preview: "Which shortcuts should the first release support?".to_owned(),
             updated: "1d".to_owned(),
             period: ConversationPeriod::Yesterday,
             pinned: false,
@@ -97,6 +105,7 @@ pub fn demo_conversations() -> Vec<ConversationSummary> {
         ConversationSummary {
             id: ConversationId(7),
             title: "Cross-provider model mapping".to_owned(),
+            preview: "How should model capabilities map across providers?".to_owned(),
             updated: "3d".to_owned(),
             period: ConversationPeriod::PreviousSevenDays,
             pinned: false,
@@ -104,6 +113,7 @@ pub fn demo_conversations() -> Vec<ConversationSummary> {
         ConversationSummary {
             id: ConversationId(8),
             title: "Accessible code blocks".to_owned(),
+            preview: "How can code blocks remain readable and accessible?".to_owned(),
             updated: "5d".to_owned(),
             period: ConversationPeriod::PreviousSevenDays,
             pinned: false,
@@ -111,6 +121,7 @@ pub fn demo_conversations() -> Vec<ConversationSummary> {
         ConversationSummary {
             id: ConversationId(9),
             title: "Linux window integration".to_owned(),
+            preview: "What native window behavior do we need on Linux?".to_owned(),
             updated: "8d".to_owned(),
             period: ConversationPeriod::Older,
             pinned: false,
@@ -118,6 +129,7 @@ pub fn demo_conversations() -> Vec<ConversationSummary> {
         ConversationSummary {
             id: ConversationId(10),
             title: "Conversation persistence boundaries".to_owned(),
+            preview: "Where should durable state stop at the application boundary?".to_owned(),
             updated: "12d".to_owned(),
             period: ConversationPeriod::Older,
             pinned: false,
@@ -153,6 +165,11 @@ impl From<magenta_core::ConversationSummary> for ConversationSummary {
         Self {
             id: summary.id,
             title: summary.title,
+            preview: summary
+                .preview
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" "),
             updated,
             period,
             pinned: summary.pinned,
