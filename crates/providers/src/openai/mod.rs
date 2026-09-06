@@ -350,49 +350,31 @@ impl OpenAiProvider {
                     break;
                 }
                 if let Some(event) = decoder.push_line(&line) {
-                    if completed {
-                        Err::<(), _>(provider_error(
-                            ProviderErrorKind::Protocol,
-                            OpenAiProviderError::Protocol("received data after completion".to_owned()),
-                        ))?;
-                    }
-                    match Self::stream_event(&serde_json::from_str::<StreamEvent>(&event.data).map_err(|error| {
-                        provider_error(
-                            ProviderErrorKind::Protocol,
-                            OpenAiProviderError::Protocol(error.to_string()),
-                        )
-                    })?) {
-                        Ok(Some(StreamOutput::Text(delta))) => yield GenerationEvent::TextDelta(delta),
-                        Ok(Some(StreamOutput::Completed(outcome))) => {
+                    ensure_stream_is_active(completed)?;
+                    match decode_stream_event(&event.data)? {
+                        Some(StreamOutput::Text(delta)) => {
+                            yield GenerationEvent::TextDelta(delta);
+                        }
+                        Some(StreamOutput::Completed(outcome)) => {
                             completed = true;
                             yield GenerationEvent::Completed(outcome);
                         }
-                        Ok(None) => {}
-                        Err(error) => Err::<(), _>(provider_error(ProviderErrorKind::Protocol, error))?,
+                        None => {}
                     }
                 }
             }
 
             if let Some(event) = decoder.finish() {
-                if completed {
-                    Err::<(), _>(provider_error(
-                        ProviderErrorKind::Protocol,
-                        OpenAiProviderError::Protocol("received data after completion".to_owned()),
-                    ))?;
-                }
-                match Self::stream_event(&serde_json::from_str::<StreamEvent>(&event.data).map_err(|error| {
-                    provider_error(
-                        ProviderErrorKind::Protocol,
-                        OpenAiProviderError::Protocol(error.to_string()),
-                    )
-                })?) {
-                    Ok(Some(StreamOutput::Text(delta))) => yield GenerationEvent::TextDelta(delta),
-                    Ok(Some(StreamOutput::Completed(outcome))) => {
+                ensure_stream_is_active(completed)?;
+                match decode_stream_event(&event.data)? {
+                    Some(StreamOutput::Text(delta)) => {
+                        yield GenerationEvent::TextDelta(delta);
+                    }
+                    Some(StreamOutput::Completed(outcome)) => {
                         completed = true;
                         yield GenerationEvent::Completed(outcome);
                     }
-                    Ok(None) => {}
-                    Err(error) => Err::<(), _>(provider_error(ProviderErrorKind::Protocol, error))?,
+                    None => {}
                 }
             }
 
@@ -446,6 +428,27 @@ enum StreamOutput {
     Completed(GenerationOutcome),
 }
 
+fn decode_stream_event(data: &str) -> Result<Option<StreamOutput>, ProviderError> {
+    let event = serde_json::from_str::<StreamEvent>(data).map_err(|error| {
+        provider_error(
+            ProviderErrorKind::Protocol,
+            OpenAiProviderError::Protocol(error.to_string()),
+        )
+    })?;
+    OpenAiProvider::stream_event(&event)
+        .map_err(|error| provider_error(ProviderErrorKind::Protocol, error))
+}
+
+fn ensure_stream_is_active(completed: bool) -> Result<(), ProviderError> {
+    if completed {
+        return Err(provider_error(
+            ProviderErrorKind::Protocol,
+            OpenAiProviderError::Protocol("received data after completion".to_owned()),
+        ));
+    }
+    Ok(())
+}
+
 fn response_error_detail(error: &ResponseError) -> String {
     match (&error.code, &error.message) {
         (Some(code), Some(message)) => format!("{code}: {message}"),
@@ -489,8 +492,8 @@ const fn classify_status(status: u16) -> ProviderErrorKind {
     }
 }
 
-fn provider_error(kind: ProviderErrorKind, error: impl Into<OpenAiProviderError>) -> ProviderError {
-    ProviderError::with_kind(openai_provider(), kind, error.into())
+fn provider_error(kind: ProviderErrorKind, error: OpenAiProviderError) -> ProviderError {
+    ProviderError::with_kind(openai_provider(), kind, error)
 }
 
 #[cfg(test)]

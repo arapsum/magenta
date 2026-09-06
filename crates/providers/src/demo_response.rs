@@ -15,13 +15,44 @@ pub fn fake_response(prompt: &str) -> String {
 
     match fingerprint % 3 {
         0 => format!(
-            "## A focused direction\n\nI would turn **{prompt}** into a small, observable workflow. Start with the user-visible state, keep the boundary narrow, and let the implementation grow from a real interaction.\n\n- Name the state the user can see.\n- Keep the first action reversible.\n- Measure the result before adding another layer.\n\nThat gives the next decision a clear place to land."
+            concat!(
+                "## A focused direction\n\n",
+                "I would turn **{}** into a small, observable workflow. ",
+                "Start with the user-visible state, keep the boundary narrow, ",
+                "and let the implementation grow from a real interaction.\n\n",
+                "- Name the state the user can see.\n",
+                "- Keep the first action reversible.\n",
+                "- Measure the result before adding another layer.\n\n",
+                "That gives the next decision a clear place to land."
+            ),
+            prompt
         ),
         1 => format!(
-            "Here is a practical shape for **{prompt}**:\n\n1. Capture the intent in one value.\n2. Render the current state immediately.\n3. Move slow work behind a cancellable task.\n4. Persist only after the result is complete.\n\nThe important part is the seam between the UI and the work behind it."
+            concat!(
+                "Here is a practical shape for **{}**:\n\n",
+                "1. Capture the intent in one value.\n",
+                "2. Render the current state immediately.\n",
+                "3. Move slow work behind a cancellable task.\n",
+                "4. Persist only after the result is complete.\n\n",
+                "The important part is the seam between the UI and the work behind it."
+            ),
+            prompt
         ),
         _ => format!(
-            "I would keep **{prompt}** deliberately small at first. The UI can model the workflow with a typed operation, then a provider or storage adapter can replace the local fixture later.\n\n```rust\nstruct Operation {{\n    input: String,\n    state: OperationState,\n}}\n```\n\nThat shape keeps the interface testable while the remote boundary is still evolving."
+            concat!(
+                "I would keep **{}** deliberately small at first. ",
+                "The UI can model the workflow with a typed operation, ",
+                "then a provider or storage adapter can replace the local fixture later.\n\n",
+                "```rust\n",
+                "struct Operation {{\n",
+                "    input: String,\n",
+                "    state: OperationState,\n",
+                "}}\n",
+                "```\n\n",
+                "That shape keeps the interface testable while the remote ",
+                "boundary is still evolving."
+            ),
+            prompt
         ),
     }
 }

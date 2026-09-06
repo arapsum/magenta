@@ -94,7 +94,8 @@ impl CredentialRecord {
             return false;
         };
 
-        expires_at_ms <= now_ms().saturating_add(REFRESH_WINDOW.as_secs().saturating_mul(1_000))
+        let refresh_window_ms = REFRESH_WINDOW.as_secs().saturating_mul(1_000);
+        expires_at_ms <= now_ms().saturating_add(refresh_window_ms)
     }
 }
 
@@ -542,11 +543,25 @@ async fn write_callback_response(
     message: &str,
 ) -> Result<(), OpenAiAuthError> {
     let body = format!(
-        "<!doctype html><html><body style=\"font-family:sans-serif;background:#090e0f;color:#d9f9ff\"><p>{message}</p></body></html>"
+        concat!(
+            "<!doctype html><html><body ",
+            "style=\"font-family:sans-serif;background:#090e0f;color:#d9f9ff\">",
+            "<p>{}</p></body></html>"
+        ),
+        message
     );
     let response = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
+        concat!(
+            "HTTP/1.1 {}\r\n",
+            "Content-Type: text/html; charset=utf-8\r\n",
+            "Content-Length: {}\r\n",
+            "Connection: close\r\n",
+            "\r\n",
+            "{}"
+        ),
+        status,
+        body.len(),
+        body
     );
     stream
         .write_all(response.as_bytes())
