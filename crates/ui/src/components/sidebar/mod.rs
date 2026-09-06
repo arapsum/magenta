@@ -1,12 +1,15 @@
 mod model;
 
 use gpui::{
-    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, Bounds, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable as _,
+    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render, RenderOnce,
+    Role, SharedString, StatefulInteractiveElement as _, Styled as _, Window, deferred, div,
+    prelude::FluentBuilder as _, px,
 };
+use gpui_base::{Align, Placement, PopoverState, Positioner, actions::Cancel};
 use gpui_component::{
-    ActiveTheme as _, Collapsible, Icon, IconName, Sizable as _, StyledExt as _,
+    ActiveTheme as _, Collapsible, Disableable as _, ElementExt as _, Icon, IconName,
+    Selectable as _, Sizable as _, StyledExt as _, ThemeStyled as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     menu::{DropdownMenu as _, PopupMenuItem},
@@ -16,7 +19,6 @@ use gpui_component::{
 use magenta_core::ProviderAccount;
 
 use crate::app::OpenConversationFinder;
-use crate::theme;
 
 pub use model::{ConversationId, ConversationPeriod, ConversationSummary, SidebarEvent};
 
@@ -26,6 +28,121 @@ const EXPANDED_WIDTH: gpui::Pixels = px(260.);
 const ROW_HEIGHT: gpui::Pixels = px(30.);
 const INITIAL_RECENCY_LIMIT: usize = 6;
 const RECENCY_PAGE_SIZE: usize = 6;
+const ACCOUNT_MENU_WIDTH: gpui::Pixels = px(240.);
+const ACCOUNT_MENU_GAP: gpui::Pixels = px(6.);
+
+type AccountMenuBuilder =
+    Box<dyn FnOnce(Entity<PopoverState>, &mut Window, &mut App) -> AnyElement>;
+
+#[derive(IntoElement)]
+struct AccountDropdown {
+    id: ElementId,
+    trigger: Button,
+    menu: AccountMenuBuilder,
+}
+
+#[derive(Clone, Copy, Default)]
+struct AccountDropdownAnchor {
+    bounds: Bounds<gpui::Pixels>,
+    captured: bool,
+}
+
+impl AccountDropdown {
+    fn new(
+        id: impl Into<ElementId>,
+        trigger: Button,
+        menu: impl FnOnce(Entity<PopoverState>, &mut Window, &mut App) -> AnyElement + 'static,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            trigger,
+            menu: Box::new(menu),
+        }
+    }
+}
+
+impl RenderOnce for AccountDropdown {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let open_state = window.use_keyed_state((self.id.clone(), "open"), cx, |_, cx| {
+            PopoverState::new(false, cx)
+        });
+        let anchor_state = window.use_keyed_state((self.id.clone(), "anchor"), cx, |_, _| {
+            AccountDropdownAnchor::default()
+        });
+        let parent_view = window.current_view();
+        let open = open_state.read(cx).is_open();
+        let trigger = self.trigger.selected(open);
+
+        let root = div()
+            .id(self.id)
+            .debug_selector(|| "account-dropdown-trigger".into())
+            .w_full()
+            .child(trigger)
+            .on_mouse_down(MouseButton::Left, {
+                let open_state = open_state.clone();
+                move |_, window, cx| {
+                    cx.stop_propagation();
+                    open_state.update(cx, |state, cx| {
+                        state.set_open(open, cx);
+                        state.toggle_open(window, cx);
+                    });
+                    cx.notify(parent_view);
+                }
+            })
+            .on_prepaint({
+                let anchor_state = anchor_state.clone();
+                move |bounds, window, cx| {
+                    let first = anchor_state.update(cx, |anchor, _| {
+                        let first = !anchor.captured;
+                        anchor.bounds = bounds;
+                        anchor.captured = true;
+                        first
+                    });
+                    if first {
+                        window.request_animation_frame();
+                    }
+                }
+            });
+
+        let anchor = *anchor_state.read(cx);
+        if !open || !anchor.captured {
+            return root.into_any_element();
+        }
+
+        let focus_handle = open_state.read(cx).focus_handle(cx);
+        let dismiss_state = open_state.clone();
+        let cancel_state = open_state.clone();
+        let menu = (self.menu)(open_state, window, cx);
+        let surface = div()
+            .id("sidebar-account-menu-surface")
+            .debug_selector(|| "account-dropdown-surface".into())
+            .role(Role::Dialog)
+            .aria_label("Account menu")
+            .occlude()
+            .tab_group()
+            .track_focus(&focus_handle)
+            .key_context("Popover")
+            .on_action(move |_: &Cancel, window, cx| {
+                cancel_state.update(cx, |state, cx| state.dismiss(window, cx));
+                cx.notify(parent_view);
+            })
+            .on_mouse_down_out(move |_, window, cx| {
+                dismiss_state.update(cx, |state, cx| state.dismiss(window, cx));
+                cx.notify(parent_view);
+            })
+            .child(menu);
+
+        root.child(deferred(
+            Positioner::side(anchor.bounds)
+                .placement(Placement::Top)
+                .align(Align::End)
+                .offset(ACCOUNT_MENU_GAP)
+                .margin(px(8.))
+                .child(surface),
+        ))
+        .into_any_element()
+    }
+}
 
 pub struct SidebarView {
     collapsed: bool,
@@ -64,7 +181,7 @@ impl SidebarView {
     }
 
     #[cfg(test)]
-    pub(crate) fn active_conversation(&self) -> Option<ConversationId> {
+    pub(crate) const fn active_conversation(&self) -> Option<ConversationId> {
         self.active_conversation
     }
     pub(crate) fn focus_finder_launcher(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -165,52 +282,44 @@ impl SidebarView {
         cx.notify();
     }
 
-    fn open_settings(cx: &mut Context<'_, Self>) {
-        cx.emit(SidebarEvent::OpenSettings);
-    }
-
-    fn render_footer(&self, view: Entity<Self>, cx: &App) -> AnyElement {
-        let settings_view = view.clone();
+    fn render_footer(&self, view: &Entity<Self>, cx: &App) -> AnyElement {
+        let details = profile_details(self.account.as_ref());
+        let connected = self.account.is_some();
+        let is_dark = cx.theme().is_dark();
+        let menu_view = view.clone();
+        let menu_details = details.clone();
         let ProfileDetails {
             name,
             detail,
             initial,
             tooltip,
-        } = profile_details(self.account.as_ref());
-        let theme_icon = if cx.theme().is_dark() {
-            IconName::Sun
-        } else {
-            IconName::Moon
-        };
-        let theme_label = if cx.theme().is_dark() {
-            "Use light theme"
-        } else {
-            "Use dark theme"
-        };
-        let theme_view = view;
-
-        h_flex()
+            ..
+        } = details;
+        let trigger = Button::new("sidebar-account-menu-trigger")
+            .ghost()
+            .accessibility_id("sidebar-account-menu")
+            .tooltip(tooltip)
             .w_full()
+            .h(px(56.))
             .items_center()
             .gap(px(8.))
             .p(px(8.))
-            .border_1()
-            .border_color(cx.theme().sidebar_border)
             .rounded(px(8.))
-            .bg(cx.theme().sidebar_accent.opacity(0.35))
             .child(
-                Button::new("local-profile")
-                    .ghost()
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
                     .size(px(28.))
-                    .p_0()
-                    .rounded_full()
+                    .flex_none()
+                    .rounded(px(8.))
                     .bg(cx.theme().sidebar_accent)
                     .text_color(cx.theme().sidebar_accent_foreground)
-                    .label(initial)
-                    .tooltip(tooltip)
-                    .on_click(move |_, _, cx| {
-                        settings_view.update(cx, |_, cx| Self::open_settings(cx));
-                    }),
+                    .border_1()
+                    .border_color(cx.theme().sidebar_border)
+                    .text_size(px(12.))
+                    .font_medium()
+                    .child(initial),
             )
             .child(
                 v_flex()
@@ -237,20 +346,345 @@ impl SidebarView {
                     ),
             )
             .child(
-                Button::new("sidebar-theme")
-                    .ghost()
-                    .small()
-                    .icon(theme_icon)
-                    .tooltip(theme_label)
-                    .accessibility_id("toggle-theme")
-                    .on_click(move |_, _, cx| {
-                        if let Err(error) = theme::toggle(cx) {
-                            tracing::error!(?error, "could not toggle the application theme");
-                        }
-                        theme_view.update(cx, |_, cx| cx.notify());
+                Icon::new(IconName::ChevronsUpDown)
+                    .xsmall()
+                    .text_color(cx.theme().muted_foreground),
+            );
+
+        v_flex()
+            .w_full()
+            .pt(px(8.))
+            .border_t_1()
+            .border_color(cx.theme().sidebar_border)
+            .child(AccountDropdown::new(
+                "sidebar-account-dropdown",
+                trigger,
+                move |popover, _window, cx| {
+                    Self::render_account_menu(
+                        &menu_view,
+                        &menu_details,
+                        connected,
+                        is_dark,
+                        &popover,
+                        cx,
+                    )
+                },
+            ))
+            .into_any_element()
+    }
+
+    fn render_account_menu(
+        view: &Entity<Self>,
+        details: &ProfileDetails,
+        connected: bool,
+        is_dark: bool,
+        popover: &Entity<PopoverState>,
+        cx: &App,
+    ) -> AnyElement {
+        let mut surface = v_flex()
+            .w(ACCOUNT_MENU_WIDTH)
+            .popover_style(cx)
+            .rounded(px(13.))
+            .p(px(4.))
+            .child(Self::account_menu_identity(details, cx))
+            .child(Self::account_menu_separator(cx))
+            .child(Self::account_menu_actions(view, popover, is_dark, cx));
+
+        if connected {
+            surface = surface
+                .child(Self::account_menu_separator(cx))
+                .child(Self::account_plan_button(view, popover, details, cx));
+        }
+
+        surface
+            .child(Self::account_menu_separator(cx))
+            .child(Self::account_session_button(view, popover, connected, cx))
+            .into_any_element()
+    }
+
+    fn account_menu_identity(details: &ProfileDetails, cx: &App) -> impl IntoElement {
+        let detail = details.email.as_ref().unwrap_or(&details.detail).clone();
+
+        h_flex()
+            .w_full()
+            .h(px(58.))
+            .items_center()
+            .gap(px(10.))
+            .px(px(8.))
+            .text_color(cx.theme().foreground)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .size(px(32.))
+                    .flex_none()
+                    .rounded(px(9.))
+                    .bg(cx.theme().sidebar_accent)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .text_size(px(13.))
+                    .font_medium()
+                    .child(details.initial.clone()),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(px(2.))
+                    .child(
+                        div()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_size(px(13.))
+                            .font_medium()
+                            .child(details.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_size(px(11.))
+                            .text_color(cx.theme().muted_foreground)
+                            .child(detail),
+                    ),
+            )
+    }
+
+    fn account_menu_actions(
+        view: &Entity<Self>,
+        popover: &Entity<PopoverState>,
+        is_dark: bool,
+        cx: &App,
+    ) -> impl IntoElement {
+        let settings_view = view.clone();
+        let settings_popover = popover.clone();
+        let settings = Self::account_menu_button(
+            "account-settings",
+            "Settings",
+            IconName::Settings,
+            None,
+            false,
+            cx,
+        )
+        .on_click(move |_, window, cx| {
+            Self::emit_account_event(
+                &settings_view,
+                &settings_popover,
+                SidebarEvent::OpenSettings,
+                window,
+                cx,
+            );
+        });
+
+        let theme_view = view.clone();
+        let theme_popover = popover.clone();
+        let appearance = Self::account_menu_button(
+            "account-appearance",
+            "Appearance",
+            if is_dark {
+                IconName::Sun
+            } else {
+                IconName::Moon
+            },
+            Some(if is_dark { "Dark" } else { "Light" }.into()),
+            false,
+            cx,
+        )
+        .on_click(move |_, window, cx| {
+            Self::emit_account_event(
+                &theme_view,
+                &theme_popover,
+                SidebarEvent::ToggleTheme,
+                window,
+                cx,
+            );
+        });
+
+        v_flex()
+            .w_full()
+            .py(px(4.))
+            .child(settings)
+            .child(appearance)
+            .child(Self::account_menu_button(
+                "account-keyboard-shortcuts",
+                "Keyboard shortcuts",
+                IconName::SquareTerminal,
+                Some("Soon".into()),
+                true,
+                cx,
+            ))
+            .child(Self::account_menu_button(
+                "account-help-feedback",
+                "Help & feedback",
+                IconName::Info,
+                Some("Soon".into()),
+                true,
+                cx,
+            ))
+    }
+
+    fn account_plan_button(
+        view: &Entity<Self>,
+        popover: &Entity<PopoverState>,
+        details: &ProfileDetails,
+        cx: &App,
+    ) -> impl IntoElement {
+        let plan = details
+            .plan
+            .as_ref()
+            .map_or_else(|| "Account plan".to_owned(), |plan| format!("{plan} plan"));
+        let plan_view = view.clone();
+        let plan_popover = popover.clone();
+
+        v_flex().w_full().py(px(5.)).child(
+            Button::new("account-plan")
+                .ghost()
+                .accessibility_id("manage-account-plan")
+                .w_full()
+                .h(px(54.))
+                .px(px(9.))
+                .rounded(px(8.))
+                .bg(cx.theme().sidebar_accent.opacity(0.45))
+                .child(
+                    h_flex()
+                        .w_full()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(8.))
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap(px(2.))
+                                .child(div().text_size(px(12.)).font_medium().child(plan))
+                                .child(
+                                    div()
+                                        .text_size(px(10.))
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("OpenAI account"),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .text_size(px(11.))
+                                .font_medium()
+                                .child("Manage"),
+                        ),
+                )
+                .on_click(move |_, window, cx| {
+                    Self::emit_account_event(
+                        &plan_view,
+                        &plan_popover,
+                        SidebarEvent::OpenSettings,
+                        window,
+                        cx,
+                    );
+                }),
+        )
+    }
+
+    fn account_session_button(
+        view: &Entity<Self>,
+        popover: &Entity<PopoverState>,
+        connected: bool,
+        cx: &App,
+    ) -> impl IntoElement {
+        let final_event = if connected {
+            SidebarEvent::SignOut
+        } else {
+            SidebarEvent::BeginLogin
+        };
+        let final_label = if connected {
+            "Log out"
+        } else {
+            "Sign in with ChatGPT"
+        };
+        let final_icon = if connected {
+            IconName::ArrowRight
+        } else {
+            IconName::Bot
+        };
+        let final_view = view.clone();
+        let final_popover = popover.clone();
+        let final_action = Self::account_menu_button(
+            "account-session-action",
+            final_label,
+            final_icon,
+            None,
+            false,
+            cx,
+        )
+        .on_click(move |_, window, cx| {
+            Self::emit_account_event(&final_view, &final_popover, final_event, window, cx);
+        });
+
+        v_flex().w_full().py(px(4.)).child(final_action)
+    }
+
+    fn account_menu_separator(cx: &App) -> impl IntoElement {
+        div().w_full().h(px(1.)).bg(cx.theme().border.opacity(0.75))
+    }
+
+    fn account_menu_button(
+        id: &'static str,
+        label: &'static str,
+        icon: IconName,
+        trailing: Option<SharedString>,
+        disabled: bool,
+        cx: &App,
+    ) -> Button {
+        Button::new(id)
+            .ghost()
+            .accessibility_id(id)
+            .w_full()
+            .h(px(32.))
+            .px(px(8.))
+            .rounded(px(7.))
+            .disabled(disabled)
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(Icon::new(icon).xsmall())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_size(px(12.))
+                            .child(label),
+                    )
+                    .when_some(trailing, |this, trailing| {
+                        this.child(
+                            div()
+                                .flex_none()
+                                .text_size(px(10.))
+                                .text_color(cx.theme().muted_foreground)
+                                .child(trailing),
+                        )
                     }),
             )
-            .into_any_element()
+    }
+
+    fn emit_account_event(
+        view: &Entity<Self>,
+        popover: &Entity<PopoverState>,
+        event: SidebarEvent,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        popover.update(cx, |state, cx| state.dismiss(window, cx));
+        view.update(cx, |_, cx| {
+            cx.emit(event);
+            cx.notify();
+        });
     }
 
     fn new_chat_button(view: Entity<Self>, _cx: &App) -> AnyElement {
@@ -333,7 +767,7 @@ impl SidebarView {
                                 .absolute()
                                 .inset_0()
                                 .justify_center()
-                                .font_family("monospace")
+                                .font_family(cx.theme().mono_font_family.clone())
                                 .text_size(px(11.))
                                 .text_color(cx.theme().muted_foreground.opacity(0.8))
                                 .when(selected, gpui::Styled::invisible)
@@ -595,12 +1029,14 @@ impl SidebarView {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ProfileDetails {
     name: String,
     detail: String,
     initial: String,
     tooltip: String,
+    email: Option<String>,
+    plan: Option<String>,
 }
 
 fn profile_details(account: Option<&ProviderAccount>) -> ProfileDetails {
@@ -610,6 +1046,8 @@ fn profile_details(account: Option<&ProviderAccount>) -> ProfileDetails {
             detail: "Local profile".to_owned(),
             initial: "A".to_owned(),
             tooltip: "Local profile and settings".to_owned(),
+            email: None,
+            plan: None,
         };
     };
 
@@ -621,11 +1059,14 @@ fn profile_details(account: Option<&ProviderAccount>) -> ProfileDetails {
         .or_else(|| account.email.as_deref().and_then(email_display_name))
         .or_else(|| account.email.clone())
         .unwrap_or_else(|| "ChatGPT account".to_owned());
-    let detail = account
-        .email
-        .clone()
-        .or_else(|| account.plan.clone())
-        .unwrap_or_else(|| "OpenAI account".to_owned());
+    let email = account.email.clone();
+    let plan = account.plan.as_deref().and_then(display_plan);
+    let detail = match (plan.as_deref(), email.as_deref()) {
+        (Some(plan), Some(email)) => format!("{plan} · {email}"),
+        (Some(plan), None) => plan.to_owned(),
+        (None, Some(email)) => email.to_owned(),
+        (None, None) => "OpenAI account".to_owned(),
+    };
     let initial = name.chars().next().map_or_else(
         || "O".to_owned(),
         |character| character.to_uppercase().collect(),
@@ -640,7 +1081,14 @@ fn profile_details(account: Option<&ProviderAccount>) -> ProfileDetails {
         detail,
         initial,
         tooltip,
+        email,
+        plan,
     }
+}
+
+fn display_plan(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| capitalize(value))
 }
 
 fn email_display_name(email: &str) -> Option<String> {
@@ -666,9 +1114,63 @@ fn capitalize(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use gpui::{
+        App, Context, InteractiveElement as _, IntoElement, Modifiers, ParentElement as _, Render,
+        Styled as _, TestAppContext, Window, div, px,
+    };
+    use gpui_component::{ActiveTheme as _, button::Button};
     use magenta_core::{ProviderAccount, ProviderId};
 
-    use super::{ProfileDetails, profile_details};
+    use super::{AccountDropdown, ProfileDetails, profile_details};
+
+    struct AccountDropdownHarness;
+
+    impl Render for AccountDropdownHarness {
+        fn render(
+            &mut self,
+            _window: &mut Window,
+            _cx: &mut Context<'_, Self>,
+        ) -> impl IntoElement {
+            div()
+                .size_full()
+                .flex()
+                .items_end()
+                .p(px(20.))
+                .child(AccountDropdown::new(
+                    "account-dropdown-test",
+                    Button::new("account-dropdown-test-trigger")
+                        .w(px(200.))
+                        .h(px(40.))
+                        .label("Account"),
+                    |_, _, cx: &mut App| {
+                        div()
+                            .debug_selector(|| "account-dropdown-test-menu".into())
+                            .w(px(180.))
+                            .h(px(100.))
+                            .bg(cx.theme().popover)
+                            .into_any_element()
+                    },
+                ))
+        }
+    }
+
+    #[gpui::test]
+    fn account_dropdown_opens_and_dismisses_from_an_outside_click(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let (_, cx) = cx.add_window_view(|_, _| AccountDropdownHarness);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let trigger = cx.debug_bounds("account-dropdown-trigger").unwrap();
+        cx.simulate_click(trigger.center(), Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        assert!(cx.debug_bounds("account-dropdown-test-menu").is_some());
+
+        cx.simulate_click(gpui::point(px(5.), px(5.)), Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        assert!(cx.debug_bounds("account-dropdown-test-menu").is_none());
+    }
 
     #[test]
     fn signed_out_profile_keeps_the_local_fallback() {
@@ -679,6 +1181,8 @@ mod tests {
                 detail: "Local profile".to_owned(),
                 initial: "A".to_owned(),
                 tooltip: "Local profile and settings".to_owned(),
+                email: None,
+                plan: None,
             }
         );
     }
@@ -696,9 +1200,11 @@ mod tests {
             profile_details(Some(&account)),
             ProfileDetails {
                 name: "Jacob Cooper".to_owned(),
-                detail: "jacob@example.com".to_owned(),
+                detail: "Plus · jacob@example.com".to_owned(),
                 initial: "J".to_owned(),
                 tooltip: "Jacob Cooper · jacob@example.com".to_owned(),
+                email: Some("jacob@example.com".to_owned()),
+                plan: Some("Plus".to_owned()),
             }
         );
     }
@@ -715,8 +1221,10 @@ mod tests {
         let details = profile_details(Some(&account));
 
         assert_eq!(details.name, "Jacob Cooper");
-        assert_eq!(details.detail, "jacob.cooper@example.com");
+        assert_eq!(details.detail, "Plus · jacob.cooper@example.com");
         assert_eq!(details.initial, "J");
+        assert_eq!(details.email.as_deref(), Some("jacob.cooper@example.com"));
+        assert_eq!(details.plan.as_deref(), Some("Plus"));
     }
 }
 
@@ -763,6 +1271,6 @@ impl Render for SidebarView {
                 view: view.clone(),
                 collapsed: false,
             })
-            .footer(self.render_footer(view, cx))
+            .footer(self.render_footer(&view, cx))
     }
 }

@@ -10,6 +10,7 @@ futures-util.workspace = true
 magenta-application.workspace = true
 magenta-core.workspace = true
 gpui.workspace = true
+gpui-base.workspace = true
 gpui-component.workspace = true
 parking_lot.workspace = true
 ratex-layout.workspace = true

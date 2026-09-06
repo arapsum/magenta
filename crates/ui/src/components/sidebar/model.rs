@@ -41,6 +41,9 @@ pub enum SidebarEvent {
     NewChat,
     OpenConversation(ConversationId),
     OpenSettings,
+    BeginLogin,
+    SignOut,
+    ToggleTheme,
     SetPinned(ConversationId, bool),
     RetryHistory,
 }
