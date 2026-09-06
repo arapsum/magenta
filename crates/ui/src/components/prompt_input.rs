@@ -780,12 +780,12 @@ impl Render for PromptComposer {
                             .when(!generating, ButtonVariants::primary)
                             .disabled(!ready && !generating)
                             .accessibility_id(if generating {
-                                "prompt-cancel"
+                                "prompt-stop-response"
                             } else {
                                 "prompt-submit"
                             })
                             .tooltip(if generating {
-                                "Stop generating"
+                                "Stop response"
                             } else if ready {
                                 "Send message"
                             } else {
@@ -795,9 +795,9 @@ impl Render for PromptComposer {
                             .p_0()
                             .rounded_full()
                             .icon(if generating {
-                                IconName::CircleX
+                                Icon::empty().path("icons/generation-stop.svg")
                             } else {
-                                IconName::ChevronUp
+                                Icon::new(IconName::ChevronUp)
                             })
                             .on_click(move |_, _window, cx| {
                                 submit_view.update(cx, |composer, cx| {
@@ -837,6 +837,8 @@ fn is_supported_image(path: &std::path::Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
     use gpui::{TestAppContext, size};
 
     use super::*;
@@ -851,6 +853,32 @@ mod tests {
             default_effort,
             supported_efforts: EffortLevel::ALL.to_vec(),
         }
+    }
+
+    #[gpui::test]
+    fn cancel_is_emitted_only_while_a_response_is_generating(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let window = cx.open_window(size(px(720.), px(420.)), PromptComposer::new);
+        let cancellations = Rc::new(RefCell::new(0));
+        let observed = Rc::clone(&cancellations);
+
+        let subscription = window
+            .update(cx, |composer, _, cx| {
+                let subscription = cx.subscribe(&cx.entity(), move |_, _, event, _| {
+                    if matches!(event, PromptComposerEvent::Cancel) {
+                        *observed.borrow_mut() += 1;
+                    }
+                });
+                composer.cancel(cx);
+                composer.set_generating(true, cx);
+                composer.cancel(cx);
+                subscription
+            })
+            .expect("the composer test window should remain open");
+
+        cx.run_until_parked();
+        assert_eq!(*cancellations.borrow(), 1);
+        drop(subscription);
     }
 
     #[gpui::test]

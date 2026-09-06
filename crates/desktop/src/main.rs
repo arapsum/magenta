@@ -28,6 +28,9 @@ impl AssetSource for MagentaAssets {
             "icons/conversation-rename.svg" => {
                 Some(include_bytes!("../assets/icons/conversation-rename.svg").as_slice())
             }
+            "icons/generation-stop.svg" => {
+                Some(include_bytes!("../assets/icons/generation-stop.svg").as_slice())
+            }
             _ => None,
         };
 
@@ -43,6 +46,7 @@ impl AssetSource for MagentaAssets {
             assets.extend([
                 "icons/conversation-pin.svg".into(),
                 "icons/conversation-rename.svg".into(),
+                "icons/generation-stop.svg".into(),
             ]);
         }
         Ok(assets)

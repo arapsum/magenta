@@ -1,4 +1,8 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use futures_util::StreamExt as _;
 use gpui::{
@@ -38,10 +42,70 @@ pub struct ConversationThread {
 const MESSAGE_MAX_WIDTH: gpui::Pixels = px(760.);
 const USER_MESSAGE_MAX_WIDTH: gpui::Pixels = px(560.);
 const LIST_OVERDRAW: gpui::Pixels = px(640.);
+const GENERATION_CLOCK_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, thiserror::Error)]
 #[error("provider stream ended before completion")]
 struct IncompleteGeneration;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GenerationPhase {
+    Connecting,
+    Thinking,
+    Responding,
+}
+
+impl GenerationPhase {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Connecting => "Connecting",
+            Self::Thinking => "Thinking",
+            Self::Responding => "Responding",
+        }
+    }
+}
+
+struct GenerationProgress {
+    message_id: MessageId,
+    provider: ProviderId,
+    configuration: Option<GenerationConfig>,
+    phase: GenerationPhase,
+    started_at: Instant,
+    provider_started_at: Option<Instant>,
+    first_text_at: Option<Instant>,
+}
+
+impl GenerationProgress {
+    fn new(
+        message_id: MessageId,
+        provider: ProviderId,
+        configuration: Option<GenerationConfig>,
+    ) -> Self {
+        Self {
+            message_id,
+            provider,
+            configuration,
+            phase: GenerationPhase::Connecting,
+            started_at: Instant::now(),
+            provider_started_at: None,
+            first_text_at: None,
+        }
+    }
+
+    fn elapsed(&self) -> Duration {
+        self.started_at.elapsed()
+    }
+
+    fn provider_started_ms(&self) -> Option<u64> {
+        self.provider_started_at
+            .map(|instant| duration_millis(instant.duration_since(self.started_at)))
+    }
+
+    fn first_text_ms(&self) -> Option<u64> {
+        self.first_text_at
+            .map(|instant| duration_millis(instant.duration_since(self.started_at)))
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum ConversationViewEvent {
@@ -74,6 +138,8 @@ pub struct ConversationView {
     generation: u64,
     streaming_message: Option<MessageId>,
     generation_task: Option<Task<()>>,
+    generation_clock_task: Option<Task<()>>,
+    generation_progress: Option<GenerationProgress>,
     older_cursor: Option<magenta_core::MessageSequence>,
     has_older: bool,
     loading_earlier: bool,
@@ -168,6 +234,8 @@ impl ConversationView {
             generation: 0,
             streaming_message: None,
             generation_task: None,
+            generation_clock_task: None,
+            generation_progress: None,
             older_cursor: None,
             has_older: false,
             loading_earlier: false,
@@ -318,6 +386,9 @@ impl ConversationView {
         let id = self.streaming_message.take()?;
         self.generation = self.generation.wrapping_add(1);
         self.generation_task.take();
+        if let Some(progress) = self.clear_generation_progress().as_ref() {
+            trace_generation_terminal(progress, "interrupted");
+        }
         let message = self
             .messages
             .iter_mut()
@@ -446,13 +517,28 @@ impl ConversationView {
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         self.streaming_message = Some(assistant_id);
+        self.generation_progress = Some(GenerationProgress::new(
+            assistant_id,
+            provider_id.clone(),
+            self.origins.get(&assistant_id).cloned(),
+        ));
+        self.start_generation_clock(generation, assistant_id, window, cx);
         self.generation_task = Some(cx.spawn_in(window, async move |view, window| {
             let mut completed = None;
             let mut stream = stream;
 
             while let Some(event) = stream.next().await {
                 match event {
-                    Ok(GenerationEvent::Started) => {}
+                    Ok(GenerationEvent::Started) => {
+                        if view
+                            .update_in(window, |view, _, cx| {
+                                view.mark_provider_started(generation, assistant_id, cx);
+                            })
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
                     Ok(GenerationEvent::TextDelta(chunk)) => {
                         if view
                             .update_in(window, |view, _, cx| {
@@ -490,6 +576,70 @@ impl ConversationView {
         cx.emit(ConversationViewEvent::GenerationStarted);
     }
 
+    fn start_generation_clock(
+        &mut self,
+        generation: u64,
+        assistant_id: MessageId,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) {
+        self.generation_clock_task.take();
+        self.generation_clock_task = Some(cx.spawn_in(window, async move |view, window| {
+            loop {
+                window
+                    .background_executor()
+                    .timer(GENERATION_CLOCK_INTERVAL)
+                    .await;
+
+                match view.update_in(window, |view, _, cx| {
+                    let active = view.generation == generation
+                        && view.streaming_message == Some(assistant_id)
+                        && view
+                            .generation_progress
+                            .as_ref()
+                            .is_some_and(|progress| progress.message_id == assistant_id);
+                    if active {
+                        cx.notify();
+                    }
+                    active
+                }) {
+                    Ok(true) => {}
+                    Ok(false) | Err(_) => break,
+                }
+            }
+        }));
+    }
+
+    fn mark_provider_started(
+        &mut self,
+        generation: u64,
+        assistant_id: MessageId,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.generation != generation || self.streaming_message != Some(assistant_id) {
+            return;
+        }
+
+        let Some(progress) = self
+            .generation_progress
+            .as_mut()
+            .filter(|progress| progress.message_id == assistant_id)
+        else {
+            return;
+        };
+        if progress.provider_started_at.is_none() {
+            progress.provider_started_at = Some(Instant::now());
+            progress.phase = GenerationPhase::Thinking;
+            tracing::debug!(
+                provider = %progress.provider.0,
+                message_id = assistant_id.0,
+                operation = "conversation.generate",
+                "provider stream started"
+            );
+            cx.notify();
+        }
+    }
+
     fn push_stream_chunk(
         &mut self,
         generation: u64,
@@ -499,6 +649,16 @@ impl ConversationView {
     ) {
         if self.generation != generation || self.streaming_message != Some(assistant_id) {
             return;
+        }
+
+        if let Some(progress) = self
+            .generation_progress
+            .as_mut()
+            .filter(|progress| progress.message_id == assistant_id)
+            && progress.first_text_at.is_none()
+        {
+            progress.first_text_at = Some(Instant::now());
+            progress.phase = GenerationPhase::Responding;
         }
 
         let Some(index) = self
@@ -539,6 +699,11 @@ impl ConversationView {
             return;
         }
 
+        let progress = self.clear_generation_progress();
+        if let Some(progress) = progress.as_ref() {
+            trace_generation_terminal(progress, "completed");
+        }
+
         if let Some(message) = self
             .messages
             .iter_mut()
@@ -573,9 +738,24 @@ impl ConversationView {
         }
 
         let provider = error.provider.clone();
+        let progress = self.clear_generation_progress();
+        let model = progress
+            .as_ref()
+            .and_then(|progress| progress.configuration.as_ref())
+            .map_or("unknown", |configuration| configuration.model.0.as_str());
+        let effort = progress
+            .as_ref()
+            .and_then(|progress| progress.configuration.as_ref())
+            .map_or("unknown", |configuration| configuration.effort.label());
         tracing::error!(
             error = ?error,
             provider = %provider.0,
+            model,
+            effort,
+            phase = progress.as_ref().map_or("unknown", |progress| progress.phase.label()),
+            elapsed_ms = progress.as_ref().map(|progress| duration_millis(progress.elapsed())),
+            provider_started_ms = progress.as_ref().and_then(GenerationProgress::provider_started_ms),
+            first_text_ms = progress.as_ref().and_then(GenerationProgress::first_text_ms),
             operation = "conversation.generate",
             "provider generation failed"
         );
@@ -607,11 +787,15 @@ impl ConversationView {
     fn cancel_generation(&mut self, cx: &mut Context<'_, Self>) {
         let Some(assistant_id) = self.streaming_message.take() else {
             self.generation_task.take();
+            self.clear_generation_progress();
             return;
         };
 
         self.generation = self.generation.wrapping_add(1);
         self.generation_task.take();
+        if let Some(progress) = self.clear_generation_progress().as_ref() {
+            trace_generation_terminal(progress, "stopped");
+        }
         if let Some(message) = self
             .messages
             .iter_mut()
@@ -629,6 +813,11 @@ impl ConversationView {
             ));
         }
         cx.notify();
+    }
+
+    fn clear_generation_progress(&mut self) -> Option<GenerationProgress> {
+        self.generation_clock_task.take();
+        self.generation_progress.take()
     }
 
     fn render_message(
@@ -795,7 +984,7 @@ impl ConversationView {
         let copy = Clipboard::new(("copy-message", message.id.0))
             .value(message.content.clone())
             .tooltip("Copy response");
-        let regenerate_view = view;
+        let regenerate_view = view.clone();
         let message_id = message.id;
         let code_id = message.id.0;
         let streaming = message.status == MessageStatus::Streaming;
@@ -804,14 +993,10 @@ impl ConversationView {
             .w_full()
             .gap(px(8.))
             .child(self.render_assistant_header(message, cx))
-            .when(message.content.is_empty() && streaming, |this| {
-                this.child(
-                    h_flex()
-                        .gap(px(8.))
-                        .text_size(px(12.))
-                        .text_color(cx.theme().muted_foreground)
-                        .child(Icon::new(IconName::LoaderCircle).xsmall())
-                        .child("Magenta is thinking..."),
+            .when(streaming, |this| {
+                this.when_some(
+                    self.render_generation_progress(message.id, cx, view),
+                    gpui::ParentElement::child,
                 )
             })
             .when(message.status == MessageStatus::Failed, |this| {
@@ -866,9 +1051,95 @@ impl ConversationView {
             })
             .into_any_element()
     }
+
+    fn render_generation_progress(
+        &self,
+        message_id: MessageId,
+        cx: &App,
+        view: Entity<Self>,
+    ) -> Option<AnyElement> {
+        let progress = self
+            .generation_progress
+            .as_ref()
+            .filter(|progress| progress.message_id == message_id)?;
+        let label = format!(
+            "{} · {}",
+            progress.phase.label(),
+            format_elapsed(progress.elapsed())
+        );
+
+        Some(
+            h_flex()
+                .h(px(26.))
+                .items_center()
+                .gap(px(8.))
+                .text_size(px(12.))
+                .text_color(cx.theme().muted_foreground)
+                .child(Icon::new(IconName::LoaderCircle).xsmall())
+                .child(label)
+                .child(
+                    Button::new(("stop-response", message_id.0))
+                        .ghost()
+                        .xsmall()
+                        .h(px(24.))
+                        .px(px(6.))
+                        .icon(Icon::empty().path("icons/generation-stop.svg"))
+                        .label("Stop")
+                        .tooltip("Stop response")
+                        .accessibility_id(format!("stop-response-{}", message_id.0))
+                        .on_click(move |_, _, cx| {
+                            view.update(cx, |view, cx| {
+                                view.cancel_generation(cx);
+                            });
+                        }),
+                )
+                .into_any_element(),
+        )
+    }
 }
 
 impl EventEmitter<ConversationViewEvent> for ConversationView {}
+
+fn duration_millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn format_elapsed(duration: Duration) -> String {
+    let seconds = duration.as_secs();
+    if seconds < 60 {
+        return format!("{seconds}s");
+    }
+
+    let minutes = seconds / 60;
+    if minutes < 60 {
+        return format!("{minutes}m {:02}s", seconds % 60);
+    }
+
+    format!("{}h {:02}m", minutes / 60, minutes % 60)
+}
+
+fn trace_generation_terminal(progress: &GenerationProgress, status: &'static str) {
+    let model = progress
+        .configuration
+        .as_ref()
+        .map_or("unknown", |configuration| configuration.model.0.as_str());
+    let effort = progress
+        .configuration
+        .as_ref()
+        .map_or("unknown", |configuration| configuration.effort.label());
+    tracing::info!(
+        provider = %progress.provider.0,
+        model,
+        effort,
+        phase = progress.phase.label(),
+        status,
+        elapsed_ms = duration_millis(progress.elapsed()),
+        provider_started_ms = progress.provider_started_ms(),
+        first_text_ms = progress.first_text_ms(),
+        operation = "conversation.generate",
+        "generation finished"
+    );
+}
 
 impl Render for ConversationView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
@@ -975,6 +1246,80 @@ mod tests {
             messages,
             has_older,
         }
+    }
+
+    #[test]
+    fn elapsed_time_uses_compact_stable_units() {
+        assert_eq!(format_elapsed(Duration::ZERO), "0s");
+        assert_eq!(format_elapsed(Duration::from_secs(59)), "59s");
+        assert_eq!(format_elapsed(Duration::from_secs(60)), "1m 00s");
+        assert_eq!(format_elapsed(Duration::from_secs(3_725)), "1h 02m");
+    }
+
+    #[gpui::test]
+    fn generation_progress_tracks_stream_phases_and_clears_on_stop(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
+            let composer = cx.new(|cx| PromptComposer::new(window, cx));
+            ConversationView::new(composer, window, cx)
+        });
+
+        window
+            .update(cx, |view, window, cx| {
+                view.load(
+                    ConversationThread {
+                        conversation: conversation(),
+                        messages: Vec::new(),
+                    },
+                    cx,
+                );
+                view.start_generation(
+                    message(1, MessageRole::User, MessageStatus::Complete),
+                    message(2, MessageRole::Assistant, MessageStatus::Streaming),
+                    ProviderId::new("demo"),
+                    Box::pin(stream::pending()),
+                    window,
+                    cx,
+                );
+
+                let generation = view.generation;
+                let progress = view
+                    .generation_progress
+                    .as_ref()
+                    .expect("generation progress should start immediately");
+                assert_eq!(progress.phase, GenerationPhase::Connecting);
+                assert!(progress.provider_started_at.is_none());
+                assert!(progress.first_text_at.is_none());
+
+                view.mark_provider_started(generation, MessageId::new(2), cx);
+                let progress = view.generation_progress.as_ref().unwrap();
+                assert_eq!(progress.phase, GenerationPhase::Thinking);
+                assert!(progress.provider_started_at.is_some());
+
+                view.push_stream_chunk(generation, MessageId::new(2), "first", cx);
+                let first_text_at = view
+                    .generation_progress
+                    .as_ref()
+                    .and_then(|progress| progress.first_text_at)
+                    .expect("the first text timestamp should be recorded");
+                assert_eq!(
+                    view.generation_progress.as_ref().unwrap().phase,
+                    GenerationPhase::Responding
+                );
+
+                view.push_stream_chunk(generation, MessageId::new(2), " second", cx);
+                assert_eq!(
+                    view.generation_progress
+                        .as_ref()
+                        .and_then(|progress| progress.first_text_at),
+                    Some(first_text_at)
+                );
+
+                view.cancel(cx);
+                assert!(view.generation_progress.is_none());
+                assert!(view.generation_clock_task.is_none());
+            })
+            .expect("the conversation test window should remain open");
     }
 
     #[gpui::test]
