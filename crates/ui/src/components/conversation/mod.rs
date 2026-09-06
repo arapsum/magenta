@@ -373,7 +373,7 @@ impl ConversationView {
             if message.message.role != MessageRole::Assistant {
                 continue;
             }
-            for key in math::formulas(&message.message.content) {
+            for key in math::configured_formulas(&message.message.content, cx) {
                 self.queue_math_render(key, cx);
             }
         }
@@ -400,6 +400,13 @@ impl ConversationView {
                 });
             }),
         );
+    }
+
+    pub(crate) fn refresh_math_typography(&mut self, cx: &mut Context<'_, Self>) {
+        self.math_tasks.clear();
+        self.math_cache.clear();
+        self.queue_math_for_messages(0..self.messages.len(), cx);
+        self.refresh_math_messages(cx);
     }
 
     fn refresh_math_messages(&mut self, cx: &mut Context<'_, Self>) {

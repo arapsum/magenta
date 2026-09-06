@@ -18,6 +18,8 @@ use ratex_parser::parser::parse;
 use ratex_svg::{SvgOptions, render_to_svg};
 use ratex_types::{color::Color, math_style::MathStyle};
 
+use crate::settings;
+
 use super::inline_code;
 
 const MATH_PLUGIN_NAME: &str = "magenta-math";
@@ -25,8 +27,6 @@ const DISPLAY_MATH_LANGUAGE: &str = "magenta-math";
 const MAX_FORMULA_BYTES: usize = 16 * 1024;
 const MAX_SVG_BYTES: usize = 1024 * 1024;
 const MAX_CACHE_ENTRIES: usize = 128;
-const INLINE_FONT_SIZE: f64 = 13.;
-const DISPLAY_FONT_SIZE: f64 = 16.;
 const FORMULA_PADDING: f64 = 2.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -39,13 +39,34 @@ pub(super) enum MathMode {
 pub(super) struct FormulaKey {
     source: String,
     mode: MathMode,
+    font: magenta_core::MathFontStyle,
+    font_size: u16,
 }
 
 impl FormulaKey {
     fn new(source: impl Into<String>, mode: MathMode) -> Self {
+        let font_size = match mode {
+            MathMode::Inline => 13,
+            MathMode::Display => 16,
+        };
         Self {
             source: source.into(),
             mode,
+            font: magenta_core::MathFontStyle::Default,
+            font_size,
+        }
+    }
+
+    fn configured(source: impl Into<String>, mode: MathMode, cx: &App) -> Self {
+        let font_size = match mode {
+            MathMode::Inline => settings::inline_math_size(cx),
+            MathMode::Display => settings::display_math_size(cx),
+        };
+        Self {
+            source: source.into(),
+            mode,
+            font: settings::math_style(cx),
+            font_size,
         }
     }
 }
@@ -94,6 +115,10 @@ impl MathCache {
             Some(FormulaState::Pending | FormulaState::Failed) | None => None,
         }
     }
+
+    pub(super) fn clear(&self) {
+        self.formulas.lock().clear();
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -111,11 +136,9 @@ pub(super) fn render_formula(key: &FormulaKey) -> Result<RenderedFormula, MathEr
         return Err(MathError::TooLarge);
     }
 
-    let ast = parse(&key.source).map_err(|error| MathError::Parse(error.to_string()))?;
-    let font_size = match key.mode {
-        MathMode::Inline => INLINE_FONT_SIZE,
-        MathMode::Display => DISPLAY_FONT_SIZE,
-    };
+    let source = styled_source(&key.source, key.font);
+    let ast = parse(&source).map_err(|error| MathError::Parse(error.to_string()))?;
+    let font_size = f64::from(key.font_size);
     let style = match key.mode {
         MathMode::Inline => MathStyle::Text,
         MathMode::Display => MathStyle::Display,
@@ -147,6 +170,16 @@ pub(super) fn render_formula(key: &FormulaKey) -> Result<RenderedFormula, MathEr
         width: pixels_from_f64(width),
         height: pixels_from_f64(height),
     })
+}
+
+fn styled_source(source: &str, font: magenta_core::MathFontStyle) -> String {
+    let command = match font {
+        magenta_core::MathFontStyle::Default => return source.to_owned(),
+        magenta_core::MathFontStyle::Roman => "\\mathrm",
+        magenta_core::MathFontStyle::SansSerif => "\\mathsf",
+        magenta_core::MathFontStyle::Typewriter => "\\mathtt",
+    };
+    format!("{command}{{{source}}}")
 }
 
 fn pixels_from_f64(value: f64) -> Pixels {
@@ -269,7 +302,7 @@ fn formula_id(source: &str) -> u64 {
 }
 
 fn render_math_formula(source: &str, mode: MathMode, cache: &MathCache, cx: &App) -> AnyElement {
-    let key = FormulaKey::new(source, mode);
+    let key = FormulaKey::configured(source, mode, cx);
     if let Some(formula) = cache.rendered(&key) {
         return svg()
             .data(formula.svg.as_bytes())
@@ -441,7 +474,16 @@ fn canonicalize_delimiters(source: &str) -> String {
     normalized
 }
 
+#[cfg(test)]
 pub(super) fn formulas(source: &str) -> Vec<FormulaKey> {
+    formulas_with_settings(source, None)
+}
+
+pub(super) fn configured_formulas(source: &str, cx: &App) -> Vec<FormulaKey> {
+    formulas_with_settings(source, Some(cx))
+}
+
+fn formulas_with_settings(source: &str, cx: Option<&App>) -> Vec<FormulaKey> {
     let source = canonicalize_delimiters(source);
     let mut formulas = Vec::new();
     let mut index = 0;
@@ -486,13 +528,14 @@ pub(super) fn formulas(source: &str) -> Vec<FormulaKey> {
             if let Some(end) = find_math_end(&source, start, display) {
                 let body = source[start..end].trim();
                 if !body.is_empty() {
-                    let key = FormulaKey::new(
-                        body,
-                        if display {
-                            MathMode::Display
-                        } else {
-                            MathMode::Inline
-                        },
+                    let mode = if display {
+                        MathMode::Display
+                    } else {
+                        MathMode::Inline
+                    };
+                    let key = cx.map_or_else(
+                        || FormulaKey::new(body, mode),
+                        |cx| FormulaKey::configured(body, mode, cx),
                     );
                     if !formulas.contains(&key) {
                         formulas.push(key);

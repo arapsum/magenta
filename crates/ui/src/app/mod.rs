@@ -1,4 +1,5 @@
 mod history;
+mod settings_window;
 #[cfg(test)]
 mod tests;
 
@@ -7,10 +8,10 @@ use std::sync::Arc;
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, FocusHandle, Focusable as _, KeyBinding,
     MouseButton, Render, Role, SharedString, StatefulInteractiveElement as _, Subscription, Task,
-    Window, div, prelude::*, px,
+    Window, WindowHandle, div, prelude::*, px,
 };
 use gpui_component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
+    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -18,8 +19,11 @@ use gpui_component::{
     v_flex,
 };
 use magenta_application::{ConversationHistory, RegenerateMessage, SendMessage};
-use magenta_core::{ConversationId, ModelCatalog, ProviderAccount, ProviderAuthenticator};
+use magenta_core::{
+    ConversationId, ModelCatalog, ProviderAccount, ProviderAuthenticator, SettingsStore,
+};
 
+use self::settings_window::{AccountSettingsState, SettingsWindow, SettingsWindowEvent};
 use crate::components::{
     conversation::{ConversationView, ConversationViewEvent},
     prompt_input::{PromptComposer, PromptComposerEvent},
@@ -74,14 +78,24 @@ pub struct MainView {
     close_requested: CloseState,
     active_conversation: Option<ConversationId>,
     account_state: AccountState,
-    account_panel_open: PanelState,
     finder_open: PanelState,
     finder_input: Entity<InputState>,
     finder_selected: usize,
     focus_handle: FocusHandle,
     account_task: Option<Task<()>>,
     model_task: Option<Task<()>>,
+    settings_store: Arc<dyn SettingsStore>,
+    settings_load_task: Option<Task<()>>,
+    settings_window: Option<WindowHandle<gpui_component::Root>>,
+    settings_view: Option<Entity<SettingsWindow>>,
+    settings_subscription: Option<Subscription>,
     subscriptions: Vec<Subscription>,
+}
+
+pub struct MainServices {
+    pub authenticator: Arc<dyn ProviderAuthenticator>,
+    pub model_catalog: Arc<dyn ModelCatalog>,
+    pub settings_store: Arc<dyn SettingsStore>,
 }
 
 #[derive(Clone, Debug)]
@@ -131,13 +145,6 @@ impl PanelState {
     const fn is_open(self) -> bool {
         matches!(self, Self::Open)
     }
-
-    const fn toggled(self) -> Self {
-        match self {
-            Self::Closed => Self::Open,
-            Self::Open => Self::Closed,
-        }
-    }
 }
 
 impl MainView {
@@ -145,8 +152,7 @@ impl MainView {
         send_message: SendMessage,
         regenerate_message: RegenerateMessage,
         history: ConversationHistory,
-        authenticator: Arc<dyn ProviderAuthenticator>,
-        model_catalog: Arc<dyn ModelCatalog>,
+        services: MainServices,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> Self {
@@ -179,8 +185,8 @@ impl MainView {
             conversation,
             send_message,
             regenerate_message,
-            authenticator,
-            model_catalog,
+            authenticator: services.authenticator,
+            model_catalog: services.model_catalog,
             history,
             storage_ready: StorageState::Loading,
             operation: history::Operation::Idle,
@@ -195,13 +201,17 @@ impl MainView {
             close_requested: CloseState::Open,
             active_conversation: None,
             account_state: AccountState::Restoring,
-            account_panel_open: PanelState::Closed,
             finder_open: PanelState::Closed,
             finder_input,
             finder_selected: 0,
             focus_handle,
             account_task: None,
             model_task: None,
+            settings_store: services.settings_store,
+            settings_load_task: None,
+            settings_window: None,
+            settings_view: None,
+            settings_subscription: None,
             subscriptions,
         };
         main.load_history(window, cx);
@@ -213,6 +223,7 @@ impl MainView {
         main.subscriptions
             .push(cx.on_app_quit(Self::prepare_shutdown));
         main.restore_account(window, cx);
+        main.load_settings(window, cx);
         main
     }
 
@@ -257,7 +268,20 @@ impl MainView {
                     SidebarEvent::RetryHistory => main.load_history(window, cx),
                     SidebarEvent::OpenSettings => {
                         tracing::info!(operation = "sidebar.open_settings", "settings requested");
-                        main.account_panel_open = main.account_panel_open.toggled();
+                        main.open_settings(window, cx);
+                    }
+                    SidebarEvent::BeginLogin => {
+                        tracing::info!(operation = "sidebar.begin_login", "login requested");
+                        main.begin_login(window, cx);
+                    }
+                    SidebarEvent::SignOut => {
+                        tracing::info!(operation = "sidebar.sign_out", "sign out requested");
+                        main.sign_out(window, cx);
+                    }
+                    SidebarEvent::ToggleTheme => {
+                        if let Err(error) = crate::theme::toggle(cx) {
+                            tracing::error!(?error, "could not toggle the application theme");
+                        }
                         cx.notify();
                     }
                 },
@@ -424,133 +448,84 @@ impl MainView {
         self.sidebar.update(cx, |sidebar, cx| {
             sidebar.set_account(account, cx);
         });
-    }
-
-    fn account_panel(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let view = cx.entity();
-        let (status, detail) = self.account_status();
-        let connected = matches!(self.account_state, AccountState::Connected(_));
-        let waiting = matches!(
-            self.account_state,
-            AccountState::Restoring | AccountState::WaitingForBrowser
-        );
-        let action_view = view.clone();
-
-        v_flex()
-            .id("account-panel")
-            .absolute()
-            .top(px(18.))
-            .right(px(22.))
-            .w(px(320.))
-            .gap(px(14.))
-            .p(px(18.))
-            .rounded(px(12.))
-            .border_1()
-            .border_color(cx.theme().border.opacity(0.9))
-            .bg(cx.theme().popover)
-            .shadow_lg()
-            .child(Self::account_panel_header(action_view, cx))
-            .child(
-                div()
-                    .font_medium()
-                    .text_color(cx.theme().foreground)
-                    .child(status),
-            )
-            .child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(cx.theme().muted_foreground)
-                    .child(detail),
-            )
-            .child(Self::account_panel_action(view, connected, waiting))
-            .into_any_element()
-    }
-
-    fn account_status(&self) -> (&'static str, String) {
-        match &self.account_state {
-            AccountState::Restoring => (
-                "Checking account",
-                "Looking for a saved ChatGPT session.".to_owned(),
-            ),
-            AccountState::SignedOut => (
-                "Not signed in",
-                "Connect a ChatGPT account to load your OpenAI models.".to_owned(),
-            ),
-            AccountState::WaitingForBrowser => (
-                "Finish sign-in in your browser",
-                "Magenta is waiting for the local OAuth callback.".to_owned(),
-            ),
-            AccountState::Connected(account) => (
-                "ChatGPT connected",
-                account
-                    .email
-                    .clone()
-                    .or_else(|| account.plan.clone())
-                    .unwrap_or_else(|| "Your OpenAI account is ready.".to_owned()),
-            ),
-            AccountState::Failed(error) => ("Account unavailable", error.clone()),
+        if let Some(settings_view) = self.settings_view.as_ref() {
+            let state = self.account_settings_state();
+            settings_view.update(cx, |settings, cx| settings.set_account(state, cx));
         }
     }
 
-    fn account_panel_header(view: Entity<Self>, cx: &Context<'_, Self>) -> impl IntoElement {
-        h_flex()
-            .items_center()
-            .justify_between()
-            .child(
-                h_flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .size(px(26.))
-                            .rounded_full()
-                            .bg(cx.theme().primary.opacity(0.16))
-                            .text_color(cx.theme().primary)
-                            .child(Icon::new(IconName::Bot).small()),
-                    )
-                    .child(div().font_medium().child("OpenAI account")),
-            )
-            .child(
-                Button::new("close-account-panel")
-                    .ghost()
-                    .small()
-                    .icon(IconName::Close)
-                    .tooltip("Close account panel")
-                    .on_click(move |_, _, cx| {
-                        view.update(cx, |main, cx| {
-                            main.account_panel_open = PanelState::Closed;
-                            cx.notify();
-                        });
-                    }),
-            )
+    fn account_settings_state(&self) -> AccountSettingsState {
+        match &self.account_state {
+            AccountState::Restoring | AccountState::WaitingForBrowser => AccountSettingsState {
+                waiting: true,
+                ..Default::default()
+            },
+            AccountState::Connected(account) => AccountSettingsState {
+                account: Some(account.clone()),
+                ..Default::default()
+            },
+            AccountState::Failed(error) => AccountSettingsState {
+                error: Some(error.clone()),
+                ..Default::default()
+            },
+            AccountState::SignedOut => AccountSettingsState::default(),
+        }
     }
 
-    fn account_panel_action(view: Entity<Self>, connected: bool, waiting: bool) -> AnyElement {
-        if connected {
-            Button::new("sign-out")
-                .secondary()
-                .disabled(waiting)
-                .label("Sign out")
-                .on_click(move |_, window, cx| {
-                    view.update(cx, |main, cx| main.sign_out(window, cx));
-                })
-                .into_any_element()
-        } else {
-            Button::new("sign-in-chatgpt")
-                .primary()
-                .disabled(waiting)
-                .label(if waiting {
-                    "Waiting…"
-                } else {
-                    "Sign in with ChatGPT"
-                })
-                .on_click(move |_, window, cx| {
-                    view.update(cx, |main, cx| main.begin_login(window, cx));
-                })
-                .into_any_element()
+    fn load_settings(&mut self, window: &Window, cx: &Context<'_, Self>) {
+        let store = Arc::clone(&self.settings_store);
+        self.settings_load_task = Some(cx.spawn_in(window, async move |view, window| {
+            let result = store.load().await;
+            _ = view.update_in(window, |main, _, cx| {
+                main.settings_load_task = None;
+                match result {
+                    Ok(value) => crate::settings::replace(value, cx),
+                    Err(error) => tracing::warn!(
+                        error = %error.source,
+                        operation = "settings.load",
+                        "could not load settings; using defaults"
+                    ),
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    fn open_settings(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
+        if let Some(handle) = self.settings_window
+            && handle.is_active(cx).is_some()
+        {
+            _ = handle.update(cx, |_, settings_window, _| {
+                settings_window.activate_window();
+            });
+            return;
+        }
+
+        let account = self.account_settings_state();
+        match SettingsWindow::open(Arc::clone(&self.settings_store), account, cx) {
+            Ok((handle, settings_view)) => {
+                let subscription = cx.subscribe_in(
+                    &settings_view,
+                    window,
+                    |main, _, event: &SettingsWindowEvent, window, cx| match event {
+                        SettingsWindowEvent::BeginLogin => main.begin_login(window, cx),
+                        SettingsWindowEvent::SignOut => main.sign_out(window, cx),
+                        SettingsWindowEvent::TypographyChanged => {
+                            main.conversation.update(cx, |conversation, cx| {
+                                conversation.refresh_math_typography(cx);
+                            });
+                        }
+                    },
+                );
+                self.settings_window = Some(handle);
+                self.settings_view = Some(settings_view);
+                self.settings_subscription = Some(subscription);
+            }
+            Err(error) => tracing::error!(
+                ?error,
+                operation = "settings.open",
+                "could not open settings"
+            ),
         }
     }
 
@@ -701,7 +676,7 @@ impl MainView {
             .child(
                 div()
                     .flex_none()
-                    .font_family("monospace")
+                    .font_family(cx.theme().mono_font_family.clone())
                     .text_size(px(11.))
                     .text_color(cx.theme().muted_foreground.opacity(0.8))
                     .child(updated),
@@ -750,7 +725,7 @@ impl MainView {
             )
             .child(
                 div()
-                    .font_family("monospace")
+                    .font_family(cx.theme().mono_font_family.clone())
                     .text_size(px(11.))
                     .text_color(cx.theme().muted_foreground.opacity(0.8))
                     .child(if cfg!(target_os = "macos") {
@@ -844,7 +819,7 @@ impl MainView {
                 .border_1()
                 .border_color(cx.theme().border)
                 .bg(cx.theme().background)
-                .font_family("monospace")
+                .font_family(cx.theme().mono_font_family.clone())
                 .text_size(px(10.))
                 .child(label)
         };
@@ -1091,9 +1066,6 @@ impl MainView {
                     )
                 },
             )
-            .when(self.account_panel_open.is_open(), |this| {
-                this.child(self.account_panel(cx))
-            })
     }
 }
 

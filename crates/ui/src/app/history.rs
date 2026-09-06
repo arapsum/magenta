@@ -5,7 +5,7 @@ use magenta_application::{
 };
 use magenta_core::{Attachment, ConversationId, Message, MessageId, MessageStatus};
 
-use super::{AccountState, CloseState, MainView, PanelState, StorageState};
+use super::{AccountState, CloseState, MainView, StorageState};
 use crate::{
     MagentaError,
     components::{conversation::ConversationThread, prompt_input::PromptRequest},
@@ -205,8 +205,7 @@ impl MainView {
         cx: &mut Context<'_, Self>,
     ) {
         if !matches!(self.account_state, AccountState::Connected(_)) {
-            self.account_panel_open = PanelState::Open;
-            cx.notify();
+            self.begin_login(window, cx);
             return;
         }
         if !self.can_write(cx) {

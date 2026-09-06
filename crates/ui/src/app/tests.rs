@@ -14,7 +14,9 @@ use gpui_component::Root;
 use magenta_application::{ConversationHistory, RegenerateMessage, SendMessage};
 use magenta_core::*;
 
-use super::{MainView, OpenConversationFinder, PanelState, StorageState, history::Operation};
+use super::{
+    MainServices, MainView, OpenConversationFinder, PanelState, StorageState, history::Operation,
+};
 
 #[derive(Default)]
 struct TestPorts {
@@ -97,6 +99,24 @@ impl ProviderAuthenticator for TestPorts {
     }
 }
 
+impl SettingsStore for TestPorts {
+    fn load(&self) -> SettingsFuture<AppSettings> {
+        Box::pin(async { Ok(AppSettings::default()) })
+    }
+
+    fn save(&self, _: AppSettings) -> SettingsFuture<()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn reset(&self) -> SettingsFuture<AppSettings> {
+        Box::pin(async { Ok(AppSettings::default()) })
+    }
+
+    fn path(&self) -> std::path::PathBuf {
+        std::path::PathBuf::from("settings.toml")
+    }
+}
+
 fn page(id: u64) -> ConversationPage {
     ConversationPage {
         conversation: Conversation {
@@ -122,14 +142,17 @@ fn summary(id: u64, title: &str) -> ConversationSummary {
         title: title.to_owned(),
         pinned: false,
         created_at: Timestamp(0),
-        updated_at: Timestamp(id as i64),
+        updated_at: Timestamp(id.cast_signed()),
     }
 }
 
 type TestWindow = (WindowHandle<Root>, Entity<MainView>);
 
 fn setup(cx: &mut TestAppContext, ports: Arc<TestPorts>) -> TestWindow {
-    cx.update(gpui_component::init);
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::settings::init(cx);
+    });
     let slot = Rc::new(RefCell::new(None));
     let view_slot = Rc::clone(&slot);
     let window = cx.open_window(size(px(1000.), px(700.)), move |window, cx| {
@@ -138,8 +161,11 @@ fn setup(cx: &mut TestAppContext, ports: Arc<TestPorts>) -> TestWindow {
                 SendMessage::new(ports.clone(), ports.clone()),
                 RegenerateMessage::new(ports.clone(), ports.clone()),
                 ConversationHistory::new(ports.clone()),
-                ports.clone(),
-                ports,
+                MainServices {
+                    authenticator: ports.clone(),
+                    model_catalog: ports.clone(),
+                    settings_store: ports.clone(),
+                },
                 window,
                 cx,
             )

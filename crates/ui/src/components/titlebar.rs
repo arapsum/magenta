@@ -4,6 +4,8 @@ use gpui::{AnyElement, IntoElement, ParentElement, Styled as _, px};
 use gpui_component::h_flex;
 #[cfg(target_os = "linux")]
 mod linux {
+    use std::rc::Rc;
+
     use gpui::{
         AnyElement, App, Context, Decorations, Entity, Hsla, InteractiveElement, IntoElement,
         MouseButton, ParentElement, Pixels, Render, RenderOnce, StatefulInteractiveElement as _,
@@ -13,10 +15,28 @@ mod linux {
     use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex};
 
     const LINUX_TITLE_BAR_HEIGHT: Pixels = px(32.0);
+    type CloseWindowHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 
     pub fn render(controls: impl IntoElement) -> AnyElement {
+        render_with_controls(controls, true, None)
+    }
+
+    pub fn render_minimize_close(
+        controls: impl IntoElement,
+        on_close: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        render_with_controls(controls, false, Some(Rc::new(on_close)))
+    }
+
+    fn render_with_controls(
+        controls: impl IntoElement,
+        show_maximize: bool,
+        on_close: Option<CloseWindowHandler>,
+    ) -> AnyElement {
         LinuxTitleBar {
             controls: controls.into_any_element(),
+            show_maximize,
+            on_close,
         }
         .into_any_element()
     }
@@ -24,6 +44,8 @@ mod linux {
     #[derive(IntoElement)]
     struct LinuxTitleBar {
         controls: AnyElement,
+        show_maximize: bool,
+        on_close: Option<CloseWindowHandler>,
     }
     struct TitleBarState {
         should_move: bool,
@@ -48,7 +70,19 @@ mod linux {
                 return hidden_title_bar();
             }
 
-            render_title_bar(&state, self.controls, window, cx)
+            let Self {
+                controls,
+                show_maximize,
+                on_close,
+            } = self;
+            render_title_bar(
+                &state,
+                controls,
+                show_maximize,
+                on_close.as_ref(),
+                window,
+                cx,
+            )
         }
     }
 
@@ -76,6 +110,8 @@ mod linux {
     fn render_title_bar(
         state: &Entity<TitleBarState>,
         controls: AnyElement,
+        show_maximize: bool,
+        on_close: Option<&CloseWindowHandler>,
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
@@ -84,9 +120,22 @@ mod linux {
             .unwrap_or_else(WindowButtonLayout::linux_default);
         let supports_window_menu = window.window_controls().window_menu;
         let left_control_id = "left-window-controls";
-        let left_controls = render_controls(left_control_id, button_layout.left, window, cx);
-        let right_controls =
-            render_controls("right-window-controls", button_layout.right, window, cx);
+        let left_controls = render_controls(
+            left_control_id,
+            button_layout.left,
+            show_maximize,
+            on_close,
+            window,
+            cx,
+        );
+        let right_controls = render_controls(
+            "right-window-controls",
+            button_layout.right,
+            show_maximize,
+            on_close,
+            window,
+            cx,
+        );
         let drag_region = drag_region(state, supports_window_menu, window);
 
         div()
@@ -167,6 +216,8 @@ mod linux {
     fn render_controls(
         id: &'static str,
         buttons: [Option<WindowButton>; 3],
+        show_maximize: bool,
+        on_close: Option<&CloseWindowHandler>,
         window: &mut Window,
         cx: &mut App,
     ) -> Option<AnyElement> {
@@ -178,9 +229,15 @@ mod linux {
             .into_iter()
             .flatten()
             .filter(|button| {
-                is_supported_control(*button, supported_controls, is_minimizable, is_resizable)
+                is_supported_control(
+                    *button,
+                    supported_controls,
+                    is_minimizable,
+                    is_resizable,
+                    show_maximize,
+                )
             })
-            .map(|button| render_control(button, window, cx))
+            .map(|button| render_control(button, on_close.cloned(), window, cx))
             .collect::<Vec<_>>();
 
         (!buttons.is_empty()).then(|| {
@@ -200,15 +257,21 @@ mod linux {
         supported_controls: WindowControls,
         is_minimizable: bool,
         is_resizable: bool,
+        show_maximize: bool,
     ) -> bool {
         match button {
             WindowButton::Minimize => supported_controls.minimize && is_minimizable,
-            WindowButton::Maximize => supported_controls.maximize && is_resizable,
+            WindowButton::Maximize => show_maximize && supported_controls.maximize && is_resizable,
             WindowButton::Close => true,
         }
     }
 
-    fn render_control(button: WindowButton, window: &mut Window, cx: &mut App) -> AnyElement {
+    fn render_control(
+        button: WindowButton,
+        on_close: Option<CloseWindowHandler>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
         let details = control_details(button, window.is_maximized());
         let colors = control_colors(details.is_close, cx);
         let foreground = control_foreground(window, cx);
@@ -251,7 +314,7 @@ mod linux {
             })
             .on_click(move |_, window, cx| {
                 cx.stop_propagation();
-                activate_control(button, window, cx);
+                activate_control(button, on_close.as_ref(), window, cx);
             })
             .child(Icon::new(details.icon).small())
             .into_any_element()
@@ -318,22 +381,49 @@ mod linux {
         })
     }
 
-    fn activate_control(button: WindowButton, window: &mut Window, cx: &mut App) {
+    fn activate_control(
+        button: WindowButton,
+        on_close: Option<&CloseWindowHandler>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         match button {
             WindowButton::Minimize => window.minimize_window(),
             WindowButton::Maximize => window.zoom_window(),
-            WindowButton::Close => window.dispatch_action(Box::new(super::CloseWindow), cx),
+            WindowButton::Close => match on_close {
+                Some(on_close) => on_close(window, cx),
+                None => window.dispatch_action(Box::new(super::CloseWindow), cx),
+            },
         }
     }
 }
 
 #[cfg(target_os = "linux")]
-pub use linux::render;
+pub use linux::{render, render_minimize_close};
 
 #[cfg(not(target_os = "linux"))]
 pub fn render(controls: impl IntoElement) -> AnyElement {
     gpui_component::TitleBar::new()
         .h(px(32.))
+        .child(
+            h_flex()
+                .h_full()
+                .flex_1()
+                .min_w_0()
+                .items_center()
+                .child(controls),
+        )
+        .into_any_element()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn render_minimize_close(
+    controls: impl IntoElement,
+    on_close: impl Fn(&mut gpui::Window, &mut gpui::App) + 'static,
+) -> AnyElement {
+    gpui_component::TitleBar::new()
+        .h(px(32.))
+        .on_close_window(move |_, window, cx| on_close(window, cx))
         .child(
             h_flex()
                 .h_full()
