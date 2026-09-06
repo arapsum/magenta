@@ -434,7 +434,16 @@ impl PromptComposer {
         let skipped = unsupported + unreadable + duplicates + overflow;
         if skipped > 0 {
             let message = format!(
-                "Skipped {skipped} file(s): {unsupported} unsupported, {unreadable} unreadable, {duplicates} duplicate, {overflow} over the four-image limit."
+                concat!(
+                    "Skipped {skipped} file(s): {unsupported} unsupported, ",
+                    "{unreadable} unreadable, {duplicates} duplicate, ",
+                    "{overflow} over the four-image limit."
+                ),
+                skipped = skipped,
+                unsupported = unsupported,
+                unreadable = unreadable,
+                duplicates = duplicates,
+                overflow = overflow
             );
             window.push_notification(
                 Notification::new()

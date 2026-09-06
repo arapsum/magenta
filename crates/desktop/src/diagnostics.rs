@@ -10,7 +10,13 @@ use tracing_appender::{
 };
 use tracing_subscriber::{fmt, layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
 
-const DEFAULT_FILTER: &str = "magenta=info,magenta_desktop=info,magenta_ui=info,gpui=warn,gpui_component::text::format::markdown=error";
+const DEFAULT_FILTER: &str = concat!(
+    "magenta=info,",
+    "magenta_desktop=info,",
+    "magenta_ui=info,",
+    "gpui=warn,",
+    "gpui_component::text::format::markdown=error"
+);
 const RETAINED_LOG_FILES: usize = 7;
 
 pub struct DiagnosticsGuard {

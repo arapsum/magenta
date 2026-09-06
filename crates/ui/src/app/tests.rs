@@ -126,7 +126,9 @@ fn summary(id: u64, title: &str) -> ConversationSummary {
     }
 }
 
-fn setup(cx: &mut TestAppContext, ports: Arc<TestPorts>) -> (WindowHandle<Root>, Entity<MainView>) {
+type TestWindow = (WindowHandle<Root>, Entity<MainView>);
+
+fn setup(cx: &mut TestAppContext, ports: Arc<TestPorts>) -> TestWindow {
     cx.update(gpui_component::init);
     let slot = Rc::new(RefCell::new(None));
     let view_slot = Rc::clone(&slot);

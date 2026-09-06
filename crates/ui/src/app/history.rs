@@ -341,8 +341,9 @@ impl MainView {
                                 cx,
                             );
                         });
-                        if main.deferred_navigation.is_some() || main.close_requested.is_requested()
-                        {
+                        let navigation_pending = main.deferred_navigation.is_some();
+                        let close_requested = main.close_requested.is_requested();
+                        if navigation_pending || close_requested {
                             main.cancel_generation(cx);
                         }
                     }
@@ -507,7 +508,11 @@ impl MainView {
                     message.status = MessageStatus::Stopped;
                 }
                 if let Err(error) = history.finalize(message).await {
-                    tracing::error!(kind = ?error.kind, operation = "history.shutdown", "could not save response before shutdown");
+                    tracing::error!(
+                        kind = ?error.kind,
+                        operation = "history.shutdown",
+                        "could not save response before shutdown"
+                    );
                 }
             }
         }

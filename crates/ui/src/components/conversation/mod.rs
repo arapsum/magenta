@@ -77,6 +77,8 @@ pub struct ConversationView {
     origins: std::collections::HashMap<MessageId, GenerationConfig>,
 }
 
+type ConversationContext<'a> = Context<'a, ConversationView>;
+
 impl ConversationView {
     pub(crate) fn load_page(
         &mut self,
@@ -286,7 +288,10 @@ impl ConversationView {
         self.cancel_generation(cx);
     }
 
-    pub(crate) fn interrupt_for_shutdown(&mut self, cx: &mut Context<'_, Self>) -> Option<Message> {
+    pub(crate) fn interrupt_for_shutdown(
+        &mut self,
+        cx: &mut ConversationContext<'_>,
+    ) -> Option<Message> {
         let id = self.streaming_message.take()?;
         self.generation = self.generation.wrapping_add(1);
         self.generation_task.take();

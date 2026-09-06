@@ -99,7 +99,10 @@ impl MagentaError {
                 code: "MAG-STORAGE-INIT",
                 severity: ErrorSeverity::Error,
                 title: "History unavailable",
-                message: "Magenta could not open local history. Retry from the sidebar before sending messages.",
+                message: concat!(
+                    "Magenta could not open local history. ",
+                    "Retry from the sidebar before sending messages."
+                ),
             },
             Self::StorageLoad { .. } => ErrorPresentation {
                 code: "MAG-STORAGE-LOAD",
@@ -111,13 +114,19 @@ impl MagentaError {
                 code: "MAG-STORAGE-WRITE",
                 severity: ErrorSeverity::Error,
                 title: "Changes could not be saved",
-                message: "Your response is still visible. Retry saving before leaving this conversation.",
+                message: concat!(
+                    "Your response is still visible. ",
+                    "Retry saving before leaving this conversation."
+                ),
             },
             Self::ThemeLoad { .. } => ErrorPresentation {
                 code: "MAG-THEME-LOAD",
                 severity: ErrorSeverity::Warning,
                 title: "Theme fallback enabled",
-                message: "Magenta could not load its bundled theme, so the default dark theme is in use.",
+                message: concat!(
+                    "Magenta could not load its bundled theme, ",
+                    "so the default dark theme is in use."
+                ),
             },
             Self::ThemeNotFound { .. } => ErrorPresentation {
                 code: "MAG-THEME-NOT-FOUND",
@@ -135,31 +144,46 @@ impl MagentaError {
                 code: "MAG-DIAGNOSTICS",
                 severity: ErrorSeverity::Warning,
                 title: "Local diagnostics unavailable",
-                message: "Magenta could not create its local log file. Diagnostics will be written to the console instead.",
+                message: concat!(
+                    "Magenta could not create its local log file. ",
+                    "Diagnostics will be written to the console instead."
+                ),
             },
             Self::AttachmentPicker { .. } => ErrorPresentation {
                 code: "MAG-ATTACHMENT-PICKER",
                 severity: ErrorSeverity::Warning,
                 title: "Images could not be selected",
-                message: "The system image picker could not be opened. Try adding the reference images again.",
+                message: concat!(
+                    "The system image picker could not be opened. ",
+                    "Try adding the reference images again."
+                ),
             },
             Self::ProviderGeneration { .. } => ErrorPresentation {
                 code: "MAG-PROVIDER-GENERATION",
                 severity: ErrorSeverity::Error,
                 title: "Response could not be generated",
-                message: "The selected model could not finish the response. Try again or choose another model.",
+                message: concat!(
+                    "The selected model could not finish the response. ",
+                    "Try again or choose another model."
+                ),
             },
             Self::SendMessage { .. } => ErrorPresentation {
                 code: "MAG-SEND-MESSAGE",
                 severity: ErrorSeverity::Error,
                 title: "Message could not be sent",
-                message: "Magenta could not prepare this message. Review the conversation and try again.",
+                message: concat!(
+                    "Magenta could not prepare this message. ",
+                    "Review the conversation and try again."
+                ),
             },
             Self::RegenerateMessage { .. } => ErrorPresentation {
                 code: "MAG-REGENERATE-MESSAGE",
                 severity: ErrorSeverity::Error,
                 title: "Response could not be regenerated",
-                message: "Magenta could not prepare this response. Try another completed response.",
+                message: concat!(
+                    "Magenta could not prepare this response. ",
+                    "Try another completed response."
+                ),
             },
         }
     }

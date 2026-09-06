@@ -133,7 +133,9 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
             data_dir.join("magenta/conversations.sqlite3"),
         ));
     let send_message = SendMessage::new(Arc::clone(&chat_provider), Arc::clone(&store));
-    let regenerate_message = RegenerateMessage::new(Arc::clone(&chat_provider), Arc::clone(&store));
+    let regenerate_provider = Arc::clone(&chat_provider);
+    let regenerate_store = Arc::clone(&store);
+    let regenerate_message = RegenerateMessage::new(regenerate_provider, regenerate_store);
     let history = ConversationHistory::new(store);
     cx.open_window(window_options, move |window, cx| {
         let main_view = cx.new(|cx| {

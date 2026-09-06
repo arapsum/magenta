@@ -83,7 +83,8 @@ mod linux {
             .button_layout()
             .unwrap_or_else(WindowButtonLayout::linux_default);
         let supports_window_menu = window.window_controls().window_menu;
-        let left_controls = render_controls("left-window-controls", button_layout.left, window, cx);
+        let left_control_id = "left-window-controls";
+        let left_controls = render_controls(left_control_id, button_layout.left, window, cx);
         let right_controls =
             render_controls("right-window-controls", button_layout.right, window, cx);
         let drag_region = drag_region(state, supports_window_menu, window);
