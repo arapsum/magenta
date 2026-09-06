@@ -3898,6 +3898,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "smol",
+ "tempfile",
  "thiserror 2.0.20",
  "tracing",
  "url",
@@ -3907,8 +3908,10 @@ dependencies = [
 name = "magenta-storage"
 version = "0.1.0"
 dependencies = [
+ "image",
  "magenta-core",
  "parking_lot",
+ "rand 0.9.5",
  "rusqlite",
  "serde",
  "serde_json",

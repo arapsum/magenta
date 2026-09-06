@@ -142,19 +142,33 @@ fn read_message(
 fn attachments(connection: &Connection, id: MessageId) -> Result<Vec<Attachment>> {
     let mut statement = connection
         .prepare(
-            "SELECT name, source_path FROM attachments WHERE message_id = ?1 ORDER BY position",
+            r"
+                SELECT name, source_path, mime_type, byte_size, managed
+                FROM attachments
+                WHERE message_id = ?1
+                ORDER BY position
+            ",
         )
         .map_err(database_error)?;
     let rows = statement
         .query_map([id.0], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, bool>(4)?,
+            ))
         })
         .map_err(database_error)?;
     rows.map(|row| {
-        let (name, bytes) = row.map_err(database_error)?;
+        let (name, bytes, mime_type, byte_size, managed) = row.map_err(database_error)?;
         Ok(Attachment {
             name,
             path: decode_path(bytes)?,
+            mime_type,
+            byte_size: u64::try_from(byte_size).map_err(invalid)?,
+            managed,
         })
     })
     .collect()
@@ -167,7 +181,7 @@ pub fn encode_path(path: &std::path::Path) -> Vec<u8> {
 }
 
 #[cfg(unix)]
-fn decode_path(bytes: Vec<u8>) -> Result<std::path::PathBuf> {
+pub fn decode_path(bytes: Vec<u8>) -> Result<std::path::PathBuf> {
     use std::os::unix::ffi::OsStringExt as _;
     if bytes.contains(&0) {
         return Err(failure(
@@ -188,7 +202,7 @@ pub(super) fn encode_path(path: &std::path::Path) -> Vec<u8> {
 }
 
 #[cfg(windows)]
-fn decode_path(bytes: Vec<u8>) -> Result<std::path::PathBuf> {
+pub fn decode_path(bytes: Vec<u8>) -> Result<std::path::PathBuf> {
     use std::os::windows::ffi::OsStringExt as _;
     if bytes.len() % 2 != 0 {
         return Err(failure(

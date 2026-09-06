@@ -17,9 +17,18 @@ pub enum MessageStatus {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttachmentDraft {
+    pub name: String,
+    pub source_path: PathBuf,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Attachment {
     pub name: String,
     pub path: PathBuf,
+    pub mime_type: String,
+    pub byte_size: u64,
+    pub managed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,6 +57,9 @@ mod tests {
             attachments: vec![Attachment {
                 name: "brief.png".to_owned(),
                 path: PathBuf::from("brief.png"),
+                mime_type: "image/png".to_owned(),
+                byte_size: 42,
+                managed: true,
             }],
             generation_outcome: None,
         };

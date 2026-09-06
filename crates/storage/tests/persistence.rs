@@ -1,19 +1,28 @@
 use magenta_core::{
-    Attachment, BeginTurn, ConversationId, ConversationStore, EffortLevel, FinishReason,
+    AttachmentDraft, BeginTurn, ConversationId, ConversationStore, EffortLevel, FinishReason,
     GenerationConfig, GenerationOutcome, MessageStatus, ModelId, ProviderId, StorageErrorKind,
     TokenUsage,
 };
 use magenta_storage::SqliteConversationStore;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
+const PNG: &[u8] = &[
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x08, 0x99, 0x63, 0xf8, 0xcf, 0xc0, 0xf0,
+    0x1f, 0x00, 0x05, 0x00, 0x01, 0xff, 0x89, 0x99, 0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
+    0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+];
 
 fn input(id: Option<ConversationId>) -> BeginTurn {
     BeginTurn {
         conversation_id: id,
         title: "Unicode λ and Markdown".into(),
         prompt: "Explain `λ`\n```rust\nfn main() {}\n```".into(),
-        attachments: vec![Attachment {
-            name: "missing.png".into(),
-            path: "/nonexistent/reference.png".into(),
-        }],
+        attachments: Vec::new(),
         generation: GenerationConfig::new(
             ProviderId::new("openai"),
             ModelId::new("test-model"),
@@ -23,6 +32,22 @@ fn input(id: Option<ConversationId>) -> BeginTurn {
             },
         ),
     }
+}
+
+fn input_with_attachments(
+    id: Option<ConversationId>,
+    attachments: Vec<AttachmentDraft>,
+) -> BeginTurn {
+    BeginTurn {
+        attachments,
+        ..input(id)
+    }
+}
+
+fn write_png(directory: &Path, name: &str) -> PathBuf {
+    let path = directory.join(name);
+    fs::write(&path, PNG).unwrap();
+    path
 }
 
 #[test]
@@ -125,10 +150,24 @@ fn delete_removes_conversation_messages_and_attachment_records() {
     smol::block_on(async {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("history.sqlite3");
+        let source = write_png(directory.path(), "source.png");
         let store = SqliteConversationStore::new(path.clone());
         store.initialize().await.unwrap();
-        let pending = store.begin_turn(input(None)).await.unwrap();
+        let pending = store
+            .begin_turn(input_with_attachments(
+                None,
+                vec![AttachmentDraft {
+                    name: "source.png".into(),
+                    source_path: source.clone(),
+                }],
+            ))
+            .await
+            .unwrap();
         let id = pending.conversation.id;
+        let imported = pending.user_message.attachments[0].clone();
+        assert!(imported.managed);
+        assert!(imported.path.exists());
+        assert!(source.exists());
 
         let connection = rusqlite::Connection::open(&path).unwrap();
         assert_eq!(
@@ -148,6 +187,8 @@ fn delete_removes_conversation_messages_and_attachment_records() {
         );
 
         store.delete(id).await.unwrap();
+        assert!(!imported.path.exists());
+        assert!(source.exists());
         assert!(store.summaries().await.unwrap().is_empty());
         assert_eq!(
             store.load(id).await.unwrap_err().kind,

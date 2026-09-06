@@ -310,11 +310,14 @@ impl OpenAiProvider {
         impl futures_util::Stream<Item = Result<GenerationEvent, ProviderError>>,
         ProviderError,
     > {
-        let wire_request = ResponsesRequest::from_request(
-            request.generation.model.0.as_str(),
-            &request.generation.effort,
-            &request.messages,
-        )
+        let wire_request = smol::unblock(move || {
+            ResponsesRequest::from_request(
+                request.generation.model.0.as_str(),
+                &request.generation.effort,
+                &request.messages,
+            )
+        })
+        .await
         .map_err(|message| {
             provider_error(
                 ProviderErrorKind::InvalidRequest,

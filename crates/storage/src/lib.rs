@@ -1,5 +1,6 @@
 //! SQLite adapter. Connections and migrations are confined to blocking workers.
 
+mod attachments;
 mod records;
 mod settings;
 mod turns;
@@ -27,6 +28,7 @@ type Result<T> = std::result::Result<T, StorageError>;
 #[derive(Clone)]
 pub struct SqliteConversationStore {
     path: Arc<PathBuf>,
+    attachments_path: Arc<PathBuf>,
     initialized: Arc<AtomicBool>,
 }
 
@@ -34,6 +36,7 @@ impl SqliteConversationStore {
     #[must_use]
     pub fn new(path: PathBuf) -> Self {
         Self {
+            attachments_path: Arc::new(attachment_directory(&path)),
             path: Arc::new(path),
             initialized: Arc::new(AtomicBool::new(false)),
         }
@@ -83,7 +86,8 @@ impl ConversationStore for SqliteConversationStore {
                 0 => transaction
                     .execute_batch(include_str!("schema.sql"))
                     .map_err(database_error)?,
-                1 => {}
+                1 => migrate_v1_to_v2(&transaction)?,
+                2 => {}
                 _ => {
                     return Err(failure(
                         StorageErrorKind::UnsupportedVersion,
@@ -98,6 +102,7 @@ impl ConversationStore for SqliteConversationStore {
                 )
                 .map_err(database_error)?;
             transaction.commit().map_err(database_error)?;
+            attachments::reconcile(&attachment_directory(&path), &connection)?;
             initialized.store(true, Ordering::Release);
             Ok(())
         }))
@@ -163,7 +168,27 @@ impl ConversationStore for SqliteConversationStore {
     }
 
     fn begin_turn(&self, input: BeginTurn) -> StorageFuture<PreparedTurn> {
-        self.run(move |connection| turns::begin(connection, input))
+        let path = Arc::clone(&self.path);
+        let attachments_path = Arc::clone(&self.attachments_path);
+        let initialized = Arc::clone(&self.initialized);
+        Box::pin(smol::unblock(move || {
+            if !initialized.load(Ordering::Acquire) {
+                return Err(failure(
+                    StorageErrorKind::Unavailable,
+                    "storage has not been initialized",
+                ));
+            }
+
+            let mut connection = connect(&path)?;
+            let attachments = attachments::import(&attachments_path, &input.attachments)?;
+            match turns::begin(&mut connection, input, attachments.clone()) {
+                Ok(prepared) => Ok(prepared),
+                Err(error) => {
+                    attachments::remove_managed(&attachments_path, &attachments);
+                    Err(error)
+                }
+            }
+        }))
     }
 
     fn begin_regeneration(
@@ -229,8 +254,23 @@ impl ConversationStore for SqliteConversationStore {
     }
 
     fn delete(&self, id: ConversationId) -> StorageFuture<()> {
-        self.run(move |connection| {
-            let changed = connection
+        let path = Arc::clone(&self.path);
+        let attachments_path = Arc::clone(&self.attachments_path);
+        let initialized = Arc::clone(&self.initialized);
+        Box::pin(smol::unblock(move || {
+            if !initialized.load(Ordering::Acquire) {
+                return Err(failure(
+                    StorageErrorKind::Unavailable,
+                    "storage has not been initialized",
+                ));
+            }
+
+            let mut connection = connect(&path)?;
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(database_error)?;
+            let managed_attachments = managed_attachments(&transaction, id)?;
+            let changed = transaction
                 .execute("DELETE FROM conversations WHERE id = ?1", [id.0])
                 .map_err(database_error)?;
             if changed == 0 {
@@ -239,8 +279,10 @@ impl ConversationStore for SqliteConversationStore {
                     "conversation does not exist",
                 ));
             }
+            transaction.commit().map_err(database_error)?;
+            attachments::remove_managed(&attachments_path, &managed_attachments);
             Ok(())
-        })
+        }))
     }
 
     fn rename(&self, id: ConversationId, title: String) -> StorageFuture<()> {
@@ -278,6 +320,70 @@ impl ConversationStore for SqliteConversationStore {
             Ok(())
         })
     }
+}
+
+fn attachment_directory(database_path: &std::path::Path) -> PathBuf {
+    database_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("attachments")
+}
+
+fn migrate_v1_to_v2(transaction: &rusqlite::Transaction<'_>) -> Result<()> {
+    transaction
+        .execute_batch(
+            r"
+                ALTER TABLE attachments
+                    ADD COLUMN mime_type TEXT NOT NULL DEFAULT 'application/octet-stream';
+                ALTER TABLE attachments
+                    ADD COLUMN byte_size INTEGER NOT NULL DEFAULT 0 CHECK (byte_size >= 0);
+                ALTER TABLE attachments
+                    ADD COLUMN managed INTEGER NOT NULL DEFAULT 0 CHECK (managed IN (0, 1));
+                PRAGMA user_version = 2;
+            ",
+        )
+        .map_err(database_error)
+}
+
+fn managed_attachments(
+    connection: &Connection,
+    id: ConversationId,
+) -> Result<Vec<magenta_core::Attachment>> {
+    let mut statement = connection
+        .prepare(
+            r"
+                SELECT attachment.name, attachment.source_path, attachment.mime_type,
+                       attachment.byte_size, attachment.managed
+                FROM attachments AS attachment
+                INNER JOIN messages AS message ON message.id = attachment.message_id
+                WHERE message.conversation_id = ?1
+                  AND attachment.managed = 1
+                ORDER BY message.sequence, attachment.position
+            ",
+        )
+        .map_err(database_error)?;
+    let rows = statement
+        .query_map([id.0], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, bool>(4)?,
+            ))
+        })
+        .map_err(database_error)?;
+    rows.map(|row| {
+        let (name, path, mime_type, byte_size, managed) = row.map_err(database_error)?;
+        Ok(magenta_core::Attachment {
+            name,
+            path: records::decode_path(path)?,
+            mime_type,
+            byte_size: u64::try_from(byte_size).map_err(invalid)?,
+            managed,
+        })
+    })
+    .collect()
 }
 
 fn connect(path: &std::path::Path) -> Result<Connection> {

@@ -21,7 +21,7 @@ pub use generation::{
     GenerationRequest, GenerationStream, TokenUsage,
 };
 pub use identifiers::{ConversationId, MessageId, ModelId, ProviderId};
-pub use message::{Attachment, Message, MessageRole, MessageStatus};
+pub use message::{Attachment, AttachmentDraft, Message, MessageRole, MessageStatus};
 pub use models::{ModelCatalog, ModelCatalogFuture, ModelDescriptor};
 pub use settings::{
     AppSettings, AppearanceMode, FontChoice, MathFontStyle, SETTINGS_VERSION, SettingsError,

@@ -28,6 +28,7 @@ use magenta_core::{EffortLevel, GenerationConfig, ModelDescriptor};
 use crate::{MagentaError, components::code_fence, notification_for_error};
 
 const MAX_ATTACHMENTS: usize = 4;
+const MAX_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ReferenceImage {
@@ -378,8 +379,12 @@ impl PromptComposer {
                     paths
                         .into_iter()
                         .map(|path| {
-                            let readable = std::fs::File::open(&path).is_ok();
-                            (path, readable)
+                            let metadata = std::fs::metadata(&path).ok();
+                            let readable =
+                                metadata.as_ref().is_some_and(std::fs::Metadata::is_file)
+                                    && std::fs::File::open(&path).is_ok();
+                            let byte_size = metadata.map(|metadata| metadata.len());
+                            (path, readable, byte_size)
                         })
                         .collect::<Vec<_>>()
                 })
@@ -394,16 +399,17 @@ impl PromptComposer {
 
     fn add_attachments(
         &mut self,
-        paths: Vec<(PathBuf, bool)>,
+        paths: Vec<(PathBuf, bool, Option<u64>)>,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
         let mut unsupported = 0;
         let mut unreadable = 0;
+        let mut too_large = 0;
         let mut duplicates = 0;
         let mut overflow = 0;
 
-        for (path, readable) in paths {
+        for (path, readable, byte_size) in paths {
             if !is_supported_image(&path) {
                 unsupported += 1;
                 continue;
@@ -411,6 +417,11 @@ impl PromptComposer {
 
             if !readable {
                 unreadable += 1;
+                continue;
+            }
+
+            if byte_size.is_none_or(|size| size > MAX_ATTACHMENT_BYTES) {
+                too_large += 1;
                 continue;
             }
 
@@ -431,17 +442,18 @@ impl PromptComposer {
             self.attachments.push(ReferenceImage::new(path));
         }
 
-        let skipped = unsupported + unreadable + duplicates + overflow;
+        let skipped = unsupported + unreadable + too_large + duplicates + overflow;
         if skipped > 0 {
             let message = format!(
                 concat!(
                     "Skipped {skipped} file(s): {unsupported} unsupported, ",
-                    "{unreadable} unreadable, {duplicates} duplicate, ",
+                    "{unreadable} unreadable, {too_large} over 10 MiB, {duplicates} duplicate, ",
                     "{overflow} over the four-image limit."
                 ),
                 skipped = skipped,
                 unsupported = unsupported,
                 unreadable = unreadable,
+                too_large = too_large,
                 duplicates = duplicates,
                 overflow = overflow
             );

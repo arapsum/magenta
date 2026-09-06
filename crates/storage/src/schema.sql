@@ -31,7 +31,10 @@ CREATE TABLE attachments (
     position INTEGER NOT NULL,
     name TEXT NOT NULL,
     source_path BLOB NOT NULL,
+    mime_type TEXT NOT NULL,
+    byte_size INTEGER NOT NULL CHECK (byte_size >= 0),
+    managed INTEGER NOT NULL CHECK (managed IN (0, 1)),
     PRIMARY KEY (message_id, position)
 );
 
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;

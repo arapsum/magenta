@@ -3,7 +3,7 @@ use gpui_component::WindowExt as _;
 use magenta_application::{
     PendingGeneration, RegenerateMessageInput, SendMessageInput, SendTarget,
 };
-use magenta_core::{Attachment, ConversationId, Message, MessageId, MessageStatus};
+use magenta_core::{AttachmentDraft, ConversationId, Message, MessageId, MessageStatus};
 
 use super::{AccountState, CloseState, MainView, StorageState};
 use crate::{
@@ -223,13 +223,13 @@ impl MainView {
             attachments: request
                 .attachments
                 .iter()
-                .map(|path| Attachment {
+                .map(|path| AttachmentDraft {
                     name: path
                         .file_name()
                         .and_then(|name| name.to_str())
                         .unwrap_or("Attachment")
                         .to_owned(),
-                    path: path.clone(),
+                    source_path: path.clone(),
                 })
                 .collect(),
             generation: request.generation.clone(),

@@ -1,4 +1,9 @@
-use magenta_core::{EffortLevel, FinishReason, ModelDescriptor, ModelId, ProviderId, TokenUsage};
+use std::fs;
+
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use magenta_core::{
+    Attachment, EffortLevel, FinishReason, ModelDescriptor, ModelId, ProviderId, TokenUsage,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
@@ -32,7 +37,15 @@ pub enum InputContent {
         text: String,
         annotations: Vec<serde_json::Value>,
     },
+    #[serde(rename = "input_image")]
+    InputImage {
+        image_url: String,
+        detail: &'static str,
+    },
 }
+
+const MAX_IMAGES_PER_MESSAGE: usize = 4;
+const MAX_IMAGE_REQUEST_BYTES: u64 = 32 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
 pub struct Reasoning {
@@ -132,24 +145,29 @@ impl ResponsesRequest {
         let mut input = Vec::with_capacity(messages.len());
         let mut has_user_message = false;
 
+        let mut total_image_bytes = 0_u64;
+
         for message in messages {
-            if !message.attachments.is_empty() {
-                return Err(
-                    "image attachments are not supported by the OpenAI provider yet".into(),
-                );
-            }
-            if message.content.trim().is_empty() {
+            if message.content.trim().is_empty() && message.attachments.is_empty() {
                 continue;
             }
 
             let item = match message.role {
                 magenta_core::MessageRole::User => {
                     has_user_message = true;
+                    let mut content = Vec::with_capacity(1 + message.attachments.len());
+                    if !message.content.trim().is_empty() {
+                        content.push(InputContent::InputText {
+                            text: message.content.clone(),
+                        });
+                    }
+                    content.extend(attachment_content(
+                        &message.attachments,
+                        &mut total_image_bytes,
+                    )?);
                     InputItem::Message {
                         role: "user".to_owned(),
-                        content: vec![InputContent::InputText {
-                            text: message.content.clone(),
-                        }],
+                        content,
                         status: None,
                     }
                 }
@@ -180,6 +198,51 @@ impl ResponsesRequest {
             },
         })
     }
+}
+
+fn attachment_content(
+    attachments: &[Attachment],
+    total_image_bytes: &mut u64,
+) -> Result<Vec<InputContent>, String> {
+    if attachments.len() > MAX_IMAGES_PER_MESSAGE {
+        return Err("a message can contain at most four images".to_owned());
+    }
+
+    attachments
+        .iter()
+        .map(|attachment| {
+            if !matches!(
+                attachment.mime_type.as_str(),
+                "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+            ) {
+                return Err("an attached image has an unsupported file type".to_owned());
+            }
+
+            *total_image_bytes = total_image_bytes
+                .checked_add(attachment.byte_size)
+                .ok_or_else(|| "attached images exceed Magenta's request limit".to_owned())?;
+            if *total_image_bytes > MAX_IMAGE_REQUEST_BYTES {
+                return Err("attached images exceed Magenta's 32 MiB request limit".to_owned());
+            }
+
+            let bytes = fs::read(&attachment.path)
+                .map_err(|_| "an attached image is no longer available locally".to_owned())?;
+            let actual_size = u64::try_from(bytes.len())
+                .map_err(|_| "an attached image is too large to send".to_owned())?;
+            if actual_size != attachment.byte_size {
+                return Err("an attached image changed after it was saved".to_owned());
+            }
+
+            Ok(InputContent::InputImage {
+                image_url: format!(
+                    "data:{};base64,{}",
+                    attachment.mime_type,
+                    STANDARD.encode(bytes)
+                ),
+                detail: "auto",
+            })
+        })
+        .collect()
 }
 
 pub fn model_descriptors(response: ModelsResponse) -> Vec<ModelDescriptor> {
@@ -277,8 +340,12 @@ const fn effort_order(effort: &EffortLevel) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
-    use magenta_core::{ConversationId, Message, MessageId, MessageRole, MessageStatus};
+    use magenta_core::{
+        Attachment, ConversationId, Message, MessageId, MessageRole, MessageStatus,
+    };
 
     fn message(role: MessageRole, content: &str) -> Message {
         Message {
@@ -311,6 +378,78 @@ mod tests {
         assert_eq!(value["reasoning"]["effort"], "high");
         assert_eq!(value["input"][0]["content"][0]["type"], "input_text");
         assert_eq!(value["input"][1]["content"][0]["type"], "output_text");
+    }
+
+    #[test]
+    fn responses_request_encodes_saved_images_as_data_urls() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let path = directory.path().join("reference.png");
+        fs::write(&path, [0x89, b'P', b'N', b'G']).expect("test image should be written");
+        let mut user = message(MessageRole::User, "What is shown here?");
+        user.attachments.push(Attachment {
+            name: "reference.png".to_owned(),
+            path,
+            mime_type: "image/png".to_owned(),
+            byte_size: 4,
+            managed: true,
+        });
+
+        let request = ResponsesRequest::from_request("gpt-5.6-luna", &EffortLevel::Medium, &[user])
+            .expect("image request should be valid");
+        let value = serde_json::to_value(request).expect("request should serialize");
+
+        assert_eq!(value["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(value["input"][0]["content"][1]["type"], "input_image");
+        assert_eq!(value["input"][0]["content"][1]["detail"], "auto");
+        assert_eq!(
+            value["input"][0]["content"][1]["image_url"],
+            "data:image/png;base64,iVBORw=="
+        );
+    }
+
+    #[test]
+    fn responses_request_allows_an_image_without_prompt_text() {
+        let directory = tempfile::tempdir().expect("temporary directory should exist");
+        let path = directory.path().join("reference.jpeg");
+        fs::write(&path, [0xFF, 0xD8, 0xFF]).expect("test image should be written");
+        let mut user = message(MessageRole::User, "");
+        user.attachments.push(Attachment {
+            name: "reference.jpeg".to_owned(),
+            path,
+            mime_type: "image/jpeg".to_owned(),
+            byte_size: 3,
+            managed: true,
+        });
+
+        let request = ResponsesRequest::from_request("gpt-5.6-luna", &EffortLevel::Medium, &[user])
+            .expect("image-only request should be valid");
+        let value = serde_json::to_value(request).expect("request should serialize");
+
+        assert_eq!(
+            value["input"][0]["content"].as_array().map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(value["input"][0]["content"][0]["type"], "input_image");
+    }
+
+    #[test]
+    fn responses_request_rejects_images_over_the_request_limit() {
+        let mut user = message(MessageRole::User, "Analyze this image");
+        user.attachments.push(Attachment {
+            name: "large.png".to_owned(),
+            path: std::path::PathBuf::from("not-read.png"),
+            mime_type: "image/png".to_owned(),
+            byte_size: MAX_IMAGE_REQUEST_BYTES + 1,
+            managed: true,
+        });
+
+        let error = ResponsesRequest::from_request("gpt-5.6-luna", &EffortLevel::Medium, &[user])
+            .expect_err("oversized image requests must be rejected before reading files");
+
+        assert_eq!(
+            error,
+            "attached images exceed Magenta's 32 MiB request limit"
+        );
     }
 
     #[test]

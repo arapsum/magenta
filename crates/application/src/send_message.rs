@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use magenta_core::{
-    Attachment, BeginTurn, ChatProvider, Conversation, ConversationId, ConversationStore,
+    AttachmentDraft, BeginTurn, ChatProvider, Conversation, ConversationId, ConversationStore,
     GenerationConfig, GenerationRequest, GenerationStream, Message,
 };
 
@@ -17,7 +17,7 @@ pub enum SendTarget {
 pub struct SendMessageInput {
     pub target: SendTarget,
     pub prompt: String,
-    pub attachments: Vec<Attachment>,
+    pub attachments: Vec<AttachmentDraft>,
     pub generation: GenerationConfig,
 }
 
@@ -49,9 +49,10 @@ impl SendMessage {
         input: SendMessageInput,
     ) -> Result<PendingGeneration, SendMessageError> {
         let prompt = input.prompt.trim().to_owned();
-        if prompt.is_empty() {
+        if prompt.is_empty() && input.attachments.is_empty() {
             return Err(SendMessageError::EmptyPrompt);
         }
+        let title = title_from_prompt(&prompt, &input.attachments);
         let prepared = self
             .store
             .begin_turn(BeginTurn {
@@ -59,7 +60,7 @@ impl SendMessage {
                     SendTarget::New => None,
                     SendTarget::Existing(id) => Some(id),
                 },
-                title: title_from_prompt(&prompt),
+                title,
                 prompt,
                 attachments: input.attachments,
                 generation: input.generation,
@@ -78,7 +79,7 @@ impl SendMessage {
     }
 }
 
-fn title_from_prompt(prompt: &str) -> String {
+fn title_from_prompt(prompt: &str, attachments: &[AttachmentDraft]) -> String {
     let title = prompt
         .lines()
         .next()
@@ -86,11 +87,32 @@ fn title_from_prompt(prompt: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
+    if title.is_empty() {
+        return attachments.first().map_or_else(
+            || "New conversation".to_owned(),
+            |attachment| format!("Image: {}", attachment.name),
+        );
+    }
     if title.chars().count() > 46 {
         format!("{}...", title.chars().take(43).collect::<String>())
-    } else if title.is_empty() {
-        "New conversation".to_owned()
     } else {
         title
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn attachment_only_turn_uses_the_first_image_name_for_its_title() {
+        let attachments = vec![AttachmentDraft {
+            name: "diagram.png".to_owned(),
+            source_path: PathBuf::from("diagram.png"),
+        }];
+
+        assert_eq!(title_from_prompt("   ", &attachments), "Image: diagram.png");
     }
 }

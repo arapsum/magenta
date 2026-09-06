@@ -167,15 +167,7 @@ impl MagentaError {
                     "Try again or choose another model."
                 ),
             },
-            Self::SendMessage { .. } => ErrorPresentation {
-                code: "MAG-SEND-MESSAGE",
-                severity: ErrorSeverity::Error,
-                title: "Message could not be sent",
-                message: concat!(
-                    "Magenta could not prepare this message. ",
-                    "Review the conversation and try again."
-                ),
-            },
+            Self::SendMessage { source } => send_message_presentation(source),
             Self::RegenerateMessage { .. } => ErrorPresentation {
                 code: "MAG-REGENERATE-MESSAGE",
                 severity: ErrorSeverity::Error,
@@ -186,6 +178,57 @@ impl MagentaError {
                 ),
             },
         }
+    }
+}
+
+const fn send_message_presentation(source: &SendMessageError) -> ErrorPresentation {
+    use magenta_core::StorageErrorKind;
+
+    match source {
+        SendMessageError::EmptyPrompt => ErrorPresentation {
+            code: "MAG-SEND-EMPTY",
+            severity: ErrorSeverity::Warning,
+            title: "Add a message or image",
+            message: "Write a message or attach an image before sending.",
+        },
+        SendMessageError::Storage(error) => match error.kind {
+            StorageErrorKind::TooManyAttachments => ErrorPresentation {
+                code: "MAG-ATTACHMENT-COUNT",
+                severity: ErrorSeverity::Warning,
+                title: "Too many images",
+                message: "Attach up to four images in one message.",
+            },
+            StorageErrorKind::AttachmentUnreadable => ErrorPresentation {
+                code: "MAG-ATTACHMENT-READ",
+                severity: ErrorSeverity::Warning,
+                title: "Image unavailable",
+                message: "Magenta could not read one of the selected images.",
+            },
+            StorageErrorKind::UnsupportedAttachment => ErrorPresentation {
+                code: "MAG-ATTACHMENT-TYPE",
+                severity: ErrorSeverity::Warning,
+                title: "Unsupported image",
+                message: "Use a PNG, JPEG, WebP, or non-animated GIF image.",
+            },
+            StorageErrorKind::AnimatedImage => ErrorPresentation {
+                code: "MAG-ATTACHMENT-ANIMATED",
+                severity: ErrorSeverity::Warning,
+                title: "Animated GIF not supported",
+                message: "Attach a still image instead.",
+            },
+            StorageErrorKind::AttachmentTooLarge => ErrorPresentation {
+                code: "MAG-ATTACHMENT-SIZE",
+                severity: ErrorSeverity::Warning,
+                title: "Image is too large",
+                message: "Each image must be 10 MiB or smaller.",
+            },
+            _ => ErrorPresentation {
+                code: "MAG-SEND-MESSAGE",
+                severity: ErrorSeverity::Error,
+                title: "Message could not be sent",
+                message: "Magenta could not save this message. Try again.",
+            },
+        },
     }
 }
 

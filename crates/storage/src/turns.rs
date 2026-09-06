@@ -6,16 +6,20 @@ use rusqlite::{Connection, Transaction, TransactionBehavior, params};
 
 use crate::{Result, database_error, failure, invalid, now, records};
 
-pub fn begin(connection: &mut Connection, input: BeginTurn) -> Result<PreparedTurn> {
+pub fn begin(
+    connection: &mut Connection,
+    input: BeginTurn,
+    attachments: Vec<Attachment>,
+) -> Result<PreparedTurn> {
     let BeginTurn {
         conversation_id,
         title,
         prompt,
-        attachments,
+        attachments: _,
         generation: generation_config,
     } = input;
 
-    if prompt.trim().is_empty() {
+    if prompt.trim().is_empty() && attachments.is_empty() {
         return Err(failure(StorageErrorKind::InvalidData, "empty prompt"));
     }
 
@@ -124,10 +128,20 @@ fn insert_user_message(
         transaction
             .execute(
                 r"
-                    INSERT INTO attachments(message_id, position, name, source_path)
-                    VALUES (?1, ?2, ?3, ?4)
+                    INSERT INTO attachments(
+                        message_id, position, name, source_path, mime_type, byte_size, managed
+                    )
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                 ",
-                params![user_id.0, position, &attachment.name, source_path],
+                params![
+                    user_id.0,
+                    position,
+                    &attachment.name,
+                    source_path,
+                    &attachment.mime_type,
+                    i64::try_from(attachment.byte_size).map_err(invalid)?,
+                    attachment.managed,
+                ],
             )
             .map_err(database_error)?;
     }

@@ -71,8 +71,9 @@ The product is guided by a few constraints:
     provider connection, and sign-out actions.
 - Empty workspace with Magenta’s animated glass orb and ambient surface.
 - Native multiline prompt composer with model-specific effort selection,
-  attachment validation and previews, fenced-code previews, and a circular
-  send/stop control. OpenAI currently accepts text messages only.
+  image validation and previews, fenced-code previews, and a circular
+  send/stop control. OpenAI requests stream text and up to four local images
+  per user message.
 - ChatGPT browser sign-in, OS-keyring credentials, account restoration,
   model discovery, and real OpenAI response streaming.
 - A separate settings window with System/Light/Dark appearance modes, UI and
@@ -103,7 +104,7 @@ The product is guided by a few constraints:
 
 - Additional provider integrations.
 - Full-text search indexing and automatic context-budget management.
-- Attachment rendering and persistence beyond the present composer prototype.
+- Non-image attachments, remote image URLs, and clipboard image capture.
 - Rich provider events such as reasoning, tool calls, and citations.
 
 ## Architecture
@@ -150,8 +151,11 @@ History is stored at `<platform-local-data>/magenta/conversations.sqlite3`.
 On Linux this is normally `~/.local/share/magenta/conversations.sqlite3`, with
 `XDG_DATA_HOME` respected. The database contains plaintext message content,
 generation configuration, usage metadata, timestamps, pins, and attachment
-references. Credentials remain in the OS keyring. Attachment references do not
-copy or preserve the original files, and missing files do not block loading.
+metadata. Credentials remain in the OS keyring. When a user sends an image,
+Magenta validates and copies it into the sibling `attachments/` directory using
+an opaque filename; the original file may then move or be deleted without
+breaking history. Magenta supports PNG, JPEG, WebP, and non-animated GIF
+images, with a maximum of four images and 10 MiB per image in each message.
 
 SQLite uses bundled native libraries, WAL mode, foreign keys, a five-second
 busy timeout, and transactional schema migrations. Blocking database work runs
@@ -168,8 +172,9 @@ The sidebar loads lightweight summaries and filters titles locally. Conversation
 titles can be renamed inline from a row’s overflow menu; Enter or focus loss
 saves a non-empty changed title, while Escape cancels. Renaming preserves the
 conversation’s recency and pin state. The same menu can permanently delete a
-conversation after confirmation; this removes its SQLite records and attachment
-references, but never deletes the original files. Opening a thread loads its
+conversation after confirmation; this removes its SQLite records and
+Magenta-managed attachment copies, but never deletes the original files.
+Opening a thread loads its
 latest 50 messages. Earlier pages load on demand, and leaving a thread releases
 its rendered messages. Provider context currently includes all
 completed messages preceding the response, even when they are outside the
@@ -308,7 +313,7 @@ recovery, privacy, and asynchronous-work conventions.
 1. Continue visual and keyboard/accessibility QA for the conversation surface.
 2. Add full-text history search.
 3. Bound provider context and evict distant loaded message pages.
-4. Add durable attachments and additional providers.
+4. Add document attachments and additional providers.
 
 ## Contributing
 

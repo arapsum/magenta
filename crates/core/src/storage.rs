@@ -2,7 +2,7 @@
 
 use std::{error::Error, future::Future, pin::Pin};
 
-use crate::{Attachment, Conversation, ConversationId, GenerationConfig, Message, MessageId};
+use crate::{AttachmentDraft, Conversation, ConversationId, GenerationConfig, Message, MessageId};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Timestamp(pub i64);
@@ -46,7 +46,7 @@ pub struct BeginTurn {
     pub conversation_id: Option<ConversationId>,
     pub title: String,
     pub prompt: String,
-    pub attachments: Vec<Attachment>,
+    pub attachments: Vec<AttachmentDraft>,
     pub generation: GenerationConfig,
 }
 
@@ -64,6 +64,11 @@ pub enum StorageErrorKind {
     UnsupportedVersion,
     NotFound,
     Conflict,
+    TooManyAttachments,
+    AttachmentUnreadable,
+    UnsupportedAttachment,
+    AnimatedImage,
+    AttachmentTooLarge,
 }
 
 #[derive(Debug, thiserror::Error)]

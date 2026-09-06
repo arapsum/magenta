@@ -1,14 +1,17 @@
 use std::{
     collections::HashMap,
+    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use futures_util::StreamExt as _;
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FollowMode, IntoElement,
-    ListAlignment, ListSizingBehavior, ListState, ParentElement as _, Render, Styled as _, Task,
-    Window, div, list, prelude::FluentBuilder as _, px, rems,
+    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FollowMode,
+    InteractiveElement as _, IntoElement, ListAlignment, ListSizingBehavior, ListState,
+    MouseButton, ObjectFit, ParentElement as _, Render, Role, StatefulInteractiveElement as _,
+    Styled as _, StyledImage as _, Task, Window, div, img, list, prelude::FluentBuilder as _, px,
+    rems,
 };
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
@@ -43,6 +46,10 @@ const MESSAGE_MAX_WIDTH: gpui::Pixels = px(760.);
 const USER_MESSAGE_MAX_WIDTH: gpui::Pixels = px(560.);
 const LIST_OVERDRAW: gpui::Pixels = px(640.);
 const GENERATION_CLOCK_INTERVAL: Duration = Duration::from_secs(1);
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[action(namespace = magenta)]
+struct CloseAttachmentPreview;
 
 #[derive(Debug, thiserror::Error)]
 #[error("provider stream ended before completion")]
@@ -122,6 +129,12 @@ struct RenderedMessage {
     user_segments: Vec<RenderedUserSegment>,
 }
 
+#[derive(Clone)]
+struct AttachmentPreview {
+    path: PathBuf,
+    name: String,
+}
+
 enum RenderedUserSegment {
     Text(String),
     Code {
@@ -146,6 +159,7 @@ pub struct ConversationView {
     origins: HashMap<MessageId, GenerationConfig>,
     math_cache: Arc<MathCache>,
     math_tasks: HashMap<FormulaKey, Task<()>>,
+    attachment_preview: Option<AttachmentPreview>,
 }
 
 type ConversationContext<'a> = Context<'a, ConversationView>;
@@ -223,8 +237,13 @@ impl ConversationView {
     pub(crate) fn new(
         composer: Entity<PromptComposer>,
         _window: &mut Window,
-        _cx: &mut Context<'_, Self>,
+        cx: &mut Context<'_, Self>,
     ) -> Self {
+        cx.bind_keys([gpui::KeyBinding::new(
+            "escape",
+            CloseAttachmentPreview,
+            Some("AttachmentPreview"),
+        )]);
         Self {
             composer,
             conversation: None,
@@ -242,6 +261,7 @@ impl ConversationView {
             origins: HashMap::new(),
             math_cache: Arc::new(MathCache::default()),
             math_tasks: HashMap::new(),
+            attachment_preview: None,
         }
     }
 
@@ -272,6 +292,7 @@ impl ConversationView {
         self.origins.clear();
         self.older_cursor = None;
         self.has_older = false;
+        self.attachment_preview = None;
         self.list_state.reset(0);
         cx.notify();
     }
@@ -832,7 +853,7 @@ impl ConversationView {
         };
 
         let body = match message.message.role {
-            MessageRole::User => Self::render_user_message(message, cx),
+            MessageRole::User => Self::render_user_message(message, &view, cx),
             MessageRole::Assistant => self.render_assistant_message(&message.message, cx, view),
         };
 
@@ -850,7 +871,7 @@ impl ConversationView {
             .into_any_element()
     }
 
-    fn render_user_message(message: &RenderedMessage, cx: &App) -> AnyElement {
+    fn render_user_message(message: &RenderedMessage, view: &Entity<Self>, cx: &App) -> AnyElement {
         let actions = Clipboard::new(("copy-message", message.message.id.0))
             .value(message.message.content.clone())
             .tooltip("Copy message");
@@ -899,27 +920,233 @@ impl ConversationView {
                 },
             );
 
+        let attachments = Self::render_user_attachments(&message.message, view, cx);
+
         div()
             .w_full()
             .flex()
             .flex_col()
             .items_end()
             .gap(px(5.))
-            .child(
+            .when_some(attachments, gpui::ParentElement::child)
+            .when(!message.message.content.trim().is_empty(), |this| {
+                this.child(
+                    div()
+                        .max_w(USER_MESSAGE_MAX_WIDTH)
+                        .px(px(14.))
+                        .py(px(10.))
+                        .rounded(px(12.))
+                        .border_1()
+                        .border_color(cx.theme().input.opacity(0.72))
+                        .bg(cx.theme().secondary)
+                        .text_size(px(13.))
+                        .line_height(px(20.))
+                        .text_color(cx.theme().foreground)
+                        .child(v_flex().w_full().gap(px(8.)).children(segments)),
+                )
+            })
+            .child(h_flex().h(px(24.)).items_center().child(actions))
+            .into_any_element()
+    }
+
+    fn render_user_attachments(
+        message: &Message,
+        view: &Entity<Self>,
+        cx: &App,
+    ) -> Option<AnyElement> {
+        if message.attachments.is_empty() {
+            return None;
+        }
+
+        let multiple = message.attachments.len() > 1;
+        let muted_foreground = cx.theme().muted_foreground;
+        let tiles = message
+            .attachments
+            .iter()
+            .enumerate()
+            .map(|(index, attachment)| {
+                let path = attachment.path.clone();
+                let name = attachment.name.clone();
+                let preview_path = path.clone();
+                let preview_name = name;
+                let preview_view = view.clone();
+
                 div()
-                    .max_w(USER_MESSAGE_MAX_WIDTH)
-                    .px(px(14.))
-                    .py(px(10.))
-                    .rounded(px(12.))
+                    .id(format!("message-attachment-{}-{index}", message.id.0))
+                    .relative()
+                    .size(if multiple { px(116.) } else { px(320.) })
+                    .h(if multiple { px(116.) } else { px(220.) })
+                    .overflow_hidden()
+                    .rounded(px(10.))
                     .border_1()
                     .border_color(cx.theme().input.opacity(0.72))
                     .bg(cx.theme().secondary)
-                    .text_size(px(13.))
-                    .line_height(px(20.))
-                    .text_color(cx.theme().foreground)
-                    .child(v_flex().w_full().gap(px(8.)).children(segments)),
+                    .cursor_pointer()
+                    .on_click(move |_, _, cx| {
+                        preview_view.update(cx, |conversation, cx| {
+                            conversation.attachment_preview = Some(AttachmentPreview {
+                                path: preview_path.clone(),
+                                name: preview_name.clone(),
+                            });
+                            cx.notify();
+                        });
+                    })
+                    .child(
+                        img(path)
+                            .size_full()
+                            .object_fit(ObjectFit::Cover)
+                            .with_fallback(move || {
+                                v_flex()
+                                    .size_full()
+                                    .items_center()
+                                    .justify_center()
+                                    .gap(px(5.))
+                                    .text_size(px(11.))
+                                    .text_color(muted_foreground)
+                                    .child(Icon::new(IconName::GalleryVerticalEnd).small())
+                                    .child("Image unavailable")
+                                    .into_any_element()
+                            }),
+                    )
+                    .into_any_element()
+            });
+
+        Some(
+            div()
+                .max_w(USER_MESSAGE_MAX_WIDTH)
+                .flex()
+                .flex_wrap()
+                .justify_end()
+                .gap(px(6.))
+                .children(tiles)
+                .into_any_element(),
+        )
+    }
+
+    fn close_attachment_preview(&mut self, cx: &mut Context<'_, Self>) {
+        if self.attachment_preview.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn attachment_preview_overlay(&self, cx: &Context<'_, Self>) -> Option<AnyElement> {
+        let preview = self.attachment_preview.as_ref()?;
+        let view = cx.entity();
+        let preview_path = preview.path.clone();
+        let preview_name = preview.name.clone();
+        let backdrop_view = view.clone();
+        let close_view = view;
+        let muted_foreground = cx.theme().muted_foreground;
+
+        Some(
+            div()
+                .id("attachment-preview-overlay")
+                .absolute()
+                .inset_0()
+                .key_context("AttachmentPreview")
+                .on_action(
+                    cx.listener(|conversation, _: &CloseAttachmentPreview, _, cx| {
+                        conversation.close_attachment_preview(cx);
+                    }),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .bg(cx.theme().background.opacity(0.82))
+                        .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                            backdrop_view.update(cx, |conversation, cx| {
+                                conversation.close_attachment_preview(cx);
+                            });
+                        }),
+                )
+                .child(Self::attachment_preview_dialog(
+                    preview_path,
+                    preview_name,
+                    close_view,
+                    muted_foreground,
+                    cx,
+                ))
+                .into_any_element(),
+        )
+    }
+
+    fn attachment_preview_dialog(
+        path: PathBuf,
+        name: String,
+        view: Entity<Self>,
+        muted_foreground: gpui::Hsla,
+        cx: &App,
+    ) -> AnyElement {
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .p(px(40.))
+            .child(
+                v_flex()
+                    .id("attachment-preview-dialog")
+                    .role(Role::Dialog)
+                    .aria_label(format!("Image preview: {name}"))
+                    .max_w(px(960.))
+                    .max_h(px(720.))
+                    .overflow_hidden()
+                    .rounded(px(14.))
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().popover)
+                    .shadow_lg()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(
+                        h_flex()
+                            .h(px(38.))
+                            .justify_between()
+                            .items_center()
+                            .px(px(12.))
+                            .border_b_1()
+                            .border_color(cx.theme().border)
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(12.))
+                                    .font_medium()
+                                    .child(name),
+                            )
+                            .child(
+                                Button::new("close-attachment-preview")
+                                    .ghost()
+                                    .small()
+                                    .icon(IconName::Close)
+                                    .tooltip("Close preview")
+                                    .on_click(move |_, _, cx| {
+                                        view.update(cx, |conversation, cx| {
+                                            conversation.close_attachment_preview(cx);
+                                        });
+                                    }),
+                            ),
+                    )
+                    .child(
+                        img(path)
+                            .w(px(880.))
+                            .h(px(620.))
+                            .object_fit(ObjectFit::Contain)
+                            .with_fallback(move || {
+                                v_flex()
+                                    .w(px(560.))
+                                    .h(px(300.))
+                                    .items_center()
+                                    .justify_center()
+                                    .gap(px(8.))
+                                    .text_color(muted_foreground)
+                                    .child(Icon::new(IconName::GalleryVerticalEnd).small())
+                                    .child("This image is no longer available")
+                                    .into_any_element()
+                            }),
+                    ),
             )
-            .child(h_flex().h(px(24.)).items_center().child(actions))
             .into_any_element()
     }
 
@@ -1194,6 +1421,9 @@ impl Render for ConversationView {
                             .child(self.composer.clone()),
                     ),
             )
+            .when_some(self.attachment_preview_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
     }
 }
 
@@ -1201,6 +1431,7 @@ impl Render for ConversationView {
 mod tests {
     use std::{
         cell::RefCell,
+        path::PathBuf,
         pin::Pin,
         rc::Rc,
         sync::{
@@ -1254,6 +1485,26 @@ mod tests {
         assert_eq!(format_elapsed(Duration::from_secs(59)), "59s");
         assert_eq!(format_elapsed(Duration::from_secs(60)), "1m 00s");
         assert_eq!(format_elapsed(Duration::from_secs(3_725)), "1h 02m");
+    }
+
+    #[gpui::test]
+    fn attachment_preview_can_be_opened_and_dismissed(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
+            let composer = cx.new(|cx| PromptComposer::new(window, cx));
+            ConversationView::new(composer, window, cx)
+        });
+
+        window
+            .update(cx, |view, _, cx| {
+                view.attachment_preview = Some(AttachmentPreview {
+                    path: PathBuf::from("reference.png"),
+                    name: "Reference image".to_owned(),
+                });
+                view.close_attachment_preview(cx);
+                assert!(view.attachment_preview.is_none());
+            })
+            .expect("the conversation test window should remain open");
     }
 
     #[gpui::test]
