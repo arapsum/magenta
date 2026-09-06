@@ -51,6 +51,14 @@ struct SelectPreviousFinderResult;
 #[action(namespace = magenta)]
 struct ConfirmFinderResult;
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[action(namespace = magenta)]
+struct ConfirmConversationDeletion;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[action(namespace = magenta)]
+struct CancelConversationDeletion;
+
 #[cfg(target_os = "macos")]
 const OPEN_FINDER_KEY: &str = "cmd-k";
 #[cfg(not(target_os = "macos"))]
@@ -77,6 +85,7 @@ pub struct MainView {
     unsaved: Option<magenta_core::Message>,
     close_requested: CloseState,
     active_conversation: Option<ConversationId>,
+    pending_deletion: Option<PendingDeletion>,
     account_state: AccountState,
     finder_open: PanelState,
     finder_input: Entity<InputState>,
@@ -90,6 +99,12 @@ pub struct MainView {
     settings_view: Option<Entity<SettingsWindow>>,
     settings_subscription: Option<Subscription>,
     subscriptions: Vec<Subscription>,
+}
+
+struct PendingDeletion {
+    id: ConversationId,
+    title: String,
+    focus_handle: FocusHandle,
 }
 
 pub struct MainServices {
@@ -168,6 +183,16 @@ impl MainView {
             KeyBinding::new("down", SelectNextFinderResult, Some("ConversationFinder")),
             KeyBinding::new("up", SelectPreviousFinderResult, Some("ConversationFinder")),
             KeyBinding::new("enter", ConfirmFinderResult, Some("ConversationFinder")),
+            KeyBinding::new(
+                "enter",
+                ConfirmConversationDeletion,
+                Some("DeleteConversationDialog"),
+            ),
+            KeyBinding::new(
+                "escape",
+                CancelConversationDeletion,
+                Some("DeleteConversationDialog"),
+            ),
         ]);
         composer.update(cx, |composer, cx| composer.set_storage_ready(false, cx));
         let subscriptions = Self::subscribe_to_children(
@@ -200,6 +225,7 @@ impl MainView {
             unsaved: None,
             close_requested: CloseState::Open,
             active_conversation: None,
+            pending_deletion: None,
             account_state: AccountState::Restoring,
             finder_open: PanelState::Closed,
             finder_input,
@@ -267,6 +293,9 @@ impl MainView {
                     }
                     SidebarEvent::SetPinned(id, pinned) => {
                         main.set_pinned(*id, *pinned, window, cx);
+                    }
+                    SidebarEvent::DeleteConversation(id) => {
+                        main.confirm_delete_conversation(*id, window, cx);
                     }
                     SidebarEvent::RetryHistory => main.load_history(window, cx),
                     SidebarEvent::OpenSettings => {
@@ -917,6 +946,125 @@ impl MainView {
             .into_any_element()
     }
 
+    fn delete_confirmation_copy(title: &str, cx: &Context<'_, Self>) -> AnyElement {
+        v_flex()
+            .gap(px(8.))
+            .p(px(20.))
+            .child(
+                div()
+                    .font_semibold()
+                    .text_size(px(16.))
+                    .child(format!("Delete “{title}”?")),
+            )
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(
+                        "This conversation and its messages will be permanently deleted. \
+                         This cannot be undone.",
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn delete_confirmation_actions(cx: &Context<'_, Self>) -> AnyElement {
+        h_flex()
+            .justify_end()
+            .gap(px(8.))
+            .px(px(20.))
+            .pb(px(20.))
+            .child(
+                Button::new("cancel-delete-conversation")
+                    .label("Cancel")
+                    .outline()
+                    .debug_selector(|| "cancel-delete-conversation".into())
+                    .accessibility_id("cancel-delete-conversation")
+                    .on_click(cx.listener(|main, _, window, cx| {
+                        main.cancel_delete_conversation(window, cx);
+                    })),
+            )
+            .child(
+                Button::new("confirm-delete-conversation")
+                    .label("Delete")
+                    .danger()
+                    .debug_selector(|| "confirm-delete-conversation".into())
+                    .accessibility_id("confirm-delete-conversation")
+                    .on_click(cx.listener(|main, _, window, cx| {
+                        main.confirm_pending_deletion(window, cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    fn delete_confirmation_dialog(
+        title: &str,
+        focus_handle: &FocusHandle,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        v_flex()
+            .id("delete-conversation-dialog")
+            .track_focus(focus_handle)
+            .key_context("DeleteConversationDialog")
+            .on_action(
+                cx.listener(|main, _: &ConfirmConversationDeletion, window, cx| {
+                    main.confirm_pending_deletion(window, cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|main, _: &CancelConversationDeletion, window, cx| {
+                    main.cancel_delete_conversation(window, cx);
+                }),
+            )
+            .role(Role::AlertDialog)
+            .aria_label("Delete conversation")
+            .w(px(420.))
+            .rounded(px(14.))
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().popover)
+            .shadow_lg()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(Self::delete_confirmation_copy(title, cx))
+            .child(Self::delete_confirmation_actions(cx))
+            .into_any_element()
+    }
+
+    fn delete_confirmation_overlay(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let pending = self
+            .pending_deletion
+            .as_ref()
+            .expect("delete confirmation is only rendered while pending");
+        let dialog = Self::delete_confirmation_dialog(&pending.title, &pending.focus_handle, cx);
+        let backdrop_view = cx.entity();
+
+        div()
+            .id("delete-conversation-overlay")
+            .absolute()
+            .inset_0()
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .bg(cx.theme().background.opacity(0.72))
+                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                        backdrop_view.update(cx, |main, cx| {
+                            main.cancel_delete_conversation(window, cx);
+                        });
+                    }),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(dialog),
+            )
+            .into_any_element()
+    }
+
     fn titlebar_controls(&self, cx: &Context<'_, Self>) -> AnyElement {
         let sidebar_view = self.sidebar.clone();
         let sidebar_collapsed = self.sidebar.read(cx).is_collapsed();
@@ -1042,6 +1190,9 @@ impl MainView {
             .child(self.main_panel(content, narrow, cx))
             .when(self.finder_open.is_open(), |this| {
                 this.child(self.finder_overlay(cx))
+            })
+            .when(self.pending_deletion.is_some(), |this| {
+                this.child(self.delete_confirmation_overlay(cx))
             })
             .when(self.loading_conversation.is_some(), |this| {
                 this.child(

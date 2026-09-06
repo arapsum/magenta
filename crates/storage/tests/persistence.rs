@@ -121,6 +121,61 @@ fn rename_persists_without_changing_conversation_recency() {
 }
 
 #[test]
+fn delete_removes_conversation_messages_and_attachment_records() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite3");
+        let store = SqliteConversationStore::new(path.clone());
+        store.initialize().await.unwrap();
+        let pending = store.begin_turn(input(None)).await.unwrap();
+        let id = pending.conversation.id;
+
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM messages", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM attachments", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            1
+        );
+
+        store.delete(id).await.unwrap();
+        assert!(store.summaries().await.unwrap().is_empty());
+        assert_eq!(
+            store.load(id).await.unwrap_err().kind,
+            StorageErrorKind::NotFound
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM messages", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM attachments", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store.delete(ConversationId(999)).await.unwrap_err().kind,
+            StorageErrorKind::NotFound
+        );
+    });
+}
+
+#[test]
 fn pages_are_ordered_without_gaps_and_provider_context_is_independent() {
     smol::block_on(async {
         let directory = tempfile::tempdir().unwrap();

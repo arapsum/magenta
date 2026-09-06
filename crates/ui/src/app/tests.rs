@@ -25,6 +25,7 @@ struct TestPorts {
     summaries: Mutex<Vec<ConversationSummary>>,
     loads: Mutex<VecDeque<StorageFuture<ConversationPage>>>,
     saves: Mutex<Vec<Message>>,
+    deleted: Mutex<Vec<ConversationId>>,
     requests: AtomicUsize,
 }
 
@@ -68,6 +69,11 @@ impl ConversationStore for TestPorts {
         } else {
             Box::pin(async { Ok(()) })
         }
+    }
+    fn delete(&self, id: ConversationId) -> StorageFuture<()> {
+        self.deleted.lock().push(id);
+        self.summaries.lock().retain(|summary| summary.id != id);
+        Box::pin(async { Ok(()) })
     }
     fn rename(&self, _: ConversationId, _: String) -> StorageFuture<()> {
         failure()
@@ -143,6 +149,7 @@ fn summary(id: u64, title: &str) -> ConversationSummary {
     ConversationSummary {
         id: ConversationId(id),
         title: title.to_owned(),
+        preview: format!("Preview for {title}"),
         pinned: false,
         created_at: Timestamp(0),
         updated_at: Timestamp(id.cast_signed()),
@@ -301,6 +308,46 @@ fn failed_finalization_retains_response_until_retry_before_navigation(cx: &mut T
     });
     assert_eq!(ports.saves.lock().as_slice(), &[response.clone(), response]);
 }
+
+#[gpui::test]
+fn delete_confirmation_removes_the_thread_and_clears_the_active_view(cx: &mut TestAppContext) {
+    let ports = Arc::new(TestPorts::default());
+    ports.summaries.lock().push(summary(1, "Delete me"));
+    let (window, view) = setup(cx, ports.clone());
+    cx.run_until_parked();
+
+    window
+        .update(cx, |_, window, cx| {
+            view.update(cx, |main, cx| {
+                main.active_conversation = Some(ConversationId(1));
+                main.conversation
+                    .update(cx, |conversation, cx| conversation.load_page(page(1), cx));
+                main.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.set_active(Some(ConversationId(1)), cx)
+                });
+                main.confirm_delete_conversation(ConversationId(1), window, cx);
+            });
+        })
+        .unwrap();
+
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    assert!(view.read_with(cx, |main, _| main.pending_deletion.is_some()));
+
+    let delete_bounds = visual
+        .debug_bounds("confirm-delete-conversation")
+        .expect("the delete confirmation button should be rendered");
+    visual.simulate_click(delete_bounds.center(), gpui::Modifiers::default());
+    visual.run_until_parked();
+
+    assert_eq!(ports.deleted.lock().as_slice(), &[ConversationId(1)]);
+    view.read_with(cx, |main, _| {
+        assert!(main.active_conversation.is_none());
+        assert!(main.pending_deletion.is_none());
+        assert_eq!(main.operation, Operation::Idle);
+    });
+}
+
 #[gpui::test]
 fn finder_filters_persisted_history_and_opens_selected_conversation(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());

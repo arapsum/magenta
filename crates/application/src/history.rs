@@ -47,6 +47,11 @@ impl ConversationHistory {
     }
 
     #[must_use]
+    pub fn delete(&self, id: ConversationId) -> StorageFuture<()> {
+        self.store.delete(id)
+    }
+
+    #[must_use]
     pub fn rename(&self, id: ConversationId, title: String) -> StorageFuture<()> {
         self.store.rename(id, title)
     }

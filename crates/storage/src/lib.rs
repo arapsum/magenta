@@ -228,6 +228,21 @@ impl ConversationStore for SqliteConversationStore {
         })
     }
 
+    fn delete(&self, id: ConversationId) -> StorageFuture<()> {
+        self.run(move |connection| {
+            let changed = connection
+                .execute("DELETE FROM conversations WHERE id = ?1", [id.0])
+                .map_err(database_error)?;
+            if changed == 0 {
+                return Err(failure(
+                    StorageErrorKind::NotFound,
+                    "conversation does not exist",
+                ));
+            }
+            Ok(())
+        })
+    }
+
     fn rename(&self, id: ConversationId, title: String) -> StorageFuture<()> {
         self.run(move |connection| {
             let changed = connection

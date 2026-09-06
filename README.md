@@ -64,6 +64,7 @@ The product is guided by a few constraints:
   - pinned conversations and grouped recent history;
   - durable pin/unpin, inline rename, selection, expansion, and “Show more”
     interactions;
+  - permanent conversation deletion behind a confirmation dialog;
   - an active-selection bevel that moves from New Chat to the selected
     conversation;
   - a local account menu with profile details, settings, theme switching,
@@ -102,7 +103,6 @@ The product is guided by a few constraints:
 
 - Additional provider integrations.
 - Full-text search indexing and automatic context-budget management.
-- Conversation deletion workflow.
 - Attachment rendering and persistence beyond the present composer prototype.
 - Rich provider events such as reasoning, tool calls, and citations.
 
@@ -167,9 +167,11 @@ navigation. Existing in-memory demo history is not imported.
 The sidebar loads lightweight summaries and filters titles locally. Conversation
 titles can be renamed inline from a row’s overflow menu; Enter or focus loss
 saves a non-empty changed title, while Escape cancels. Renaming preserves the
-conversation’s recency and pin state. Opening a thread loads its latest 50
-messages. Earlier pages load on demand, and leaving a thread releases its
-rendered messages. Provider context currently includes all
+conversation’s recency and pin state. The same menu can permanently delete a
+conversation after confirmation; this removes its SQLite records and attachment
+references, but never deletes the original files. Opening a thread loads its
+latest 50 messages. Earlier pages load on demand, and leaving a thread releases
+its rendered messages. Provider context currently includes all
 completed messages preceding the response, even when they are outside the
 loaded page; token-budget truncation and page eviction are future work.
 
@@ -304,7 +306,7 @@ recovery, privacy, and asynchronous-work conventions.
 ## Roadmap
 
 1. Continue visual and keyboard/accessibility QA for the conversation surface.
-2. Add conversation rename/delete and full-text history search.
+2. Add full-text history search.
 3. Bound provider context and evict distant loaded message pages.
 4. Add durable attachments and additional providers.
 

@@ -60,6 +60,28 @@ struct RenameState {
     saving: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum HistoryActionState {
+    #[default]
+    Disabled,
+    Enabled,
+}
+
+impl HistoryActionState {
+    const fn is_enabled(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+}
+
+struct ConversationActionData {
+    id: ConversationId,
+    selected: bool,
+    metadata: Option<String>,
+    group_name: SharedString,
+    pinned: bool,
+    history_actions: HistoryActionState,
+}
+
 impl AccountDropdown {
     fn new(
         id: impl Into<ElementId>,
@@ -167,6 +189,7 @@ pub struct SidebarView {
     recency_limit: usize,
     history_status: Option<&'static str>,
     history_failed: bool,
+    history_actions: HistoryActionState,
     rename: Option<RenameState>,
     rename_subscription: Option<Subscription>,
 }
@@ -188,6 +211,7 @@ impl SidebarView {
             recency_limit: INITIAL_RECENCY_LIMIT,
             history_status: Some("Loading conversations…"),
             history_failed: false,
+            history_actions: HistoryActionState::Disabled,
             rename: None,
             rename_subscription: None,
         }
@@ -258,7 +282,7 @@ impl SidebarView {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if self.rename.is_some() {
+        if self.rename.is_some() || !self.history_actions.is_enabled() {
             return;
         }
         let Some(original) = self
@@ -370,6 +394,31 @@ impl SidebarView {
         cx.notify();
     }
 
+    pub(crate) fn delete_succeeded(&mut self, id: ConversationId, cx: &mut Context<'_, Self>) {
+        self.conversations
+            .retain(|conversation| conversation.id != id);
+        if self.rename.as_ref().is_some_and(|rename| rename.id == id) {
+            self.cancel_rename(cx);
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn set_history_actions_enabled(
+        &mut self,
+        enabled: bool,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let state = if enabled {
+            HistoryActionState::Enabled
+        } else {
+            HistoryActionState::Disabled
+        };
+        if self.history_actions != state {
+            self.history_actions = state;
+            cx.notify();
+        }
+    }
+
     pub(crate) fn set_account(
         &mut self,
         account: Option<ProviderAccount>,
@@ -380,6 +429,9 @@ impl SidebarView {
     }
 
     fn set_pinned(&self, id: ConversationId, pinned: bool, cx: &mut Context<'_, Self>) {
+        if !self.history_actions.is_enabled() {
+            return;
+        }
         if self
             .conversations
             .iter()
@@ -876,11 +928,14 @@ impl SidebarView {
             ))
             .when(!is_renaming, |this| {
                 this.child(Self::conversation_actions(
-                    id,
-                    selected,
-                    metadata,
-                    group_name,
-                    conversation.pinned,
+                    ConversationActionData {
+                        id,
+                        selected,
+                        metadata,
+                        group_name,
+                        pinned: conversation.pinned,
+                        history_actions: self.history_actions,
+                    },
                     view,
                     cx,
                 ))
@@ -950,14 +1005,19 @@ impl SidebarView {
     }
 
     fn conversation_actions(
-        id: ConversationId,
-        selected: bool,
-        metadata: Option<String>,
-        group_name: SharedString,
-        pinned: bool,
+        actions: ConversationActionData,
         view: Entity<Self>,
         cx: &App,
     ) -> AnyElement {
+        let ConversationActionData {
+            id,
+            selected,
+            metadata,
+            group_name,
+            pinned,
+            history_actions,
+        } = actions;
+        let history_actions_enabled = history_actions.is_enabled();
         let next_pinned = !pinned;
         let menu_label = if next_pinned { "Pin" } else { "Unpin" };
 
@@ -1000,9 +1060,11 @@ impl SidebarView {
                             .dropdown_menu(move |menu, window, _cx| {
                                 let action_view = view.clone();
                                 let rename_view = view.clone();
+                                let delete_view = view.clone();
                                 menu.item(
                                     PopupMenuItem::new(menu_label)
                                         .icon(Icon::empty().path("icons/conversation-pin.svg"))
+                                        .disabled(!history_actions_enabled)
                                         .on_click(window.listener_for(
                                             &action_view,
                                             move |sidebar, _, _, cx| {
@@ -1013,10 +1075,25 @@ impl SidebarView {
                                 .item(
                                     PopupMenuItem::new("Rename")
                                         .icon(Icon::empty().path("icons/conversation-rename.svg"))
+                                        .disabled(!history_actions_enabled)
                                         .on_click(window.listener_for(
                                             &rename_view,
                                             move |sidebar, _, window, cx| {
                                                 sidebar.start_rename(id, window, cx);
+                                            },
+                                        )),
+                                )
+                                .item(PopupMenuItem::separator())
+                                .item(
+                                    PopupMenuItem::new("Delete")
+                                        .icon(Icon::empty().path("icons/conversation-delete.svg"))
+                                        .disabled(!history_actions_enabled)
+                                        .on_click(window.listener_for(
+                                            &delete_view,
+                                            move |sidebar, _, _, cx| {
+                                                if sidebar.history_actions.is_enabled() {
+                                                    cx.emit(SidebarEvent::DeleteConversation(id));
+                                                }
                                             },
                                         )),
                                 )
