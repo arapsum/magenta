@@ -11,10 +11,14 @@ magenta-application.workspace = true
 magenta-core.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
+parking_lot.workspace = true
+ratex-layout.workspace = true
+ratex-parser.workspace = true
+ratex-svg.workspace = true
+ratex-types.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 futures-channel.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
-parking_lot.workspace = true

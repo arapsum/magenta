@@ -45,6 +45,10 @@ gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "49229371e095bfd2ca77d336b5972b16956f0a87" }
 reqwest_client = { git = "https://github.com/zed-industries/zed" }
 rand = "0.9"
+ratex-layout = "0.1.14"
+ratex-parser = "0.1.14"
+ratex-svg = { version = "0.1.14", default-features = false, features = ["embed-fonts", "standalone"] }
+ratex-types = "0.1.14"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
