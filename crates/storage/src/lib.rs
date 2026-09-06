@@ -1,7 +1,10 @@
 //! SQLite adapter. Connections and migrations are confined to blocking workers.
 
 mod records;
+mod settings;
 mod turns;
+
+pub use settings::TomlSettingsStore;
 
 use std::{
     path::PathBuf,

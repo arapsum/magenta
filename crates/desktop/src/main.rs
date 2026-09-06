@@ -9,10 +9,12 @@ use gpui::{
 use gpui::{WindowBackgroundAppearance, WindowDecorations};
 use gpui_component::Root;
 use magenta_application::{ConversationHistory, RegenerateMessage, SendMessage};
-use magenta_core::{ChatProvider, ConversationStore, ModelCatalog, ProviderAuthenticator};
+use magenta_core::{
+    ChatProvider, ConversationStore, ModelCatalog, ProviderAuthenticator, SettingsStore,
+};
 use magenta_providers::OpenAiProvider;
 
-use magenta_ui::{notification_for_error, MagentaError, MainView, Result};
+use magenta_ui::{notification_for_error, MagentaError, MainServices, MainView, Result};
 
 fn main() -> ExitCode {
     let (diagnostics_guard, diagnostics_error) = initialize_diagnostics();
@@ -62,6 +64,7 @@ fn initialize_application(cx: &mut App) {
     );
     cx.set_app_identity("magenta-1", "Magenta");
     gpui_component::init(cx);
+    magenta_ui::init_settings(cx);
 }
 
 fn collect_startup_warnings(
@@ -132,6 +135,15 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
         Arc::new(magenta_storage::SqliteConversationStore::new(
             data_dir.join("magenta/conversations.sqlite3"),
         ));
+    let config_dir = dirs::config_dir().ok_or_else(|| MagentaError::StorageInitialize {
+        source: magenta_core::StorageError::new(
+            magenta_core::StorageErrorKind::Unavailable,
+            std::io::Error::other("configuration directory unavailable"),
+        ),
+    })?;
+    let settings_store: Arc<dyn SettingsStore> = Arc::new(magenta_storage::TomlSettingsStore::new(
+        config_dir.join("magenta/settings.toml"),
+    ));
     let send_message = SendMessage::new(Arc::clone(&chat_provider), Arc::clone(&store));
     let regenerate_provider = Arc::clone(&chat_provider);
     let regenerate_store = Arc::clone(&store);
@@ -143,8 +155,11 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
                 send_message,
                 regenerate_message,
                 history,
-                Arc::clone(&authenticator),
-                Arc::clone(&model_catalog),
+                MainServices {
+                    authenticator: Arc::clone(&authenticator),
+                    model_catalog: Arc::clone(&model_catalog),
+                    settings_store: Arc::clone(&settings_store),
+                },
                 window,
                 cx,
             )

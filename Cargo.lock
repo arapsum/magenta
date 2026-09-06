@@ -3908,11 +3908,13 @@ name = "magenta-storage"
 version = "0.1.0"
 dependencies = [
  "magenta-core",
+ "parking_lot",
  "rusqlite",
  "serde",
  "serde_json",
  "smol",
  "tempfile",
+ "toml_edit 0.22.27",
 ]
 
 [[package]]
@@ -3924,6 +3926,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "gpui",
+ "gpui-base",
  "gpui-component",
  "magenta-application",
  "magenta-core",

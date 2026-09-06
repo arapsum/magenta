@@ -41,6 +41,7 @@ gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
   "wayland",
   "x11",
 ] }
+gpui-base = { git = "https://github.com/longbridge/gpui-component", rev = "49229371e095bfd2ca77d336b5972b16956f0a87" }
 gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "49229371e095bfd2ca77d336b5972b16956f0a87" }
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "49229371e095bfd2ca77d336b5972b16956f0a87" }
 reqwest_client = { git = "https://github.com/zed-industries/zed" }
@@ -54,6 +55,7 @@ serde_json = "1"
 sha2 = "0.10"
 smol = "2"
 thiserror = "2"
+toml_edit = "0.22"
 tracing = "0.1"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
