@@ -9,10 +9,11 @@ experience for remote AI providers without turning a chat client into a
 browser tab in a desktop wrapper. Magenta is intended to be fast at idle,
 careful with memory, and pleasant to use for long-lived conversations.
 
-> **Status:** Magenta supports ChatGPT sign-in, OpenAI streaming, and local
-> SQLite conversation history. Conversations survive restarts, including their
-> model, effort, pinned state, and completed, stopped, or failed responses.
-> The application remains experimental; Linux is the platform exercised here.
+> **Status:** Magenta supports ChatGPT sign-in, OpenAI streaming, local SQLite
+> conversation history, and an editable TOML-backed settings window.
+> Conversations survive restarts, including their model, effort, pinned state,
+> and completed, stopped, or failed responses. The application remains
+> experimental; Linux is the platform exercised here.
 
 The visual language takes inspiration from the
 [Mogonta AI Chat Workspace UI design](https://dribbble.com/shots/27203662-Mogonta-AI-Chat-Workspace-UI-Design).
@@ -64,13 +65,17 @@ The product is guided by a few constraints:
   - durable pin/unpin, selection, expansion, and “Show more” interactions;
   - an active-selection bevel that moves from New Chat to the selected
     conversation;
-  - a local profile/settings entry point and a theme toggle.
+  - a local account menu with profile details, settings, theme switching,
+    provider connection, and sign-out actions.
 - Empty workspace with Magenta’s animated glass orb and ambient surface.
 - Native multiline prompt composer with model-specific effort selection,
   attachment validation and previews, fenced-code previews, and a circular
   send/stop control. OpenAI currently accepts text messages only.
 - ChatGPT browser sign-in, OS-keyring credentials, account restoration,
   model discovery, and real OpenAI response streaming.
+- A separate settings window with System/Light/Dark appearance modes, UI and
+  monospace font families and sizes, KaTeX math styles and sizes, OpenAI
+  connection controls, and local configuration-file actions.
 - A conversation surface backed by provider-independent core types and SQLite.
 - Conversation selection, new-thread creation, rich Markdown responses,
   code-block copy actions, response regeneration, cancellable streaming,
@@ -133,7 +138,10 @@ desktop
 `desktop` constructs the adapters and injects them into application workflows.
 `application` coordinates durable turns and provider requests; `ui` owns stream
 lifecycle, cancellation, loaded pages, and rendering. SQLite allocates IDs and
-message sequences. `core` has no dependency on GPUI, HTTP, or SQLite.
+message sequences. The `SettingsStore` port keeps settings persistence behind
+the same boundary: `storage` provides the TOML adapter and `ui` applies the
+active settings to the running windows. `core` has no dependency on GPUI, HTTP,
+or SQLite.
 
 ## Local conversation history
 
@@ -160,6 +168,50 @@ thread loads its latest 50 messages. Earlier pages load on demand, and leaving a
 thread releases its rendered messages. Provider context currently includes all
 completed messages preceding the response, even when they are outside the
 loaded page; token-budget truncation and page eviction are future work.
+
+## Application settings
+
+Magenta stores user preferences in an editable TOML file at
+`<platform-config>/magenta/settings.toml`. On Linux this is normally
+`~/.config/magenta/settings.toml`, with `XDG_CONFIG_HOME` respected. The file is
+opened from the sidebar account menu by selecting **Settings**.
+
+The settings window applies changes immediately and persists them without
+blocking the GPUI thread. It currently provides:
+
+- System, Light, and Dark appearance modes;
+- UI and monospace font families, including installed font names and the
+  `system-ui`/`system-monospace` defaults;
+- UI and monospace font sizes;
+- KaTeX Default, Roman, Sans-serif, and Typewriter math styles;
+- inline and display-math sizes; and
+- OpenAI account connection and disconnection controls.
+
+The file uses the following shape. Values not listed here are preserved when
+Magenta updates a setting, so comments and application-specific TOML keys can
+remain in the file:
+
+```toml
+version = 1
+
+[appearance]
+theme = "dark"
+
+[typography]
+ui_font = "system-ui"
+ui_size = 15
+monospace_font = "system-monospace"
+monospace_size = 13
+math_font = "default"
+inline_math_size = 13
+display_math_size = 16
+```
+
+**Reload from disk** applies edits made outside Magenta after a successful
+parse. **Restore defaults** copies the current file to a timestamped
+`settings.toml.bak-*` sibling before writing the default values. Missing files
+start from defaults. Provider credentials are never written to this file; they
+remain in the operating system keyring.
 
 ## Requirements
 
@@ -205,7 +257,9 @@ cargo clippy --all-targets --all-features -- \
 Compilation and unit tests do not replace launching the application. UI changes
 should also be exercised in the real window, including expanded and collapsed
 sidebar states, keyboard focus, search, selection, theme switching, and a
-small window size.
+small window size. Settings changes should additionally exercise opening,
+minimizing, and closing the separate settings window, changing typography,
+reloading the TOML file, and restoring defaults.
 
 ## Themes
 

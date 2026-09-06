@@ -77,3 +77,23 @@ window opens.
 
 No diagnostics are transmitted remotely. Adding crash upload or telemetry
 requires a separate privacy and consent decision.
+
+## Settings persistence
+
+Settings are preferences, not credentials. The TOML file stores appearance and
+typography values; provider credentials remain in the operating system keyring.
+
+- A missing settings file loads the versioned defaults.
+- A malformed or unreadable file must not replace the currently usable settings;
+  record the typed settings error and offer a retry or an edit through the
+  settings window.
+- Reload applies a file only after it has been read and parsed successfully.
+- Saves are written to a temporary sibling, flushed, and renamed into place so
+  an interrupted write does not leave a partially written settings file.
+- Restoring defaults creates a timestamped backup before replacing the active
+  file. If the backup cannot be created, the reset must not proceed.
+
+Settings errors should use the same presentation rules as other local I/O:
+show a concise recovery-oriented status in the settings window and keep the
+technical source chain in diagnostics rather than exposing filesystem details
+or credentials in normal UI copy.
