@@ -1,10 +1,10 @@
 mod model;
 
 use gpui::{
-    AnyElement, App, Bounds, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable as _,
-    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render, RenderOnce,
-    Role, SharedString, StatefulInteractiveElement as _, Styled as _, Window, deferred, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, Bounds, Context, ElementId, Entity, EventEmitter,
+    FocusHandle, Focusable as _, InteractiveElement as _, IntoElement, KeyBinding, MouseButton,
+    ParentElement as _, Render, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Window, deferred, div, prelude::FluentBuilder as _, px,
 };
 use gpui_base::{Align, Placement, PopoverState, Positioner, actions::Cancel};
 use gpui_component::{
@@ -12,6 +12,7 @@ use gpui_component::{
     Selectable as _, Sizable as _, StyledExt as _, ThemeStyled as _,
     button::{Button, ButtonVariants as _},
     h_flex,
+    input::{Input, InputEvent, InputState},
     menu::{DropdownMenu as _, PopupMenuItem},
     sidebar::{Sidebar, SidebarCollapsible, SidebarItem},
     v_flex,
@@ -31,6 +32,10 @@ const RECENCY_PAGE_SIZE: usize = 6;
 const ACCOUNT_MENU_WIDTH: gpui::Pixels = px(240.);
 const ACCOUNT_MENU_GAP: gpui::Pixels = px(6.);
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[action(namespace = magenta)]
+struct CancelConversationRename;
+
 type AccountMenuBuilder =
     Box<dyn FnOnce(Entity<PopoverState>, &mut Window, &mut App) -> AnyElement>;
 
@@ -45,6 +50,14 @@ struct AccountDropdown {
 struct AccountDropdownAnchor {
     bounds: Bounds<gpui::Pixels>,
     captured: bool,
+}
+
+struct RenameState {
+    id: ConversationId,
+    original: String,
+    input: Entity<InputState>,
+    invalid: bool,
+    saving: bool,
 }
 
 impl AccountDropdown {
@@ -154,10 +167,17 @@ pub struct SidebarView {
     recency_limit: usize,
     history_status: Option<&'static str>,
     history_failed: bool,
+    rename: Option<RenameState>,
+    rename_subscription: Option<Subscription>,
 }
 
 impl SidebarView {
-    pub fn new(_window: &mut Window, cx: &Context<'_, Self>) -> Self {
+    pub fn new(_window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
+        cx.bind_keys([KeyBinding::new(
+            "escape",
+            CancelConversationRename,
+            Some("ConversationRename"),
+        )]);
         Self {
             collapsed: false,
             conversations: Vec::new(),
@@ -168,6 +188,8 @@ impl SidebarView {
             recency_limit: INITIAL_RECENCY_LIMIT,
             history_status: Some("Loading conversations…"),
             history_failed: false,
+            rename: None,
+            rename_subscription: None,
         }
     }
 
@@ -224,6 +246,124 @@ impl SidebarView {
 
     fn select_conversation(id: ConversationId, cx: &mut Context<'_, Self>) {
         cx.emit(SidebarEvent::OpenConversation(id));
+        cx.notify();
+    }
+
+    fn start_rename(
+        &mut self,
+        id: ConversationId,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.rename.is_some() {
+            return;
+        }
+        let Some(original) = self
+            .conversations
+            .iter()
+            .find(|conversation| conversation.id == id)
+            .map(|conversation| conversation.title.clone())
+        else {
+            return;
+        };
+
+        let input = cx.new(|cx| InputState::new(window, cx));
+        input.update(cx, |input, cx| {
+            input.set_value(original.clone(), window, cx);
+            input.set_selected_range(0..original.len(), cx);
+        });
+        let subscription = cx.subscribe_in(
+            &input,
+            window,
+            |sidebar, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => sidebar.clear_rename_validation(cx),
+                InputEvent::PressEnter { shift: false, .. } | InputEvent::Blur => {
+                    sidebar.commit_rename(window, cx);
+                }
+                _ => {}
+            },
+        );
+        self.rename = Some(RenameState {
+            id,
+            original,
+            input: input.clone(),
+            invalid: false,
+            saving: false,
+        });
+        self.rename_subscription = Some(subscription);
+        input.read(cx).focus_handle(cx).focus(window, cx);
+        cx.notify();
+    }
+
+    fn clear_rename_validation(&mut self, cx: &mut Context<'_, Self>) {
+        if let Some(rename) = &mut self.rename
+            && rename.invalid
+        {
+            rename.invalid = false;
+            cx.notify();
+        }
+    }
+
+    fn commit_rename(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let Some(rename) = &self.rename else {
+            return;
+        };
+        if rename.saving {
+            return;
+        }
+
+        let id = rename.id;
+        let original = rename.original.clone();
+        let input = rename.input.clone();
+        let title = input.read(cx).value().trim().to_owned();
+        if title.is_empty() {
+            if let Some(rename) = &mut self.rename {
+                rename.invalid = true;
+            }
+            input.read(cx).focus_handle(cx).focus(window, cx);
+            cx.notify();
+            return;
+        }
+        if title == original {
+            self.cancel_rename(cx);
+            return;
+        }
+
+        if let Some(rename) = &mut self.rename {
+            rename.saving = true;
+            rename.invalid = false;
+        }
+        input.update(cx, |input, cx| input.set_disabled(true, cx));
+        cx.emit(SidebarEvent::RenameConversation(id, title));
+        cx.notify();
+    }
+
+    fn cancel_rename(&mut self, cx: &mut Context<'_, Self>) {
+        self.rename = None;
+        self.rename_subscription = None;
+        cx.notify();
+    }
+
+    pub(crate) fn rename_succeeded(&mut self, id: ConversationId, cx: &mut Context<'_, Self>) {
+        if self.rename.as_ref().is_some_and(|rename| rename.id == id) {
+            self.cancel_rename(cx);
+        }
+    }
+
+    pub(crate) fn rename_failed(
+        &mut self,
+        id: ConversationId,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(rename) = self.rename.as_mut().filter(|rename| rename.id == id) else {
+            return;
+        };
+        rename.saving = false;
+        rename.invalid = true;
+        let input = rename.input.clone();
+        input.update(cx, |input, cx| input.set_disabled(false, cx));
+        input.read(cx).focus_handle(cx).focus(window, cx);
         cx.notify();
     }
 
@@ -619,7 +759,7 @@ impl SidebarView {
             cx,
         )
         .on_click(move |_, window, cx| {
-            Self::emit_account_event(&final_view, &final_popover, final_event, window, cx);
+            Self::emit_account_event(&final_view, &final_popover, final_event.clone(), window, cx);
         });
 
         v_flex().w_full().py(px(4.)).child(final_action)
@@ -710,12 +850,10 @@ impl SidebarView {
     ) -> AnyElement {
         let selected = self.active_conversation == Some(conversation.id);
         let id = conversation.id;
-        let select_view = view.clone();
-        let menu_view = view;
-        let next_pinned = !conversation.pinned;
-        let menu_label = if next_pinned { "Pin" } else { "Unpin" };
         let group_name: SharedString = format!("conversation-row-{}", id.0).into();
         let metadata = (!conversation.pinned).then(|| conversation.updated.clone());
+        let rename = self.rename.as_ref().filter(|rename| rename.id == id);
+        let is_renaming = rename.is_some();
 
         h_flex()
             .relative()
@@ -729,82 +867,157 @@ impl SidebarView {
                     .text_color(cx.theme().sidebar_accent_foreground)
             })
             .hover(|this| this.bg(cx.theme().sidebar_accent))
-            .child(
-                Button::new(("conversation", id.0))
-                    .ghost()
-                    .accessibility_id(format!("conversation-{}", id.0))
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .px(px(8.))
-                    .rounded(px(6.))
-                    .text_color(if selected {
-                        cx.theme().sidebar_accent_foreground
-                    } else {
-                        cx.theme().sidebar_foreground
-                    })
-                    .child(
-                        div()
-                            .w_full()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .text_size(px(13.))
-                            .child(conversation.title.clone()),
-                    )
-                    .on_click(move |_, _, cx| {
-                        select_view.update(cx, |_, cx| Self::select_conversation(id, cx));
-                    }),
-            )
+            .child(rename.map_or_else(
+                || Self::conversation_title(conversation, selected, view.clone(), cx),
+                |rename| Self::conversation_rename_input(id, rename, cx),
+            ))
+            .when(!is_renaming, |this| {
+                this.child(Self::conversation_actions(
+                    id,
+                    selected,
+                    metadata,
+                    group_name,
+                    conversation.pinned,
+                    view,
+                    cx,
+                ))
+            })
+            .into_any_element()
+    }
+
+    fn conversation_title(
+        conversation: &ConversationSummary,
+        selected: bool,
+        view: Entity<Self>,
+        cx: &App,
+    ) -> AnyElement {
+        let id = conversation.id;
+        Button::new(("conversation", id.0))
+            .ghost()
+            .accessibility_id(format!("conversation-{}", id.0))
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .px(px(8.))
+            .rounded(px(6.))
+            .text_color(if selected {
+                cx.theme().sidebar_accent_foreground
+            } else {
+                cx.theme().sidebar_foreground
+            })
             .child(
                 div()
-                    .relative()
-                    .flex_none()
-                    .size(px(28.))
-                    .when_some(metadata, |this, updated| {
-                        this.child(
-                            h_flex()
-                                .absolute()
-                                .inset_0()
-                                .justify_center()
-                                .font_family(cx.theme().mono_font_family.clone())
-                                .text_size(px(11.))
-                                .text_color(cx.theme().muted_foreground.opacity(0.8))
-                                .when(selected, gpui::Styled::invisible)
-                                .group_hover(group_name.clone(), gpui::Styled::invisible)
-                                .child(updated),
-                        )
+                    .w_full()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .text_size(px(13.))
+                    .child(conversation.title.clone()),
+            )
+            .on_click(move |_, _, cx| {
+                view.update(cx, |_, cx| Self::select_conversation(id, cx));
+            })
+            .into_any_element()
+    }
+
+    fn conversation_rename_input(id: ConversationId, rename: &RenameState, cx: &App) -> AnyElement {
+        Input::new(&rename.input)
+            .appearance(false)
+            .bordered(false)
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .px(px(8.))
+            .rounded(px(6.))
+            .border_1()
+            .border_color(if rename.invalid {
+                cx.theme().danger
+            } else {
+                cx.theme().ring
+            })
+            .bg(cx.theme().background)
+            .text_size(px(13.))
+            .accessibility_id(format!("rename-conversation-{}", id.0))
+            .aria_label(if rename.invalid {
+                "Conversation title is required"
+            } else {
+                "Conversation title"
+            })
+            .into_any_element()
+    }
+
+    fn conversation_actions(
+        id: ConversationId,
+        selected: bool,
+        metadata: Option<String>,
+        group_name: SharedString,
+        pinned: bool,
+        view: Entity<Self>,
+        cx: &App,
+    ) -> AnyElement {
+        let next_pinned = !pinned;
+        let menu_label = if next_pinned { "Pin" } else { "Unpin" };
+
+        div()
+            .relative()
+            .flex_none()
+            .size(px(28.))
+            .when_some(metadata, |this, updated| {
+                this.child(
+                    h_flex()
+                        .absolute()
+                        .inset_0()
+                        .justify_center()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_size(px(11.))
+                        .text_color(cx.theme().muted_foreground.opacity(0.8))
+                        .when(selected, gpui::Styled::invisible)
+                        .group_hover(group_name.clone(), gpui::Styled::invisible)
+                        .child(updated),
+                )
+            })
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .when(!selected, |this| {
+                        this.invisible()
+                            .group_hover(group_name, gpui::Styled::visible)
                     })
                     .child(
-                        div()
-                            .absolute()
-                            .inset_0()
-                            .when(!selected, |this| {
-                                this.invisible()
-                                    .group_hover(group_name, gpui::Styled::visible)
-                            })
-                            .child(
-                                Button::new(("conversation-more", id.0))
-                                    .ghost()
-                                    .xsmall()
-                                    .size(px(28.))
-                                    .p_0()
-                                    .icon(IconName::Ellipsis)
-                                    .tooltip(format!("{menu_label} conversation"))
-                                    .accessibility_id(format!("conversation-more-{}", id.0))
-                                    .text_color(cx.theme().muted_foreground)
-                                    .dropdown_menu(move |menu, window, _cx| {
-                                        let action_view = menu_view.clone();
-                                        menu.item(PopupMenuItem::new(menu_label).on_click(
-                                            window.listener_for(
-                                                &action_view,
-                                                move |sidebar, _, _, cx| {
-                                                    sidebar.set_pinned(id, next_pinned, cx);
-                                                },
-                                            ),
-                                        ))
-                                    }),
-                            ),
+                        Button::new(("conversation-more", id.0))
+                            .ghost()
+                            .xsmall()
+                            .size(px(28.))
+                            .p_0()
+                            .icon(IconName::Ellipsis)
+                            .tooltip(format!("{menu_label} conversation"))
+                            .accessibility_id(format!("conversation-more-{}", id.0))
+                            .text_color(cx.theme().muted_foreground)
+                            .dropdown_menu(move |menu, window, _cx| {
+                                let action_view = view.clone();
+                                let rename_view = view.clone();
+                                menu.item(
+                                    PopupMenuItem::new(menu_label)
+                                        .icon(Icon::empty().path("icons/conversation-pin.svg"))
+                                        .on_click(window.listener_for(
+                                            &action_view,
+                                            move |sidebar, _, _, cx| {
+                                                sidebar.set_pinned(id, next_pinned, cx);
+                                            },
+                                        )),
+                                )
+                                .item(
+                                    PopupMenuItem::new("Rename")
+                                        .icon(Icon::empty().path("icons/conversation-rename.svg"))
+                                        .on_click(window.listener_for(
+                                            &rename_view,
+                                            move |sidebar, _, window, cx| {
+                                                sidebar.start_rename(id, window, cx);
+                                            },
+                                        )),
+                                )
+                            }),
                     ),
             )
             .into_any_element()
@@ -1251,11 +1464,16 @@ impl SidebarItem for SidebarContent {
     fn render(
         self,
         id: impl Into<gpui::ElementId>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
         v_flex()
             .id(id.into())
+            .key_context("ConversationRename")
+            .on_action(window.listener_for(
+                &self.view,
+                |sidebar, _: &CancelConversationRename, _, cx| sidebar.cancel_rename(cx),
+            ))
             .w_full()
             .child(self.view.read(cx).render_content(self.view.clone(), cx))
     }

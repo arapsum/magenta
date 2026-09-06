@@ -210,6 +210,24 @@ impl ConversationStore for SqliteConversationStore {
         })
     }
 
+    fn rename(&self, id: ConversationId, title: String) -> StorageFuture<()> {
+        self.run(move |connection| {
+            let changed = connection
+                .execute(
+                    "UPDATE conversations SET title = ?1 WHERE id = ?2",
+                    params![title, id.0],
+                )
+                .map_err(database_error)?;
+            if changed == 0 {
+                return Err(failure(
+                    StorageErrorKind::NotFound,
+                    "conversation does not exist",
+                ));
+            }
+            Ok(())
+        })
+    }
+
     fn set_pinned(&self, id: ConversationId, pinned: bool) -> StorageFuture<()> {
         self.run(move |connection| {
             let changed = connection

@@ -36,10 +36,11 @@ pub struct ConversationSummary {
     pub pinned: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SidebarEvent {
     NewChat,
     OpenConversation(ConversationId),
+    RenameConversation(ConversationId, String),
     OpenSettings,
     BeginLogin,
     SignOut,

@@ -73,6 +73,50 @@ fn reopen_preserves_messages_configuration_metadata_and_pins() {
 }
 
 #[test]
+fn rename_persists_without_changing_conversation_recency() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite3");
+        let store = SqliteConversationStore::new(path.clone());
+        store.initialize().await.unwrap();
+
+        let pending = store.begin_turn(input(None)).await.unwrap();
+        let id = pending.conversation.id;
+        store.set_pinned(id, true).await.unwrap();
+        let before = store.summaries().await.unwrap().remove(0);
+
+        store
+            .rename(id, "Renamed conversation".into())
+            .await
+            .unwrap();
+        let renamed = store.summaries().await.unwrap().remove(0);
+        assert_eq!(renamed.title, "Renamed conversation");
+        assert!(renamed.pinned);
+        assert_eq!(renamed.updated_at, before.updated_at);
+        assert_eq!(
+            store.load(id).await.unwrap().conversation.title,
+            renamed.title
+        );
+        assert_eq!(
+            store
+                .rename(ConversationId(999), "Missing".into())
+                .await
+                .unwrap_err()
+                .kind,
+            StorageErrorKind::NotFound
+        );
+
+        drop(store);
+        let reopened = SqliteConversationStore::new(path);
+        reopened.initialize().await.unwrap();
+        assert_eq!(
+            reopened.load(id).await.unwrap().conversation.title,
+            "Renamed conversation"
+        );
+    });
+}
+
+#[test]
 fn pages_are_ordered_without_gaps_and_provider_context_is_independent() {
     smol::block_on(async {
         let directory = tempfile::tempdir().unwrap();

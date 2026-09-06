@@ -47,6 +47,11 @@ impl ConversationHistory {
     }
 
     #[must_use]
+    pub fn rename(&self, id: ConversationId, title: String) -> StorageFuture<()> {
+        self.store.rename(id, title)
+    }
+
+    #[must_use]
     pub fn set_pinned(&self, id: ConversationId, pinned: bool) -> StorageFuture<()> {
         self.store.set_pinned(id, pinned)
     }

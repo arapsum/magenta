@@ -98,5 +98,6 @@ pub trait ConversationStore: Send + Sync {
         target: MessageId,
     ) -> StorageFuture<PreparedTurn>;
     fn finalize(&self, message: Message) -> StorageFuture<()>;
+    fn rename(&self, id: ConversationId, title: String) -> StorageFuture<()>;
     fn set_pinned(&self, id: ConversationId, pinned: bool) -> StorageFuture<()>;
 }

@@ -219,6 +219,20 @@ impl ConversationView {
         }
     }
 
+    pub(crate) fn rename(
+        &mut self,
+        id: magenta_core::ConversationId,
+        title: String,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if let Some(conversation) = &mut self.conversation
+            && conversation.id == id
+        {
+            conversation.title = title;
+            cx.notify();
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn snapshot(&self) -> Option<ConversationThread> {
         Some(ConversationThread {

@@ -262,6 +262,9 @@ impl MainView {
                         );
                         main.navigate(Some(*id), window, cx);
                     }
+                    SidebarEvent::RenameConversation(id, title) => {
+                        main.rename_conversation(*id, title.clone(), window, cx);
+                    }
                     SidebarEvent::SetPinned(id, pinned) => {
                         main.set_pinned(*id, *pinned, window, cx);
                     }

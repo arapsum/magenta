@@ -69,6 +69,9 @@ impl ConversationStore for TestPorts {
             Box::pin(async { Ok(()) })
         }
     }
+    fn rename(&self, _: ConversationId, _: String) -> StorageFuture<()> {
+        failure()
+    }
     fn set_pinned(&self, _: ConversationId, _: bool) -> StorageFuture<()> {
         failure()
     }

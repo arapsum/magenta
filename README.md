@@ -62,7 +62,8 @@ The product is guided by a few constraints:
   - New Chat state;
   - searchable persisted conversation titles;
   - pinned conversations and grouped recent history;
-  - durable pin/unpin, selection, expansion, and “Show more” interactions;
+  - durable pin/unpin, inline rename, selection, expansion, and “Show more”
+    interactions;
   - an active-selection bevel that moves from New Chat to the selected
     conversation;
   - a local account menu with profile details, settings, theme switching,
@@ -101,7 +102,7 @@ The product is guided by a few constraints:
 
 - Additional provider integrations.
 - Full-text search indexing and automatic context-budget management.
-- Conversation rename and delete workflows.
+- Conversation deletion workflow.
 - Attachment rendering and persistence beyond the present composer prototype.
 - Rich provider events such as reasoning, tool calls, and citations.
 
@@ -163,9 +164,12 @@ unfinished placeholders recover as stopped; text streamed since the turn began
 may be lost. Failed saves retain the visible response and offer Retry before
 navigation. Existing in-memory demo history is not imported.
 
-The sidebar loads lightweight summaries and filters titles locally. Opening a
-thread loads its latest 50 messages. Earlier pages load on demand, and leaving a
-thread releases its rendered messages. Provider context currently includes all
+The sidebar loads lightweight summaries and filters titles locally. Conversation
+titles can be renamed inline from a row’s overflow menu; Enter or focus loss
+saves a non-empty changed title, while Escape cancels. Renaming preserves the
+conversation’s recency and pin state. Opening a thread loads its latest 50
+messages. Earlier pages load on demand, and leaving a thread releases its
+rendered messages. Provider context currently includes all
 completed messages preceding the response, even when they are outside the
 loaded page; token-budget truncation and page eviction are future work.
 

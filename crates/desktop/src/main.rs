@@ -1,9 +1,10 @@
 mod diagnostics;
 
-use std::{cell::Cell, process::ExitCode, rc::Rc, sync::Arc};
+use std::{borrow::Cow, cell::Cell, process::ExitCode, rc::Rc, sync::Arc};
 
 use gpui::{
-    px, size, App, AppContext, Application, Bounds, WindowBounds, WindowHandle, WindowOptions,
+    px, size, App, AppContext, Application, AssetSource, Bounds, Result as GpuiResult,
+    SharedString, WindowBounds, WindowHandle, WindowOptions,
 };
 #[cfg(target_os = "linux")]
 use gpui::{WindowBackgroundAppearance, WindowDecorations};
@@ -15,6 +16,38 @@ use magenta_core::{
 use magenta_providers::OpenAiProvider;
 
 use magenta_ui::{notification_for_error, MagentaError, MainServices, MainView, Result};
+
+struct MagentaAssets;
+
+impl AssetSource for MagentaAssets {
+    fn load(&self, path: &str) -> GpuiResult<Option<Cow<'static, [u8]>>> {
+        let asset = match path {
+            "icons/conversation-pin.svg" => {
+                Some(include_bytes!("../assets/icons/conversation-pin.svg").as_slice())
+            }
+            "icons/conversation-rename.svg" => {
+                Some(include_bytes!("../assets/icons/conversation-rename.svg").as_slice())
+            }
+            _ => None,
+        };
+
+        asset.map_or_else(
+            || gpui_component_assets::Assets.load(path),
+            |asset| Ok(Some(Cow::Borrowed(asset))),
+        )
+    }
+
+    fn list(&self, path: &str) -> GpuiResult<Vec<SharedString>> {
+        let mut assets = gpui_component_assets::Assets.list(path)?;
+        if path.is_empty() || path == "icons" {
+            assets.extend([
+                "icons/conversation-pin.svg".into(),
+                "icons/conversation-rename.svg".into(),
+            ]);
+        }
+        Ok(assets)
+    }
+}
 
 fn main() -> ExitCode {
     let (diagnostics_guard, diagnostics_error) = initialize_diagnostics();
@@ -45,7 +78,7 @@ fn initialize_diagnostics() -> (Option<diagnostics::DiagnosticsGuard>, Option<Ma
 }
 
 fn run_application(diagnostics_error: Option<MagentaError>, launch_failed: Rc<Cell<bool>>) {
-    let app: Application = gpui_platform::application().with_assets(gpui_component_assets::Assets);
+    let app: Application = gpui_platform::application().with_assets(MagentaAssets);
 
     app.run(move |cx: &mut App| {
         initialize_application(cx);

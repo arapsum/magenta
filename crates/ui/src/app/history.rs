@@ -18,6 +18,7 @@ pub(super) enum Operation {
     Preparing,
     Saving,
     Pinning,
+    Renaming,
 }
 
 #[derive(Clone, Copy)]
@@ -440,6 +441,54 @@ impl MainView {
                         window,
                         cx,
                     ),
+                }
+                main.continue_navigation(window, cx);
+                main.update_composer_availability(cx);
+                if main.close_requested.is_requested() {
+                    window.remove_window();
+                }
+            });
+        }));
+    }
+
+    pub(super) fn rename_conversation(
+        &mut self,
+        id: ConversationId,
+        title: String,
+        window: &Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if !self.can_write(cx) {
+            return;
+        }
+        let history = self.history.clone();
+        self.operation = Operation::Renaming;
+        self.update_composer_availability(cx);
+        self.operation_task = Some(cx.spawn_in(window, async move |view, window| {
+            let result = history.rename(id, title.clone()).await;
+            _ = view.update_in(window, |main, window, cx| {
+                main.operation_task = None;
+                main.operation = Operation::Idle;
+                match result {
+                    Ok(()) => {
+                        main.conversation.update(cx, |conversation, cx| {
+                            conversation.rename(id, title, cx);
+                        });
+                        main.sidebar.update(cx, |sidebar, cx| {
+                            sidebar.rename_succeeded(id, cx);
+                        });
+                        main.refresh_summaries(window, cx);
+                    }
+                    Err(source) => {
+                        main.sidebar.update(cx, |sidebar, cx| {
+                            sidebar.rename_failed(id, window, cx);
+                        });
+                        Self::present_storage_error(
+                            &MagentaError::StorageWrite { source },
+                            window,
+                            cx,
+                        );
+                    }
                 }
                 main.continue_navigation(window, cx);
                 main.update_composer_availability(cx);
