@@ -166,7 +166,18 @@ fn failed_turn_rolls_back_and_newer_schema_is_preserved() {
         let store = SqliteConversationStore::new(path.clone());
         store.initialize().await.unwrap();
         let connection = rusqlite::Connection::open(&path).unwrap();
-        connection.execute_batch("CREATE TRIGGER reject_assistant BEFORE INSERT ON messages WHEN NEW.role = 'assistant' BEGIN SELECT RAISE(ABORT, 'test write failure'); END;").unwrap();
+        connection
+            .execute_batch(
+                r"
+                    CREATE TRIGGER reject_assistant
+                    BEFORE INSERT ON messages
+                    WHEN NEW.role = 'assistant'
+                    BEGIN
+                        SELECT RAISE(ABORT, 'test write failure');
+                    END;
+                ",
+            )
+            .unwrap();
         assert!(store.begin_turn(input(None)).await.is_err());
         assert!(store.summaries().await.unwrap().is_empty());
         connection

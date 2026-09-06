@@ -26,7 +26,18 @@ pub fn page(
     id: ConversationId,
     before: Option<MessageSequence>,
 ) -> Result<MessagePage> {
-    let mut statement = connection.prepare("SELECT id, sequence, role, content, status, generation, outcome, created_at FROM messages WHERE conversation_id = ?1 AND (?2 IS NULL OR sequence < ?2) ORDER BY sequence DESC LIMIT 51").map_err(database_error)?;
+    let mut statement = connection
+        .prepare(
+            r"
+                SELECT id, sequence, role, content, status, generation, outcome, created_at
+                FROM messages
+                WHERE conversation_id = ?1
+                  AND (?2 IS NULL OR sequence < ?2)
+                ORDER BY sequence DESC
+                LIMIT 51
+            ",
+        )
+        .map_err(database_error)?;
     let mut rows = statement
         .query(params![id.0, before.map(|cursor| cursor.0)])
         .map_err(database_error)?;
@@ -46,7 +57,18 @@ pub fn page(
 }
 
 pub fn context(connection: &Connection, id: ConversationId, before: i64) -> Result<Vec<Message>> {
-    let mut statement = connection.prepare("SELECT id, sequence, role, content, status, generation, outcome, created_at FROM messages WHERE conversation_id = ?1 AND sequence < ?2 AND status = 'complete' ORDER BY sequence").map_err(database_error)?;
+    let mut statement = connection
+        .prepare(
+            r"
+                SELECT id, sequence, role, content, status, generation, outcome, created_at
+                FROM messages
+                WHERE conversation_id = ?1
+                  AND sequence < ?2
+                  AND status = 'complete'
+                ORDER BY sequence
+            ",
+        )
+        .map_err(database_error)?;
     let mut rows = statement
         .query(params![id.0, before])
         .map_err(database_error)?;
@@ -67,43 +89,53 @@ fn read_message(
     let state: String = row.get(4).map_err(database_error)?;
     let generation: String = row.get(5).map_err(database_error)?;
     let outcome: Option<String> = row.get(6).map_err(database_error)?;
+
+    let role = match role.as_str() {
+        "user" => MessageRole::User,
+        "assistant" => MessageRole::Assistant,
+        _ => {
+            return Err(failure(
+                magenta_core::StorageErrorKind::InvalidData,
+                "unknown message role",
+            ));
+        }
+    };
+    let status = match state.as_str() {
+        "complete" => MessageStatus::Complete,
+        "streaming" => MessageStatus::Streaming,
+        "stopped" => MessageStatus::Stopped,
+        "failed" => MessageStatus::Failed,
+        _ => {
+            return Err(failure(
+                magenta_core::StorageErrorKind::InvalidData,
+                "unknown message status",
+            ));
+        }
+    };
+    let content = row.get(3).map_err(database_error)?;
+    let attachments = attachments(connection, message_id)?;
+    let generation_outcome = outcome
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(invalid)?;
+    let sequence = MessageSequence(row.get(1).map_err(database_error)?);
+    let created_at = Timestamp(row.get(7).map_err(database_error)?);
+    let generation = serde_json::from_str(&generation).map_err(invalid)?;
+
     Ok(StoredMessage {
         message: Message {
             id: message_id,
             conversation_id: id,
-            role: match role.as_str() {
-                "user" => MessageRole::User,
-                "assistant" => MessageRole::Assistant,
-                _ => {
-                    return Err(failure(
-                        magenta_core::StorageErrorKind::InvalidData,
-                        "unknown message role",
-                    ));
-                }
-            },
-            content: row.get(3).map_err(database_error)?,
-            status: match state.as_str() {
-                "complete" => MessageStatus::Complete,
-                "streaming" => MessageStatus::Streaming,
-                "stopped" => MessageStatus::Stopped,
-                "failed" => MessageStatus::Failed,
-                _ => {
-                    return Err(failure(
-                        magenta_core::StorageErrorKind::InvalidData,
-                        "unknown message status",
-                    ));
-                }
-            },
-            attachments: attachments(connection, message_id)?,
-            generation_outcome: outcome
-                .as_deref()
-                .map(serde_json::from_str)
-                .transpose()
-                .map_err(invalid)?,
+            role,
+            content,
+            status,
+            attachments,
+            generation_outcome,
         },
-        sequence: MessageSequence(row.get(1).map_err(database_error)?),
-        created_at: Timestamp(row.get(7).map_err(database_error)?),
-        generation: serde_json::from_str(&generation).map_err(invalid)?,
+        sequence,
+        created_at,
+        generation,
     })
 }
 

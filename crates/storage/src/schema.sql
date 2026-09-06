@@ -6,6 +6,7 @@ CREATE TABLE conversations (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
+
 CREATE TABLE messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -18,8 +19,13 @@ CREATE TABLE messages (
     created_at INTEGER NOT NULL,
     UNIQUE (conversation_id, sequence)
 );
-CREATE UNIQUE INDEX one_stream_per_conversation ON messages(conversation_id) WHERE status = 'streaming';
+
+CREATE UNIQUE INDEX one_stream_per_conversation
+    ON messages(conversation_id)
+    WHERE status = 'streaming';
+
 CREATE INDEX conversation_recency ON conversations(updated_at DESC, id DESC);
+
 CREATE TABLE attachments (
     message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     position INTEGER NOT NULL,
@@ -27,4 +33,5 @@ CREATE TABLE attachments (
     source_path BLOB NOT NULL,
     PRIMARY KEY (message_id, position)
 );
+
 PRAGMA user_version = 1;

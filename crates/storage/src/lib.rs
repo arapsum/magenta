@@ -102,12 +102,28 @@ impl ConversationStore for SqliteConversationStore {
 
     fn summaries(&self) -> StorageFuture<Vec<ConversationSummary>> {
         self.run(|connection| {
-            let mut statement = connection.prepare("SELECT id, title, pinned, created_at, updated_at FROM conversations ORDER BY updated_at DESC, id DESC").map_err(database_error)?;
-            let rows = statement.query_map([], |row| Ok(ConversationSummary {
-                id: ConversationId(row.get(0)?), title: row.get(1)?, pinned: row.get(2)?,
-                created_at: Timestamp(row.get(3)?), updated_at: Timestamp(row.get(4)?),
-            })).map_err(database_error)?;
-            rows.collect::<std::result::Result<Vec<_>, _>>().map_err(database_error)
+            let mut statement = connection
+                .prepare(
+                    r"
+                        SELECT id, title, pinned, created_at, updated_at
+                        FROM conversations
+                        ORDER BY updated_at DESC, id DESC
+                    ",
+                )
+                .map_err(database_error)?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok(ConversationSummary {
+                        id: ConversationId(row.get(0)?),
+                        title: row.get(1)?,
+                        pinned: row.get(2)?,
+                        created_at: Timestamp(row.get(3)?),
+                        updated_at: Timestamp(row.get(4)?),
+                    })
+                })
+                .map_err(database_error)?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(database_error)
         })
     }
 
@@ -139,14 +155,54 @@ impl ConversationStore for SqliteConversationStore {
 
     fn finalize(&self, message: Message) -> StorageFuture<()> {
         self.run(move |connection| {
-            if message.role != magenta_core::MessageRole::Assistant || message.status == magenta_core::MessageStatus::Streaming {
-                return Err(failure(StorageErrorKind::InvalidData, "only terminal assistant messages can be finalized"));
+            if message.role != magenta_core::MessageRole::Assistant
+                || message.status == magenta_core::MessageStatus::Streaming
+            {
+                return Err(failure(
+                    StorageErrorKind::InvalidData,
+                    "only terminal assistant messages can be finalized",
+                ));
             }
-            let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(database_error)?;
-            let outcome = message.generation_outcome.as_ref().map(serde_json::to_string).transpose().map_err(invalid)?;
-            let changed = transaction.execute("UPDATE messages SET content = ?1, status = ?2, outcome = ?3 WHERE id = ?4 AND conversation_id = ?5 AND status = 'streaming'", params![message.content, records::status(message.status), outcome, message.id.0, message.conversation_id.0]).map_err(database_error)?;
-            if changed != 1 { return Err(failure(StorageErrorKind::Conflict, "message is no longer streaming")); }
-            transaction.execute("UPDATE conversations SET updated_at = ?1 WHERE id = ?2", params![now()?, message.conversation_id.0]).map_err(database_error)?;
+
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(database_error)?;
+            let outcome = message
+                .generation_outcome
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(invalid)?;
+            let changed = transaction
+                .execute(
+                    r"
+                        UPDATE messages
+                        SET content = ?1, status = ?2, outcome = ?3
+                        WHERE id = ?4
+                          AND conversation_id = ?5
+                          AND status = 'streaming'
+                    ",
+                    params![
+                        message.content,
+                        records::status(message.status),
+                        outcome,
+                        message.id.0,
+                        message.conversation_id.0
+                    ],
+                )
+                .map_err(database_error)?;
+            if changed != 1 {
+                return Err(failure(
+                    StorageErrorKind::Conflict,
+                    "message is no longer streaming",
+                ));
+            }
+            transaction
+                .execute(
+                    "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
+                    params![now()?, message.conversation_id.0],
+                )
+                .map_err(database_error)?;
             transaction.commit().map_err(database_error)
         })
     }
