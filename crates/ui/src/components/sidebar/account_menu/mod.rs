@@ -1,5 +1,7 @@
 use super::account_dropdown::AccountDropdown;
 use super::*;
+use crate::components::provider_icon;
+use magenta_core::ProviderId;
 
 impl SidebarView {
     pub(super) fn render_footer(&self, view: &Entity<Self>, cx: &App) -> AnyElement {
@@ -324,9 +326,9 @@ impl SidebarView {
             "Sign in with ChatGPT"
         };
         let final_icon = if connected {
-            IconName::ArrowRight
+            Icon::new(IconName::ArrowRight)
         } else {
-            IconName::Bot
+            provider_icon(Some(&ProviderId::new("openai")))
         };
         let final_view = view.clone();
         let final_popover = popover.clone();
@@ -352,11 +354,12 @@ impl SidebarView {
     fn account_menu_button(
         id: &'static str,
         label: &'static str,
-        icon: IconName,
+        icon: impl Into<Icon>,
         trailing: Option<SharedString>,
         disabled: bool,
         cx: &App,
     ) -> Button {
+        let icon = icon.into();
         Button::new(id)
             .ghost()
             .accessibility_id(id)
@@ -370,7 +373,7 @@ impl SidebarView {
                     .w_full()
                     .items_center()
                     .gap(px(8.))
-                    .child(Icon::new(icon).xsmall())
+                    .child(icon.xsmall())
                     .child(
                         div()
                             .flex_1()

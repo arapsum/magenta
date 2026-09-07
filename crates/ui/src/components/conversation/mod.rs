@@ -43,6 +43,7 @@ use crate::components::{
     markdown,
     math::{self, FormulaKey, MarkdownMathPlugin, MathCache},
     prompt_input::PromptComposer,
+    provider_icon,
 };
 use crate::{MagentaError, notification_for_error};
 

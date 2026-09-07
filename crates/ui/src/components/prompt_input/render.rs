@@ -15,6 +15,8 @@ use gpui_component::{
 };
 use magenta_core::ConversationMode;
 
+use crate::components::provider_icon;
+
 use super::{MAX_ATTACHMENTS, PromptComposer};
 
 impl PromptComposer {
@@ -174,8 +176,12 @@ impl PromptComposer {
                 format!("{}  ·  {}", model.display_name, effort.label()).into()
             }
         };
+        let selected_provider = selected_model.as_ref().map_or_else(
+            || provider_icon(None),
+            |model| provider_icon(Some(&model.provider)),
+        );
 
-        option_button("prompt-model", trigger_label, IconName::Bot)
+        option_button("prompt-model", trigger_label, selected_provider)
             .accessibility_id("prompt-model-and-effort-selector")
             .dropdown_menu(move |menu, window, cx| {
                 let menu = models.clone().into_iter().fold(
@@ -185,6 +191,7 @@ impl PromptComposer {
                         let model_for_click = model.clone();
                         menu.item(
                             PopupMenuItem::new(model.display_name.clone())
+                                .icon(provider_icon(Some(&model.provider)))
                                 .checked(selected_model_id.as_ref() == Some(&model.id))
                                 .on_click(window.listener_for(
                                     &select_view,
@@ -407,7 +414,11 @@ impl Render for PromptComposer {
     }
 }
 
-fn option_button(id: &'static str, label: impl Into<SharedString>, icon: IconName) -> Button {
+fn option_button(
+    id: &'static str,
+    label: impl Into<SharedString>,
+    icon: impl Into<Icon>,
+) -> Button {
     Button::new(id)
         .compact()
         .dropdown_caret(true)

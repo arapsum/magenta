@@ -15,13 +15,16 @@ use gpui_component::{
     setting::{SettingGroup, SettingItem, SettingPage, Settings},
     v_flex,
 };
-use magenta_core::{AppSettings, ProviderAccount, SettingsStore};
+use magenta_core::{AppSettings, ProviderAccount, ProviderId, SettingsStore};
 
 use self::{
     appearance::{installed_font_options, mathematics_group, theme_group, typography_group},
     configuration::configuration_group,
 };
-use crate::{components::titlebar, settings};
+use crate::{
+    components::{provider_icon, titlebar},
+    settings,
+};
 
 #[derive(Clone, Debug)]
 pub enum SettingsWindowEvent {
@@ -216,7 +219,7 @@ impl SettingsWindow {
         let disabled = self.account.waiting;
         let event_view = view.clone();
         SettingPage::new("Providers")
-            .icon(Icon::new(IconName::Bot))
+            .icon(provider_icon(Some(&ProviderId::new("openai"))))
             .description("Connect the accounts that supply models to Magenta.")
             .header_style(&header_style)
             .group(

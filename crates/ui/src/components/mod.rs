@@ -5,6 +5,9 @@ mod inline_code;
 mod markdown;
 mod math;
 pub mod prompt_input;
+mod provider_icon;
 pub mod sidebar;
 pub mod titlebar;
 pub mod workspace;
+
+pub use provider_icon::provider_icon;

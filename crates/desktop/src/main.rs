@@ -39,6 +39,7 @@ impl AssetSource for MagentaAssets {
                 Some(include_bytes!("../assets/icons/generation-stop.svg").as_slice())
             }
             "icons/code.svg" => Some(include_bytes!("../assets/icons/code.svg").as_slice()),
+            "icons/openai.svg" => Some(include_bytes!("../assets/icons/openai.svg").as_slice()),
             _ => None,
         };
 
@@ -57,6 +58,7 @@ impl AssetSource for MagentaAssets {
                 "icons/conversation-delete.svg".into(),
                 "icons/generation-stop.svg".into(),
                 "icons/code.svg".into(),
+                "icons/openai.svg".into(),
             ]);
         }
         Ok(assets)

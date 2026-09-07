@@ -311,18 +311,15 @@ impl ConversationView {
     }
 
     fn render_assistant_header(&self, message: &Message, cx: &App) -> AnyElement {
-        let model_label = self
-            .origins
-            .get(&message.id)
-            .or_else(|| {
-                self.conversation
-                    .as_ref()
-                    .map(|conversation| &conversation.generation)
-            })
-            .map_or_else(
-                || "Model".to_owned(),
-                |generation| generation.model.0.clone(),
-            );
+        let generation = self.origins.get(&message.id).or_else(|| {
+            self.conversation
+                .as_ref()
+                .map(|conversation| &conversation.generation)
+        });
+        let model_label = generation.map_or_else(
+            || "Model".to_owned(),
+            |generation| generation.model.0.clone(),
+        );
         let label = match message.status {
             MessageStatus::Stopped => format!("{model_label} · stopped"),
             MessageStatus::Failed => format!("{model_label} · failed"),
@@ -334,7 +331,7 @@ impl ConversationView {
             .items_center()
             .gap(px(8.))
             .child(
-                Icon::new(IconName::Bot)
+                provider_icon(generation.map(|generation| &generation.provider))
                     .xsmall()
                     .text_color(cx.theme().muted_foreground),
             )
