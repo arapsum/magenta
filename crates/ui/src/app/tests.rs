@@ -23,7 +23,9 @@ struct TestPorts {
     fail_initialize: AtomicBool,
     fail_save: AtomicBool,
     summaries: Mutex<Vec<ConversationSummary>>,
+    search_results: Mutex<Option<Vec<ConversationSearchResult>>>,
     loads: Mutex<VecDeque<StorageFuture<ConversationPage>>>,
+    around_loads: Mutex<Vec<(ConversationId, MessageSequence)>>,
     saves: Mutex<Vec<Message>>,
     deleted: Mutex<Vec<ConversationId>>,
     requests: AtomicUsize,
@@ -50,7 +52,42 @@ impl ConversationStore for TestPorts {
         let summaries = self.summaries.lock().clone();
         Box::pin(async move { Ok(summaries) })
     }
+    fn search(&self, query: String, limit: usize) -> StorageFuture<Vec<ConversationSearchResult>> {
+        if let Some(results) = self.search_results.lock().clone() {
+            return Box::pin(async move { Ok(results) });
+        }
+        let query = query.to_lowercase();
+        let results = self
+            .summaries
+            .lock()
+            .iter()
+            .filter(|summary| {
+                summary.title.to_lowercase().contains(&query)
+                    || summary.preview.to_lowercase().contains(&query)
+            })
+            .take(limit)
+            .map(|summary| ConversationSearchResult {
+                conversation_id: summary.id,
+                message_id: None,
+                message_sequence: None,
+                title: summary.title.clone(),
+                title_highlights: Vec::new(),
+                snippet: summary.preview.clone(),
+                snippet_highlights: Vec::new(),
+                updated_at: summary.updated_at,
+            })
+            .collect();
+        Box::pin(async move { Ok(results) })
+    }
     fn load(&self, _: ConversationId) -> StorageFuture<ConversationPage> {
+        self.loads.lock().pop_front().unwrap_or_else(failure)
+    }
+    fn load_around(
+        &self,
+        id: ConversationId,
+        sequence: MessageSequence,
+    ) -> StorageFuture<ConversationPage> {
+        self.around_loads.lock().push((id, sequence));
         self.loads.lock().pop_front().unwrap_or_else(failure)
     }
     fn earlier(&self, _: ConversationId, _: MessageSequence) -> StorageFuture<MessagePage> {
@@ -458,6 +495,50 @@ fn finder_filters_persisted_history_and_opens_selected_conversation(cx: &mut Tes
 }
 
 #[gpui::test]
+fn finder_message_match_loads_the_page_around_that_message(cx: &mut TestAppContext) {
+    let ports = Arc::new(TestPorts::default());
+    ports
+        .summaries
+        .lock()
+        .push(summary(7, "Architecture notes"));
+    *ports.search_results.lock() = Some(vec![ConversationSearchResult {
+        conversation_id: ConversationId(7),
+        message_id: Some(MessageId(70)),
+        message_sequence: Some(MessageSequence(64)),
+        title: "Architecture notes".into(),
+        title_highlights: Vec::new(),
+        snippet: "The indexing needle is here".into(),
+        snippet_highlights: vec![13..19],
+        updated_at: Timestamp(0),
+    }]);
+    ports
+        .loads
+        .lock()
+        .push_back(Box::pin(async { Ok(page(7)) }));
+
+    let (window, view) = setup(cx, ports.clone());
+    cx.run_until_parked();
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.dispatch_action(OpenConversationFinder);
+    visual.simulate_input("needle");
+    visual.run_until_parked();
+    let result = visual
+        .debug_bounds("finder-conversation-7")
+        .expect("the message body match should be rendered");
+    visual.simulate_click(result.center(), gpui::Modifiers::default());
+    visual.run_until_parked();
+
+    assert_eq!(
+        ports.around_loads.lock().as_slice(),
+        &[(ConversationId(7), MessageSequence(64))]
+    );
+    assert_eq!(
+        view.read_with(cx, |main, _| main.active_conversation),
+        Some(ConversationId(7))
+    );
+}
+
+#[gpui::test]
 fn closing_finder_clears_query_without_changing_selection(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     ports.summaries.lock().push(summary(1, "Design notes"));
@@ -506,4 +587,42 @@ fn finder_arrow_navigation_opens_highlighted_conversation(cx: &mut TestAppContex
         assert_eq!(main.finder_open, PanelState::Closed);
         assert_eq!(main.active_conversation, Some(ConversationId(2)));
     });
+}
+
+#[gpui::test]
+fn finder_result_list_scrolls_when_history_exceeds_the_dialog(cx: &mut TestAppContext) {
+    let ports = Arc::new(TestPorts::default());
+    ports
+        .summaries
+        .lock()
+        .extend((1..=20).map(|id| summary(id, &format!("Conversation {id}"))));
+    let (window, _) = setup(cx, ports);
+    cx.run_until_parked();
+
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.dispatch_action(OpenConversationFinder);
+    visual.run_until_parked();
+    let list = visual
+        .debug_bounds("finder-result-list")
+        .expect("the finder result viewport should be rendered");
+    let first_before = visual
+        .debug_bounds("finder-conversation-20")
+        .expect("the first conversation should be rendered")
+        .top();
+
+    visual.simulate_event(gpui::ScrollWheelEvent {
+        position: gpui::point(list.center().x, list.top() + px(150.)),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-240.))),
+        ..Default::default()
+    });
+    visual.run_until_parked();
+
+    let first_after = visual
+        .debug_bounds("finder-conversation-20")
+        .expect("the first conversation should remain in the scroll content")
+        .top();
+    assert!(
+        first_after < first_before,
+        "expected scroll offset to change: before={first_before:?}, after={first_after:?}, list={list:?}"
+    );
 }

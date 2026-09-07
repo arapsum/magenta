@@ -70,6 +70,51 @@ pub fn page(
     })
 }
 
+pub fn page_around(
+    connection: &Connection,
+    id: ConversationId,
+    target: MessageSequence,
+) -> Result<MessagePage> {
+    let first = target.0.saturating_sub(24).max(0);
+    let last = target.0.saturating_add(25);
+    let mut statement = connection
+        .prepare(
+            r"
+                SELECT id, sequence, role, content, status, generation, outcome, created_at
+                FROM messages
+                WHERE conversation_id = ?1
+                  AND sequence BETWEEN ?2 AND ?3
+                ORDER BY sequence
+            ",
+        )
+        .map_err(database_error)?;
+    let mut rows = statement
+        .query(params![id.0, first, last])
+        .map_err(database_error)?;
+    let mut messages = Vec::new();
+    while let Some(row) = rows.next().map_err(database_error)? {
+        messages.push(read_message(connection, id, row)?);
+    }
+    let Some(older_cursor) = messages.first().map(|message| message.sequence) else {
+        return Err(failure(
+            magenta_core::StorageErrorKind::NotFound,
+            "search result message does not exist",
+        ));
+    };
+    let has_older = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM messages WHERE conversation_id = ?1 AND sequence < ?2)",
+            params![id.0, older_cursor.0],
+            |row| row.get(0),
+        )
+        .map_err(database_error)?;
+    Ok(MessagePage {
+        messages,
+        older_cursor: Some(older_cursor),
+        has_older,
+    })
+}
+
 pub fn context(connection: &Connection, id: ConversationId, before: i64) -> Result<Vec<Message>> {
     let mut statement = connection
         .prepare(

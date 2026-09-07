@@ -3,7 +3,9 @@ mod operations;
 use gpui::{Context, Window};
 use gpui_component::WindowExt as _;
 use magenta_application::{SendMessageInput, SendTarget};
-use magenta_core::{AttachmentDraft, ConversationId, ConversationMode, MessageStatus};
+use magenta_core::{
+    AttachmentDraft, ConversationId, ConversationMode, ConversationSearchResult, MessageStatus,
+};
 
 use super::{AccountState, CloseState, MainView, StorageState};
 use crate::{MagentaError, components::prompt_input::PromptRequest, notification_for_error};
@@ -18,10 +20,11 @@ pub(super) enum Operation {
     Deleting,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) enum Navigation {
     New,
     Conversation(ConversationId),
+    SearchResult(ConversationSearchResult),
 }
 
 impl MainView {
@@ -106,6 +109,27 @@ impl MainView {
         self.continue_navigation(window, cx);
     }
 
+    pub(super) fn navigate_to_search_result(
+        &mut self,
+        result: ConversationSearchResult,
+        window: &Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if !self.storage_ready.is_ready() {
+            return;
+        }
+        self.deferred_navigation = Some(Navigation::SearchResult(result));
+        self.load_generation = self.load_generation.wrapping_add(1);
+        self.load_task.take();
+        self.page_task.take();
+        self.loading_conversation = None;
+        if self.conversation.read(cx).is_streaming() {
+            self.cancel_generation(cx);
+            return;
+        }
+        self.continue_navigation(window, cx);
+    }
+
     fn continue_navigation(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
         if self.operation != Operation::Idle || self.unsaved.is_some() {
             return;
@@ -113,7 +137,7 @@ impl MainView {
         let Some(id) = self.deferred_navigation.take() else {
             return;
         };
-        let Navigation::Conversation(id) = id else {
+        if matches!(id, Navigation::New) {
             self.active_conversation = None;
             self.conversation.update(cx, super::ConversationView::clear);
             self.composer.update(cx, |composer, cx| {
@@ -132,13 +156,25 @@ impl MainView {
             self.update_composer_availability(cx);
             cx.notify();
             return;
+        }
+        let (id, target) = match id {
+            Navigation::Conversation(id) => (id, None),
+            Navigation::SearchResult(result) => (
+                result.conversation_id,
+                result.message_sequence.zip(result.message_id),
+            ),
+            Navigation::New => unreachable!(),
         };
         let generation = self.load_generation;
         let history = self.history.clone();
         self.loading_conversation = Some(id);
         self.update_composer_availability(cx);
         self.load_task = Some(cx.spawn_in(window, async move |view, window| {
-            let result = history.load(id).await;
+            let result = if let Some((sequence, _)) = target {
+                history.load_around(id, sequence).await
+            } else {
+                history.load(id).await
+            };
             _ = view.update_in(window, |main, window, cx| {
                 if main.load_generation != generation {
                     return;
@@ -157,6 +193,11 @@ impl MainView {
                         });
                         main.conversation
                             .update(cx, |view, cx| view.load_page(loaded, cx));
+                        if let Some((_, message_id)) = target {
+                            main.conversation.update(cx, |view, cx| {
+                                view.scroll_to_message(message_id, cx);
+                            });
+                        }
                         main.active_conversation = Some(id);
                         main.sidebar
                             .update(cx, |sidebar, cx| sidebar.set_active(Some(id), cx));

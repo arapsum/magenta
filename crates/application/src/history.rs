@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use magenta_core::{
-    ConversationId, ConversationPage, ConversationStore, ConversationSummary, Message, MessagePage,
-    MessageSequence, StorageFuture,
+    ConversationId, ConversationPage, ConversationSearchResult, ConversationStore,
+    ConversationSummary, Message, MessagePage, MessageSequence, StorageFuture,
 };
 
 /// Application entry point for history operations, shared by the desktop views.
@@ -28,8 +28,26 @@ impl ConversationHistory {
     }
 
     #[must_use]
+    pub fn search(
+        &self,
+        query: String,
+        limit: usize,
+    ) -> StorageFuture<Vec<ConversationSearchResult>> {
+        self.store.search(query, limit)
+    }
+
+    #[must_use]
     pub fn load(&self, id: ConversationId) -> StorageFuture<ConversationPage> {
         self.store.load(id)
+    }
+
+    #[must_use]
+    pub fn load_around(
+        &self,
+        id: ConversationId,
+        sequence: MessageSequence,
+    ) -> StorageFuture<ConversationPage> {
+        self.store.load_around(id, sequence)
     }
 
     #[must_use]

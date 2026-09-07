@@ -1,6 +1,6 @@
 //! Durable conversation values and the persistence port. No database types cross this boundary.
 
-use std::{error::Error, future::Future, pin::Pin};
+use std::{error::Error, future::Future, ops::Range, pin::Pin};
 
 use crate::{
     AgentActivity, AgentActivityRecord, AgentRunId, AttachmentDraft, Conversation, ConversationId,
@@ -22,6 +22,18 @@ pub struct ConversationSummary {
     pub mode: ConversationMode,
     pub workspace_root: Option<std::path::PathBuf>,
     pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConversationSearchResult {
+    pub conversation_id: ConversationId,
+    pub message_id: Option<MessageId>,
+    pub message_sequence: Option<MessageSequence>,
+    pub title: String,
+    pub title_highlights: Vec<Range<usize>>,
+    pub snippet: String,
+    pub snippet_highlights: Vec<Range<usize>>,
     pub updated_at: Timestamp,
 }
 
@@ -104,7 +116,13 @@ pub type StorageFuture<T> = Pin<Box<dyn Future<Output = Result<T, StorageError>>
 pub trait ConversationStore: Send + Sync {
     fn initialize(&self) -> StorageFuture<()>;
     fn summaries(&self) -> StorageFuture<Vec<ConversationSummary>>;
+    fn search(&self, query: String, limit: usize) -> StorageFuture<Vec<ConversationSearchResult>>;
     fn load(&self, id: ConversationId) -> StorageFuture<ConversationPage>;
+    fn load_around(
+        &self,
+        id: ConversationId,
+        sequence: MessageSequence,
+    ) -> StorageFuture<ConversationPage>;
     fn earlier(&self, id: ConversationId, before: MessageSequence) -> StorageFuture<MessagePage>;
     fn begin_turn(&self, input: BeginTurn) -> StorageFuture<PreparedTurn>;
     fn begin_regeneration(

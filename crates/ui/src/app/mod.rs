@@ -8,12 +8,13 @@ mod settings_window;
 #[cfg(test)]
 mod tests;
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use gpui::{
-    AnyElement, AppContext as _, Context, Entity, FocusHandle, Focusable as _, KeyBinding,
-    MouseButton, Render, Role, SharedString, StatefulInteractiveElement as _, Subscription, Task,
-    Window, WindowHandle, div, prelude::*, px,
+    AnyElement, AppContext as _, Context, Entity, FocusHandle, Focusable as _, FontWeight,
+    HighlightStyle, KeyBinding, MouseButton, Render, Role, SharedString,
+    StatefulInteractiveElement as _, StyledText, Subscription, Task, Window, WindowHandle, div,
+    prelude::*, px,
 };
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _,
@@ -27,7 +28,8 @@ use magenta_application::{
     ConversationHistory, ProjectCatalog, RegenerateMessage, RunWorkspaceAgent, SendMessage,
 };
 use magenta_core::{
-    ConversationId, ModelCatalog, ProviderAccount, ProviderAuthenticator, SettingsStore,
+    ConversationId, ConversationSearchResult, ModelCatalog, ProviderAccount, ProviderAuthenticator,
+    SettingsStore,
 };
 
 use self::settings_window::{AccountSettingsState, SettingsWindow, SettingsWindowEvent};
@@ -102,6 +104,10 @@ pub struct MainView {
     finder_open: PanelState,
     finder_input: Entity<InputState>,
     finder_selected: usize,
+    finder_results: Vec<ConversationSearchResult>,
+    finder_search_status: FinderSearchStatus,
+    finder_search_generation: u64,
+    finder_search_task: Option<Task<()>>,
     focus_handle: FocusHandle,
     account_task: Option<Task<()>>,
     model_task: Option<Task<()>>,
@@ -168,6 +174,15 @@ enum PanelState {
     #[default]
     Closed,
     Open,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum FinderSearchStatus {
+    #[default]
+    Idle,
+    Searching,
+    Ready,
+    Failed,
 }
 
 impl PanelState {
@@ -257,6 +272,10 @@ impl MainView {
             finder_open: PanelState::Closed,
             finder_input,
             finder_selected: 0,
+            finder_results: Vec::new(),
+            finder_search_status: FinderSearchStatus::Idle,
+            finder_search_generation: 0,
+            finder_search_task: None,
             focus_handle,
             account_task: None,
             model_task: None,
@@ -360,10 +379,10 @@ impl MainView {
             cx.subscribe_in(
                 finder_input,
                 window,
-                |main, _, event: &InputEvent, _, cx| {
+                |main, _, event: &InputEvent, window, cx| {
                     if matches!(event, InputEvent::Change) {
                         main.finder_selected = 0;
-                        cx.notify();
+                        main.schedule_finder_search(window, cx);
                     }
                 },
             ),

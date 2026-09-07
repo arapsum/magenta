@@ -34,6 +34,20 @@ impl ConversationView {
         self.has_older.then_some(self.older_cursor).flatten()
     }
 
+    pub(crate) fn scroll_to_message(&self, id: MessageId, cx: &mut Context<'_, Self>) {
+        if let Some(item_ix) = self
+            .messages
+            .iter()
+            .position(|rendered| rendered.message.id == id)
+        {
+            self.list_state.scroll_to(gpui::ListOffset {
+                item_ix,
+                offset_in_item: px(0.),
+            });
+            cx.notify();
+        }
+    }
+
     pub(crate) fn set_loading_earlier(&mut self, loading: bool, cx: &mut Context<'_, Self>) {
         self.loading_earlier = loading;
         cx.notify();

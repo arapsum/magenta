@@ -1,6 +1,7 @@
 mod v1_to_v2;
 mod v2_to_v3;
 mod v3_to_v4;
+mod v4_to_v5;
 
 use magenta_core::StorageErrorKind;
 use rusqlite::Transaction;
@@ -12,14 +13,20 @@ pub fn apply(version: i64, transaction: &Transaction<'_>) -> Result<()> {
         1 => {
             v1_to_v2::apply(transaction)?;
             v2_to_v3::apply(transaction)?;
-            v3_to_v4::apply(transaction)
+            v3_to_v4::apply(transaction)?;
+            v4_to_v5::apply(transaction)
         }
         2 => {
             v2_to_v3::apply(transaction)?;
-            v3_to_v4::apply(transaction)
+            v3_to_v4::apply(transaction)?;
+            v4_to_v5::apply(transaction)
         }
-        3 => v3_to_v4::apply(transaction),
-        4 => Ok(()),
+        3 => {
+            v3_to_v4::apply(transaction)?;
+            v4_to_v5::apply(transaction)
+        }
+        4 => v4_to_v5::apply(transaction),
+        5 => Ok(()),
         _ => Err(failure(
             StorageErrorKind::UnsupportedVersion,
             "unsupported database schema version",

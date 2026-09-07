@@ -41,9 +41,9 @@ pub use settings::{
     SettingsFuture, SettingsStore, TypographySettings,
 };
 pub use storage::{
-    BeginTurn, ConversationPage, ConversationStore, ConversationSummary, MessagePage,
-    MessageSequence, PreparedTurn, StorageError, StorageErrorKind, StorageFuture, StoredMessage,
-    Timestamp,
+    BeginTurn, ConversationPage, ConversationSearchResult, ConversationStore, ConversationSummary,
+    MessagePage, MessageSequence, PreparedTurn, StorageError, StorageErrorKind, StorageFuture,
+    StoredMessage, Timestamp,
 };
 pub use workspace::{
     WorkspaceAccess, WorkspaceError, WorkspaceFuture, WorkspaceMutation, WorkspaceOperation,

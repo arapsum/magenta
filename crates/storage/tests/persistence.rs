@@ -1,7 +1,7 @@
 use magenta_core::{
     AttachmentDraft, BeginTurn, ConversationId, ConversationMode, ConversationStore, EffortLevel,
-    FinishReason, GenerationConfig, GenerationOutcome, MessageStatus, ModelId, Project,
-    ProjectStore, ProviderId, StorageErrorKind, Timestamp, TokenUsage,
+    FinishReason, GenerationConfig, GenerationOutcome, MessageSequence, MessageStatus, ModelId,
+    Project, ProjectStore, ProviderId, StorageErrorKind, Timestamp, TokenUsage,
 };
 use magenta_storage::SqliteConversationStore;
 use std::{
@@ -179,6 +179,94 @@ fn rename_persists_without_changing_conversation_recency() {
 }
 
 #[test]
+fn full_text_search_tracks_titles_message_updates_renames_and_deletes() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite3");
+        let store = SqliteConversationStore::new(path);
+        store.initialize().await.unwrap();
+
+        let pending = store.begin_turn(input(None)).await.unwrap();
+        let id = pending.conversation.id;
+        let title_match = store.search("unic".into(), 10).await.unwrap();
+        assert_eq!(title_match.len(), 1);
+        assert_eq!(title_match[0].conversation_id, id);
+        assert!(title_match[0].message_id.is_none());
+        assert_eq!(
+            &title_match[0].title[title_match[0].title_highlights[0].clone()],
+            "Unicode"
+        );
+
+        let body_match = store.search("main".into(), 10).await.unwrap();
+        assert_eq!(body_match.len(), 1);
+        assert_eq!(body_match[0].message_id, Some(pending.user_message.id));
+        assert_eq!(body_match[0].message_sequence.unwrap().0, 0);
+        assert!(body_match[0].snippet.contains("main"));
+        assert!(!body_match[0].snippet_highlights.is_empty());
+
+        let mut assistant = pending.assistant_message;
+        assistant.content = "A distinctly searchable phosphorescent answer".into();
+        assistant.status = MessageStatus::Complete;
+        store.finalize(assistant.clone()).await.unwrap();
+        let finalized = store.search("phosphor".into(), 10).await.unwrap();
+        assert_eq!(finalized[0].message_id, Some(assistant.id));
+
+        store.rename(id, "Retitled archive".into()).await.unwrap();
+        assert!(store.search("unicode".into(), 10).await.unwrap().is_empty());
+        assert_eq!(
+            store.search("retit".into(), 10).await.unwrap()[0].conversation_id,
+            id
+        );
+
+        store.delete(id).await.unwrap();
+        assert!(
+            store
+                .search("phosphor".into(), 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(store.search("   ".into(), 10).await.unwrap().is_empty());
+    });
+}
+
+#[test]
+fn version_four_migration_backfills_full_text_indexes() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite3");
+        let store = SqliteConversationStore::new(path.clone());
+        store.initialize().await.unwrap();
+        let pending = store.begin_turn(input(None)).await.unwrap();
+        drop(store);
+
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                r"
+                    DROP TRIGGER conversation_fts_insert;
+                    DROP TRIGGER conversation_fts_delete;
+                    DROP TRIGGER conversation_fts_update;
+                    DROP TRIGGER message_fts_insert;
+                    DROP TRIGGER message_fts_delete;
+                    DROP TRIGGER message_fts_update;
+                    DROP TABLE conversation_fts;
+                    DROP TABLE message_fts;
+                    PRAGMA user_version = 4;
+                ",
+            )
+            .unwrap();
+        drop(connection);
+
+        let migrated = SqliteConversationStore::new(path);
+        migrated.initialize().await.unwrap();
+        let matches = migrated.search("main".into(), 10).await.unwrap();
+        assert_eq!(matches[0].conversation_id, pending.conversation.id);
+        assert_eq!(matches[0].message_id, Some(pending.user_message.id));
+    });
+}
+
+#[test]
 fn delete_removes_conversation_messages_and_attachment_records() {
     smol::block_on(async {
         let directory = tempfile::tempdir().unwrap();
@@ -283,6 +371,17 @@ fn pages_are_ordered_without_gaps_and_provider_context_is_independent() {
         }
         sequences.sort_unstable();
         assert_eq!(sequences, (0..112).collect::<Vec<_>>());
+
+        let around = store.load_around(id, MessageSequence(80)).await.unwrap();
+        assert!(around.page.has_older);
+        assert_eq!(around.page.messages.first().unwrap().sequence.0, 56);
+        assert!(
+            around
+                .page
+                .messages
+                .iter()
+                .any(|message| message.sequence.0 == 80)
+        );
     });
 }
 

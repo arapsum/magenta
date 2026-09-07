@@ -1,18 +1,97 @@
 use super::*;
 
+struct FinderRow {
+    result: ConversationSearchResult,
+    updated: SharedString,
+}
+
 impl MainView {
+    pub(super) fn schedule_finder_search(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
+        self.finder_search_generation = self.finder_search_generation.wrapping_add(1);
+        let generation = self.finder_search_generation;
+        self.finder_search_task.take();
+        let query = self.finder_input.read(cx).value().trim().to_owned();
+        self.finder_results.clear();
+        if query.is_empty() {
+            self.finder_search_status = FinderSearchStatus::Idle;
+            cx.notify();
+            return;
+        }
+
+        self.finder_search_status = FinderSearchStatus::Searching;
+        let history = self.history.clone();
+        self.finder_search_task = Some(cx.spawn_in(window, async move |view, window| {
+            window
+                .background_executor()
+                .timer(Duration::from_millis(if cfg!(test) { 0 } else { 120 }))
+                .await;
+            let results = history.search(query, 30).await;
+            _ = view.update_in(window, |main, _, cx| {
+                if main.finder_search_generation != generation {
+                    return;
+                }
+                main.finder_search_task = None;
+                match results {
+                    Ok(results) => {
+                        main.finder_results = results;
+                        main.finder_search_status = FinderSearchStatus::Ready;
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            kind = ?error.kind,
+                            operation = "history.search",
+                            "conversation search failed"
+                        );
+                        main.finder_results.clear();
+                        main.finder_search_status = FinderSearchStatus::Failed;
+                    }
+                }
+                main.finder_selected = 0;
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    fn finder_rows(&self, query: &str, cx: &Context<'_, Self>) -> Vec<FinderRow> {
+        if query.is_empty() {
+            return self
+                .sidebar
+                .read(cx)
+                .matching_conversations("")
+                .into_iter()
+                .map(|(id, title, updated)| FinderRow {
+                    result: ConversationSearchResult {
+                        conversation_id: id,
+                        message_id: None,
+                        message_sequence: None,
+                        title: title.to_string(),
+                        title_highlights: Vec::new(),
+                        snippet: String::new(),
+                        snippet_highlights: Vec::new(),
+                        updated_at: magenta_core::Timestamp(0),
+                    },
+                    updated,
+                })
+                .collect();
+        }
+        self.finder_results
+            .iter()
+            .cloned()
+            .map(|result| FinderRow {
+                updated: relative_timestamp(result.updated_at).into(),
+                result,
+            })
+            .collect()
+    }
+
     pub(crate) fn move_finder_selection(&mut self, offset: isize, cx: &mut Context<'_, Self>) {
         if !self.finder_open.is_open() {
             return;
         }
 
-        let query = self.finder_input.read(cx).value();
-        let count = self
-            .sidebar
-            .read(cx)
-            .matching_conversations(query.trim())
-            .len()
-            + 1;
+        let query = self.finder_input.read(cx).value().trim().to_owned();
+        let count = self.finder_rows(&query, cx).len() + 1;
         self.finder_selected = (self.finder_selected.cast_signed() + offset)
             .rem_euclid(count.cast_signed())
             .cast_unsigned();
@@ -28,10 +107,13 @@ impl MainView {
             return;
         }
 
-        let query = self.finder_input.read(cx).value();
-        let matches = self.sidebar.read(cx).matching_conversations(query.trim());
-        if let Some((id, _, _)) = matches.get(self.finder_selected) {
-            self.select_finder_result(*id, window, cx);
+        let query = self.finder_input.read(cx).value().trim().to_owned();
+        if !query.is_empty() && self.finder_search_status == FinderSearchStatus::Searching {
+            return;
+        }
+        let matches = self.finder_rows(&query, cx);
+        if let Some(row) = matches.get(self.finder_selected) {
+            self.select_finder_result(row.result.clone(), window, cx);
         } else {
             self.new_chat_from_finder(window, cx);
         }
@@ -39,6 +121,8 @@ impl MainView {
     pub(crate) fn open_finder(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.finder_open = PanelState::Open;
         self.finder_selected = 0;
+        self.finder_results.clear();
+        self.finder_search_status = FinderSearchStatus::Idle;
         self.finder_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
         });
@@ -56,6 +140,10 @@ impl MainView {
 
         self.finder_open = PanelState::Closed;
         self.finder_selected = 0;
+        self.finder_search_generation = self.finder_search_generation.wrapping_add(1);
+        self.finder_search_task.take();
+        self.finder_results.clear();
+        self.finder_search_status = FinderSearchStatus::Idle;
         self.finder_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
         });
@@ -70,12 +158,12 @@ impl MainView {
 
     fn select_finder_result(
         &mut self,
-        id: ConversationId,
+        result: ConversationSearchResult,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
         self.close_finder(window, cx);
-        self.navigate(Some(id), window, cx);
+        self.navigate_to_search_result(result, window, cx);
     }
 
     fn new_chat_from_finder(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -86,14 +174,22 @@ impl MainView {
     }
 
     fn finder_conversation_row(
-        id: ConversationId,
-        title: SharedString,
-        updated: SharedString,
+        row: FinderRow,
         selected: bool,
         view: Entity<Self>,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let accessibility_label = title.to_string();
+        let FinderRow { result, updated } = row;
+        let id = result.conversation_id;
+        let accessibility_label = if result.snippet.is_empty() {
+            result.title.clone()
+        } else {
+            format!("{}. {}", result.title, result.snippet)
+        };
+        let title = highlighted_text(result.title.clone(), result.title_highlights.clone());
+        let has_snippet = !result.snippet.is_empty();
+        let snippet = highlighted_text(result.snippet.clone(), result.snippet_highlights.clone());
+        let selected_result = result;
         h_flex()
             .id(("finder-conversation", id.0))
             .debug_selector(move || format!("finder-conversation-{}", id.0))
@@ -102,7 +198,7 @@ impl MainView {
             .aria_selected(selected)
             .cursor_pointer()
             .w_full()
-            .h(px(40.))
+            .min_h(if has_snippet { px(58.) } else { px(40.) })
             .px(px(10.))
             .gap(px(12.))
             .rounded(px(8.))
@@ -139,15 +235,32 @@ impl MainView {
                     ),
             )
             .child(
-                div()
+                v_flex()
                     .flex_1()
                     .min_w_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .font_medium()
-                    .text_size(px(13.))
-                    .child(title),
+                    .gap(px(2.))
+                    .child(
+                        div()
+                            .w_full()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .font_medium()
+                            .text_size(px(13.))
+                            .child(title),
+                    )
+                    .when(has_snippet, |this| {
+                        this.child(
+                            div()
+                                .w_full()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_size(px(12.))
+                                .text_color(cx.theme().muted_foreground)
+                                .child(snippet),
+                        )
+                    }),
             )
             .child(
                 div()
@@ -159,7 +272,7 @@ impl MainView {
             )
             .on_click(move |_, window, cx| {
                 view.update(cx, |main, cx| {
-                    main.select_finder_result(id, window, cx);
+                    main.select_finder_result(selected_result.clone(), window, cx);
                 });
             })
             .into_any_element()
@@ -221,7 +334,7 @@ impl MainView {
     fn finder_results(
         &self,
         query: &str,
-        matches: Vec<(ConversationId, SharedString, SharedString)>,
+        matches: Vec<FinderRow>,
         view: Entity<Self>,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
@@ -239,11 +352,9 @@ impl MainView {
                     .child("CHATS"),
             );
         }
-        for (index, (id, title, updated)) in matches.into_iter().enumerate() {
+        for (index, row) in matches.into_iter().enumerate() {
             result_rows = result_rows.child(Self::finder_conversation_row(
-                id,
-                title,
-                updated,
+                row,
                 self.finder_selected == index,
                 view.clone(),
                 cx,
@@ -258,10 +369,11 @@ impl MainView {
                     .text_center()
                     .text_size(px(13.))
                     .text_color(cx.theme().muted_foreground)
-                    .child(if query.is_empty() {
-                        "No conversations yet."
-                    } else {
-                        "No conversations match your search."
+                    .child(match (query.is_empty(), self.finder_search_status) {
+                        (true, _) => "No conversations yet.",
+                        (false, FinderSearchStatus::Searching) => "Searching conversation history…",
+                        (false, FinderSearchStatus::Failed) => "Search is unavailable. Try again.",
+                        (false, _) => "No conversations match your search.",
                     }),
             );
         }
@@ -305,6 +417,7 @@ impl MainView {
             .role(Role::Dialog)
             .aria_label("Search chats")
             .w(px(385.))
+            .h(px(440.))
             .max_h(px(560.))
             .overflow_hidden()
             .rounded(px(14.))
@@ -335,8 +448,10 @@ impl MainView {
             .child(
                 div()
                     .id("finder-result-list")
+                    .debug_selector(|| "finder-result-list".to_owned())
                     .role(Role::ListBox)
-                    .max_h(px(320.))
+                    .flex_1()
+                    .min_h_0()
                     .overflow_y_scrollbar()
                     .p(px(4.))
                     .child(result_rows),
@@ -359,7 +474,7 @@ impl MainView {
 
     pub(crate) fn finder_overlay(&self, cx: &Context<'_, Self>) -> AnyElement {
         let query = self.finder_input.read(cx).value().trim().to_owned();
-        let matches = self.sidebar.read(cx).matching_conversations(&query);
+        let matches = self.finder_rows(&query, cx);
         let view = cx.entity();
         let result_rows = self.finder_results(&query, matches, view.clone(), cx);
         let popover = self.finder_popover(result_rows, cx);
@@ -368,6 +483,7 @@ impl MainView {
             .id("conversation-finder-overlay")
             .absolute()
             .inset_0()
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .absolute()
@@ -388,5 +504,36 @@ impl MainView {
                     .child(popover),
             )
             .into_any_element()
+    }
+}
+
+fn highlighted_text(text: String, ranges: Vec<std::ops::Range<usize>>) -> StyledText {
+    let highlights = ranges.into_iter().map(|range| {
+        (
+            range,
+            HighlightStyle {
+                font_weight: Some(FontWeight::BOLD),
+                ..Default::default()
+            },
+        )
+    });
+    StyledText::new(SharedString::from(text)).with_highlights(highlights)
+}
+
+fn relative_timestamp(timestamp: magenta_core::Timestamp) -> String {
+    let Some(updated_at) = chrono::DateTime::from_timestamp_millis(timestamp.0)
+        .map(|time| time.with_timezone(&chrono::Local))
+    else {
+        return String::new();
+    };
+    let minutes = chrono::Local::now()
+        .signed_duration_since(updated_at)
+        .num_minutes()
+        .max(0);
+    match minutes {
+        0 => "now".to_owned(),
+        1..=59 => format!("{minutes}m"),
+        60..=1439 => format!("{}h", minutes / 60),
+        _ => format!("{}d", minutes / 1_440),
     }
 }
