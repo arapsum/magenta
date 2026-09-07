@@ -5,8 +5,8 @@ use std::{
 
 use image::{Frame, RgbaImage, codecs::gif::GifEncoder};
 use magenta_core::{
-    AttachmentDraft, BeginTurn, ConversationId, ConversationStore, EffortLevel, GenerationConfig,
-    ModelId, ProviderId, StorageErrorKind,
+    AttachmentDraft, BeginTurn, ConversationId, ConversationMode, ConversationStore, EffortLevel,
+    GenerationConfig, ModelId, ProviderId, StorageErrorKind,
 };
 use magenta_storage::SqliteConversationStore;
 
@@ -29,6 +29,8 @@ fn begin_turn(attachments: Vec<AttachmentDraft>) -> BeginTurn {
             ModelId::new("test-model"),
             EffortLevel::Medium,
         ),
+        mode: ConversationMode::Chat,
+        workspace_root: None,
     }
 }
 
@@ -235,7 +237,7 @@ fn version_one_attachments_remain_unmanaged_and_their_sources_are_not_deleted() 
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
     });
 }
 

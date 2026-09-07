@@ -1,6 +1,9 @@
+use std::path::PathBuf;
+
 use magenta_core::{
-    Attachment, BeginTurn, Conversation, ConversationId, Message, MessageId, MessageRole,
-    MessageStatus, PreparedTurn, StorageErrorKind,
+    AgentRunId, Attachment, BeginTurn, Conversation, ConversationId, ConversationMode,
+    GenerationConfig, Message, MessageId, MessageRole, MessageStatus, PreparedTurn,
+    StorageErrorKind,
 };
 use rusqlite::{Connection, Transaction, TransactionBehavior, params};
 
@@ -17,6 +20,8 @@ pub fn begin(
         prompt,
         attachments: _,
         generation: generation_config,
+        mode,
+        workspace_root,
     } = input;
 
     if prompt.trim().is_empty() && attachments.is_empty() {
@@ -28,38 +33,17 @@ pub fn begin(
         .map_err(database_error)?;
 
     let timestamp = now()?;
-    let generation = serde_json::to_string(&generation_config).map_err(invalid)?;
-
-    let conversation = if let Some(id) = conversation_id {
-        let mut conversation = records::conversation(&transaction, id)?;
-        ensure_idle(&transaction, id)?;
-
-        transaction
-            .execute(
-                "UPDATE conversations SET generation = ?1, updated_at = ?2 WHERE id = ?3",
-                params![generation, timestamp, id.0],
-            )
-            .map_err(database_error)?;
-        conversation.generation = generation_config;
-
-        conversation
-    } else {
-        transaction
-            .execute(
-                r"
-                    INSERT INTO conversations(title, generation, created_at, updated_at)
-                    VALUES (?1, ?2, ?3, ?3)
-                ",
-                params![title, generation, timestamp],
-            )
-            .map_err(database_error)?;
-
-        Conversation {
-            id: ConversationId(u64::try_from(transaction.last_insert_rowid()).map_err(invalid)?),
-            title,
-            generation: generation_config,
-        }
-    };
+    let setup = prepare_conversation(
+        &transaction,
+        conversation_id,
+        title,
+        generation_config,
+        mode,
+        workspace_root,
+        timestamp,
+    )?;
+    let conversation = setup.conversation;
+    let generation = setup.generation;
 
     let sequence: i64 = transaction
         .query_row(
@@ -89,6 +73,9 @@ pub fn begin(
         timestamp,
     )?;
 
+    let agent_run_id =
+        insert_agent_run(&transaction, &conversation, &assistant_message, timestamp)?;
+
     context.push(user_message.clone());
     transaction.commit().map_err(database_error)?;
 
@@ -97,7 +84,107 @@ pub fn begin(
         user_message,
         assistant_message,
         context,
+        agent_run_id,
     })
+}
+
+struct ConversationSetup {
+    conversation: Conversation,
+    generation: String,
+}
+
+fn prepare_conversation(
+    transaction: &Transaction<'_>,
+    conversation_id: Option<ConversationId>,
+    title: String,
+    generation_config: GenerationConfig,
+    mode: ConversationMode,
+    workspace_root: Option<PathBuf>,
+    timestamp: i64,
+) -> Result<ConversationSetup> {
+    let generation = serde_json::to_string(&generation_config).map_err(invalid)?;
+    let mode_value = mode_name(&mode);
+    let workspace_root_value = workspace_root
+        .as_ref()
+        .map(|path| records::encode_path(path));
+    let conversation = if let Some(id) = conversation_id {
+        let mut conversation = records::conversation(transaction, id)?;
+        ensure_idle(transaction, id)?;
+        transaction
+            .execute(
+                r"
+                    UPDATE conversations
+                    SET generation = ?1, mode = ?2, workspace_root = ?3, updated_at = ?4
+                    WHERE id = ?5
+                ",
+                params![
+                    generation,
+                    mode_value,
+                    workspace_root_value,
+                    timestamp,
+                    id.0
+                ],
+            )
+            .map_err(database_error)?;
+        conversation.generation = generation_config;
+        conversation.mode = mode;
+        conversation.workspace_root = workspace_root;
+        conversation
+    } else {
+        transaction
+            .execute(
+                r"
+                    INSERT INTO conversations(
+                        title, generation, mode, workspace_root, created_at, updated_at
+                    )
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+                ",
+                params![
+                    title,
+                    generation,
+                    mode_value,
+                    workspace_root_value,
+                    timestamp
+                ],
+            )
+            .map_err(database_error)?;
+        Conversation {
+            id: ConversationId(u64::try_from(transaction.last_insert_rowid()).map_err(invalid)?),
+            title,
+            generation: generation_config,
+            mode,
+            workspace_root,
+        }
+    };
+    Ok(ConversationSetup {
+        conversation,
+        generation,
+    })
+}
+
+fn insert_agent_run(
+    transaction: &Transaction<'_>,
+    conversation: &Conversation,
+    assistant_message: &Message,
+    timestamp: i64,
+) -> Result<Option<AgentRunId>> {
+    if conversation.mode != ConversationMode::Agent {
+        return Ok(None);
+    }
+    transaction
+        .execute(
+            r"
+                INSERT INTO agent_runs(
+                    conversation_id, assistant_message_id, status, started_at
+                )
+                VALUES (?1, ?2, 'running', ?3)
+            ",
+            params![conversation.id.0, assistant_message.id.0, timestamp],
+        )
+        .map_err(database_error)?;
+    Ok(Some(AgentRunId(
+        u64::try_from(transaction.last_insert_rowid()).map_err(invalid)?,
+    )))
 }
 
 fn insert_user_message(
@@ -154,6 +241,7 @@ fn insert_user_message(
         status: MessageStatus::Complete,
         attachments,
         generation_outcome: None,
+        agent_activities: Vec::new(),
     })
 }
 
@@ -187,6 +275,7 @@ fn insert_assistant_message(
         status: MessageStatus::Streaming,
         attachments: Vec::new(),
         generation_outcome: None,
+        agent_activities: Vec::new(),
     })
 }
 
@@ -254,6 +343,7 @@ pub fn regenerate(
         status: MessageStatus::Streaming,
         attachments: Vec::new(),
         generation_outcome: None,
+        agent_activities: Vec::new(),
     };
 
     transaction.commit().map_err(database_error)?;
@@ -263,7 +353,15 @@ pub fn regenerate(
         user_message,
         assistant_message,
         context,
+        agent_run_id: None,
     })
+}
+
+const fn mode_name(mode: &ConversationMode) -> &'static str {
+    match mode {
+        ConversationMode::Chat => "chat",
+        ConversationMode::Agent => "agent",
+    }
 }
 
 fn ensure_idle(connection: &Connection, id: ConversationId) -> Result<()> {

@@ -1,6 +1,7 @@
 //! SQLite adapter. Connections and migrations are confined to blocking workers.
 
 mod attachments;
+mod migrations;
 mod records;
 mod settings;
 mod turns;
@@ -17,9 +18,9 @@ use std::{
 };
 
 use magenta_core::{
-    BeginTurn, ConversationId, ConversationPage, ConversationStore, ConversationSummary, Message,
-    MessageId, MessagePage, MessageSequence, PreparedTurn, StorageError, StorageErrorKind,
-    StorageFuture, Timestamp,
+    AgentActivityKind, AgentActivityRecord, BeginTurn, ConversationId, ConversationPage,
+    ConversationStore, ConversationSummary, Message, MessageId, MessagePage, MessageSequence,
+    PreparedTurn, StorageError, StorageErrorKind, StorageFuture, Timestamp,
 };
 use rusqlite::{Connection, TransactionBehavior, params};
 
@@ -82,23 +83,23 @@ impl ConversationStore for SqliteConversationStore {
             let version: i64 = transaction
                 .pragma_query_value(None, "user_version", |row| row.get(0))
                 .map_err(database_error)?;
-            match version {
-                0 => transaction
+            if version == 0 {
+                transaction
                     .execute_batch(include_str!("schema.sql"))
-                    .map_err(database_error)?,
-                1 => migrate_v1_to_v2(&transaction)?,
-                2 => {}
-                _ => {
-                    return Err(failure(
-                        StorageErrorKind::UnsupportedVersion,
-                        "unsupported database schema version",
-                    ));
-                }
+                    .map_err(database_error)?;
+            } else {
+                migrations::apply(version, &transaction)?;
             }
             transaction
                 .execute(
                     "UPDATE messages SET status = 'stopped' WHERE status = 'streaming'",
                     [],
+                )
+                .map_err(database_error)?;
+            transaction
+                .execute(
+                    "UPDATE agent_runs SET status = 'stopped', finished_at = ?1 WHERE status = 'running' AND assistant_message_id IN (SELECT id FROM messages WHERE status = 'stopped')",
+                    [now()?],
                 )
                 .map_err(database_error)?;
             transaction.commit().map_err(database_error)?;
@@ -245,6 +246,12 @@ impl ConversationStore for SqliteConversationStore {
             }
             transaction
                 .execute(
+                    "UPDATE agent_runs SET status = ?1, finished_at = ?2 WHERE assistant_message_id = ?3 AND status = 'running'",
+                    params![agent_run_status(message.status), now()?, message.id.0],
+                )
+                .map_err(database_error)?;
+            transaction
+                .execute(
                     "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
                     params![now()?, message.conversation_id.0],
                 )
@@ -320,6 +327,41 @@ impl ConversationStore for SqliteConversationStore {
             Ok(())
         })
     }
+
+    fn append_agent_activity(&self, activity: AgentActivityRecord) -> StorageFuture<()> {
+        self.run(move |connection| {
+            let sequence: i64 = connection
+                .query_row(
+                    "SELECT COALESCE(MAX(sequence) + 1, 0) FROM agent_activities WHERE run_id = ?1",
+                    [activity.run_id.0],
+                    |row| row.get(0),
+                )
+                .map_err(database_error)?;
+            connection
+                .execute(
+                    r"
+                        INSERT INTO agent_activities(
+                            run_id, sequence, kind, call_id, tool_name,
+                            status, summary, detail, created_at
+                        )
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                    ",
+                    params![
+                        activity.run_id.0,
+                        sequence,
+                        activity_kind(&activity.activity.kind),
+                        activity.activity.call_id,
+                        activity.activity.tool_name,
+                        activity.activity.status,
+                        activity.activity.summary,
+                        activity.activity.detail,
+                        now()?,
+                    ],
+                )
+                .map_err(database_error)?;
+            Ok(())
+        })
+    }
 }
 
 fn attachment_directory(database_path: &std::path::Path) -> PathBuf {
@@ -329,20 +371,21 @@ fn attachment_directory(database_path: &std::path::Path) -> PathBuf {
         .join("attachments")
 }
 
-fn migrate_v1_to_v2(transaction: &rusqlite::Transaction<'_>) -> Result<()> {
-    transaction
-        .execute_batch(
-            r"
-                ALTER TABLE attachments
-                    ADD COLUMN mime_type TEXT NOT NULL DEFAULT 'application/octet-stream';
-                ALTER TABLE attachments
-                    ADD COLUMN byte_size INTEGER NOT NULL DEFAULT 0 CHECK (byte_size >= 0);
-                ALTER TABLE attachments
-                    ADD COLUMN managed INTEGER NOT NULL DEFAULT 0 CHECK (managed IN (0, 1));
-                PRAGMA user_version = 2;
-            ",
-        )
-        .map_err(database_error)
+const fn activity_kind(kind: &AgentActivityKind) -> &'static str {
+    match kind {
+        AgentActivityKind::ToolCall => "tool-call",
+        AgentActivityKind::ApprovalRequested => "approval-requested",
+        AgentActivityKind::ToolResult => "tool-result",
+    }
+}
+
+const fn agent_run_status(status: magenta_core::MessageStatus) -> &'static str {
+    match status {
+        magenta_core::MessageStatus::Complete => "completed",
+        magenta_core::MessageStatus::Streaming => "running",
+        magenta_core::MessageStatus::Stopped => "stopped",
+        magenta_core::MessageStatus::Failed => "failed",
+    }
 }
 
 fn managed_attachments(

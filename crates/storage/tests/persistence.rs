@@ -1,7 +1,7 @@
 use magenta_core::{
-    AttachmentDraft, BeginTurn, ConversationId, ConversationStore, EffortLevel, FinishReason,
-    GenerationConfig, GenerationOutcome, MessageStatus, ModelId, ProviderId, StorageErrorKind,
-    TokenUsage,
+    AttachmentDraft, BeginTurn, ConversationId, ConversationMode, ConversationStore, EffortLevel,
+    FinishReason, GenerationConfig, GenerationOutcome, MessageStatus, ModelId, ProviderId,
+    StorageErrorKind, TokenUsage,
 };
 use magenta_storage::SqliteConversationStore;
 use std::{
@@ -31,6 +31,8 @@ fn input(id: Option<ConversationId>) -> BeginTurn {
                 label: "Thinking budget".into(),
             },
         ),
+        mode: ConversationMode::Chat,
+        workspace_root: None,
     }
 }
 
@@ -98,6 +100,37 @@ fn reopen_preserves_messages_configuration_metadata_and_pins() {
         assert_eq!(continued.context.len(), 3);
         assert_eq!(continued.context[1], assistant);
         assert!(continued.user_message.id.0 > assistant.id.0);
+    });
+}
+
+#[test]
+fn agent_finalization_marks_the_run_completed() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite3");
+        let store = SqliteConversationStore::new(path.clone());
+        store.initialize().await.unwrap();
+
+        let mut agent_input = input(None);
+        agent_input.mode = ConversationMode::Agent;
+        agent_input.workspace_root = Some(directory.path().to_path_buf());
+        let pending = store.begin_turn(agent_input).await.unwrap();
+        let assistant_id = pending.assistant_message.id.0;
+        let mut assistant = pending.assistant_message;
+        assistant.status = MessageStatus::Complete;
+        assistant.content = "Created the project.".into();
+
+        store.finalize(assistant).await.unwrap();
+
+        let connection = rusqlite::Connection::open(path).unwrap();
+        let status: String = connection
+            .query_row(
+                "SELECT status FROM agent_runs WHERE assistant_message_id = ?1",
+                [assistant_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "completed");
     });
 }
 

@@ -1,23 +1,37 @@
 use magenta_core::{
-    Attachment, Conversation, ConversationId, Message, MessageId, MessagePage, MessageRole,
-    MessageSequence, MessageStatus, StoredMessage, Timestamp,
+    AgentActivity, AgentActivityKind, Attachment, Conversation, ConversationId, ConversationMode,
+    Message, MessageId, MessagePage, MessageRole, MessageSequence, MessageStatus, StoredMessage,
+    Timestamp,
 };
 use rusqlite::{Connection, params};
 
 use crate::{Result, database_error, failure, invalid};
 
 pub fn conversation(connection: &Connection, id: ConversationId) -> Result<Conversation> {
-    let (title, generation): (String, String) = connection
-        .query_row(
-            "SELECT title, generation FROM conversations WHERE id = ?1",
-            [id.0],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(database_error)?;
+    let (title, generation, mode, workspace_root): (String, String, String, Option<Vec<u8>>) =
+        connection
+            .query_row(
+                "SELECT title, generation, mode, workspace_root FROM conversations WHERE id = ?1",
+                [id.0],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .map_err(database_error)?;
+    let mode = match mode.as_str() {
+        "chat" => ConversationMode::Chat,
+        "agent" => ConversationMode::Agent,
+        _ => {
+            return Err(failure(
+                magenta_core::StorageErrorKind::InvalidData,
+                "unknown conversation mode",
+            ));
+        }
+    };
     Ok(Conversation {
         id,
         title,
         generation: serde_json::from_str(&generation).map_err(invalid)?,
+        mode,
+        workspace_root: workspace_root.map(decode_path).transpose()?,
     })
 }
 
@@ -114,6 +128,7 @@ fn read_message(
     };
     let content = row.get(3).map_err(database_error)?;
     let attachments = attachments(connection, message_id)?;
+    let agent_activities = agent_activities(connection, message_id)?;
     let generation_outcome = outcome
         .as_deref()
         .map(serde_json::from_str)
@@ -132,11 +147,63 @@ fn read_message(
             status,
             attachments,
             generation_outcome,
+            agent_activities: agent_activities.clone(),
         },
         sequence,
         created_at,
         generation,
+        agent_activities,
     })
+}
+
+fn agent_activities(connection: &Connection, message_id: MessageId) -> Result<Vec<AgentActivity>> {
+    let mut statement = connection
+        .prepare(
+            r"
+                SELECT activity.kind, activity.call_id, activity.tool_name,
+                       activity.status, activity.summary, activity.detail
+                FROM agent_activities AS activity
+                INNER JOIN agent_runs AS run ON run.id = activity.run_id
+                WHERE run.assistant_message_id = ?1
+                ORDER BY activity.sequence
+            ",
+        )
+        .map_err(database_error)?;
+    let rows = statement
+        .query_map([message_id.0], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })
+        .map_err(database_error)?;
+    rows.map(|row| {
+        let (kind, call_id, tool_name, status, summary, detail) = row.map_err(database_error)?;
+        let kind = match kind.as_str() {
+            "tool-call" => AgentActivityKind::ToolCall,
+            "approval-requested" => AgentActivityKind::ApprovalRequested,
+            "tool-result" => AgentActivityKind::ToolResult,
+            _ => {
+                return Err(failure(
+                    magenta_core::StorageErrorKind::InvalidData,
+                    "unknown agent activity kind",
+                ));
+            }
+        };
+        Ok(AgentActivity {
+            kind,
+            call_id,
+            tool_name,
+            status,
+            summary,
+            detail,
+        })
+    })
+    .collect()
 }
 
 fn attachments(connection: &Connection, id: MessageId) -> Result<Vec<Attachment>> {
