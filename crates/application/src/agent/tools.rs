@@ -3,9 +3,9 @@ use std::{path::Path, sync::Arc};
 use async_channel::Receiver;
 use magenta_core::{
     AgentActivity, AgentActivityKind, AgentApprovalDecision, AgentApprovalRequest, AgentRunEvent,
-    AgentRunStream, AgentToolCall, AgentToolDefinition, AgentToolOutput, Conversation,
-    ConversationId, ConversationStore, ProviderId, WorkspaceAccess, WorkspaceOperation,
-    WorkspacePreview,
+    AgentRunStream, AgentToolCall, AgentToolDefinition, AgentToolOutput, AgentWorkspaceChange,
+    Conversation, ConversationId, ConversationStore, ProviderId, WorkspaceAccess,
+    WorkspaceChangeKind, WorkspaceChangeState, WorkspaceOperation, WorkspacePreview,
 };
 
 use super::{AgentStreamContext, ApprovalResponse, agent_error};
@@ -36,6 +36,10 @@ pub fn execute_tools(
                 }
             };
             let mut preview = prepared.preview;
+            let proposed_change = workspace_change(&call, &preview, WorkspaceChangeState::Proposed);
+            if let Some(change) = proposed_change.clone() {
+                yield AgentRunEvent::WorkspaceChange(change);
+            }
             if prepared.operation.is_mutating() || preview.protected {
                 let approval = AgentApprovalRequest {
                     request_id: format!("{}-approval", call.id),
@@ -63,6 +67,10 @@ pub fn execute_tools(
                 yield AgentRunEvent::ApprovalRequired(approval.clone());
                 let decision = await_decision(&approvals, &approval.request_id).await;
                 if decision != AgentApprovalDecision::Approve {
+                    if let Some(mut change) = proposed_change {
+                        change.state = WorkspaceChangeState::Rejected;
+                        yield AgentRunEvent::WorkspaceChange(change);
+                    }
                     let output = rejected_output(&call.id, "the user rejected this operation");
                     record_result(
                         &context.store,
@@ -94,9 +102,12 @@ pub fn execute_tools(
                     };
                 }
             }
-            let output = finish_tool(&context, &prepared.call, preview)
+            let (output, change) = finish_tool(&context, &prepared.call, preview)
                 .await
                 .map_err(|error| agent_error(&provider_id, &error))?;
+            if let Some(change) = change {
+                yield AgentRunEvent::WorkspaceChange(change);
+            }
             yield AgentRunEvent::ToolResult(output);
         }
     })
@@ -150,7 +161,8 @@ async fn finish_tool(
     context: &AgentStreamContext,
     call: &AgentToolCall,
     preview: WorkspacePreview,
-) -> Result<AgentToolOutput, String> {
+) -> Result<(AgentToolOutput, Option<AgentWorkspaceChange>), String> {
+    let proposed = workspace_change(call, &preview, WorkspaceChangeState::Proposed);
     let output = if let Some(mutation) = preview.mutation {
         match context
             .workspace
@@ -180,7 +192,37 @@ async fn finish_tool(
         &output,
     )
     .await?;
-    Ok(output)
+    let change = proposed.map(|mut change| {
+        if output.is_error {
+            change.state = WorkspaceChangeState::Failed;
+            change.error = Some(output.output.clone());
+        } else {
+            change.state = WorkspaceChangeState::Committed;
+        }
+        change
+    });
+    Ok((output, change))
+}
+
+fn workspace_change(
+    call: &AgentToolCall,
+    preview: &WorkspacePreview,
+    state: WorkspaceChangeState,
+) -> Option<AgentWorkspaceChange> {
+    let mutation = preview.mutation.as_ref()?;
+    Some(AgentWorkspaceChange {
+        call_id: call.id.clone(),
+        path: mutation.path.clone(),
+        kind: if mutation.creates_file {
+            WorkspaceChangeKind::Create
+        } else {
+            WorkspaceChangeKind::Modify
+        },
+        content: String::from_utf8(mutation.replacement.clone()).ok()?,
+        diff: preview.diff.clone().unwrap_or_default(),
+        state,
+        error: None,
+    })
 }
 
 async fn record_failure(

@@ -16,7 +16,7 @@ impl SidebarView {
             .into_any_element()
     }
 
-    fn conversation_row(
+    pub(super) fn conversation_row(
         &self,
         conversation: &ConversationSummary,
         view: Entity<Self>,
@@ -378,6 +378,8 @@ impl SidebarView {
             .child(self.search_button(cx));
         let mut content = v_flex().w_full().gap(px(3.)).child(controls);
 
+        content = content.child(self.render_projects(&view, cx));
+
         if self.history_status.is_some() || self.conversations.is_empty() {
             return self.render_history_status(content, view, cx);
         }
@@ -385,7 +387,7 @@ impl SidebarView {
         let pinned: Vec<_> = self
             .conversations
             .iter()
-            .filter(|item| item.pinned)
+            .filter(|item| item.pinned && !self.belongs_to_registered_project(item))
             .collect();
         if !pinned.is_empty() {
             content = content.child(Self::section_label(
@@ -404,7 +406,7 @@ impl SidebarView {
         let recency: Vec<_> = self
             .conversations
             .iter()
-            .filter(|item| !item.pinned)
+            .filter(|item| !item.pinned && !self.belongs_to_registered_project(item))
             .collect();
         let limited_recency: Vec<_> = recency.iter().take(self.recency_limit).copied().collect();
         for period in ConversationPeriod::ALL {

@@ -18,7 +18,8 @@ pub use agent::{
     AgentActivity, AgentActivityKind, AgentActivityRecord, AgentApprovalDecision,
     AgentApprovalRequest, AgentContinuation, AgentProvider, AgentProviderEvent,
     AgentProviderStream, AgentRequest, AgentResumeRequest, AgentRunEvent, AgentRunStream,
-    AgentToolCall, AgentToolDefinition, AgentToolOutput, ConversationMode,
+    AgentToolCall, AgentToolDefinition, AgentToolOutput, AgentWorkspaceChange, ConversationMode,
+    WorkspaceChangeKind, WorkspaceChangeState,
 };
 pub use auth::{
     AuthenticationFuture, AuthorizationSession, ProviderAccount, ProviderAuthenticator,

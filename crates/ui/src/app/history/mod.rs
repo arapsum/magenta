@@ -45,6 +45,7 @@ impl MainView {
                         main.storage_ready = StorageState::Ready;
                         main.sidebar
                             .update(cx, |sidebar, cx| sidebar.set_history(summaries, cx));
+                        main.refresh_projects(cx);
                     }
                     Err(source) => {
                         main.storage_ready = StorageState::Failed;
@@ -118,8 +119,16 @@ impl MainView {
             self.composer.update(cx, |composer, cx| {
                 composer.set_conversation_context(ConversationMode::Chat, None, cx);
             });
-            self.sidebar
-                .update(cx, |sidebar, cx| sidebar.set_active(None, cx));
+            self.sidebar.update(cx, |sidebar, cx| {
+                sidebar.set_active(None, cx);
+                sidebar.set_active_project(None, cx);
+            });
+            self.workbench_open = false;
+            if let Some(workbench) = &self.workbench {
+                workbench.update(cx, |workbench, cx| {
+                    workbench.set_project(None, window, cx);
+                });
+            }
             self.update_composer_availability(cx);
             cx.notify();
             return;
@@ -281,7 +290,7 @@ impl MainView {
             && !self.conversation.read(cx).is_streaming()
     }
 
-    fn update_composer_availability(&self, cx: &mut Context<'_, Self>) {
+    pub(super) fn update_composer_availability(&self, cx: &mut Context<'_, Self>) {
         let ready = self.can_write(cx);
         self.composer
             .update(cx, |composer, cx| composer.set_storage_ready(ready, cx));

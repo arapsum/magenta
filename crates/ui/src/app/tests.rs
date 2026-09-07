@@ -156,6 +156,8 @@ fn summary(id: u64, title: &str) -> ConversationSummary {
         title: title.to_owned(),
         preview: format!("Preview for {title}"),
         pinned: false,
+        mode: ConversationMode::Chat,
+        workspace_root: None,
         created_at: Timestamp(0),
         updated_at: Timestamp(id.cast_signed()),
     }
@@ -181,6 +183,7 @@ fn setup(cx: &mut TestAppContext, ports: Arc<TestPorts>) -> TestWindow {
                     model_catalog: ports.clone(),
                     settings_store: ports.clone(),
                     agent: None,
+                    projects: None,
                 },
                 window,
                 cx,

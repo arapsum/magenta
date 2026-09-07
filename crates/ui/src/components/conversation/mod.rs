@@ -32,9 +32,9 @@ use gpui_component::{
 };
 use magenta_application::AgentApprovalController;
 use magenta_core::{
-    AgentActivityKind, AgentApprovalRequest, Conversation, GenerationConfig, GenerationEvent,
-    GenerationOutcome, GenerationStream, Message, MessageId, MessageRole, MessageStatus,
-    ProviderError, ProviderId,
+    AgentActivityKind, AgentApprovalRequest, AgentWorkspaceChange, Conversation, GenerationConfig,
+    GenerationEvent, GenerationOutcome, GenerationStream, Message, MessageId, MessageRole,
+    MessageStatus, ProviderError, ProviderId,
 };
 
 use crate::components::{
@@ -130,6 +130,7 @@ pub enum ConversationViewEvent {
     GenerationFinished(Message),
     LoadEarlier,
     Regenerate(MessageId),
+    WorkspaceChange(AgentWorkspaceChange),
 }
 
 struct RenderedMessage {

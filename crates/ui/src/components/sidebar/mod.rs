@@ -1,11 +1,17 @@
 mod account_dropdown;
 mod account_menu;
 mod model;
+mod projects;
 mod rendering;
 mod state;
 #[cfg(test)]
 mod tests;
 use state::{ConversationActionData, HistoryActionState, RenameState};
+
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, Context, ElementId, Entity, EventEmitter,
@@ -46,6 +52,9 @@ struct CancelConversationRename;
 pub struct SidebarView {
     collapsed: bool,
     conversations: Vec<ConversationSummary>,
+    projects: Vec<magenta_core::Project>,
+    expanded_projects: HashSet<PathBuf>,
+    active_project: Option<PathBuf>,
     active_conversation: Option<ConversationId>,
     finder_launcher_focus: FocusHandle,
     account: Option<ProviderAccount>,
@@ -68,6 +77,9 @@ impl SidebarView {
         Self {
             collapsed: false,
             conversations: Vec::new(),
+            projects: Vec::new(),
+            expanded_projects: HashSet::new(),
+            active_project: None,
             active_conversation: None,
             finder_launcher_focus: cx.focus_handle(),
             account: None,
@@ -138,6 +150,67 @@ impl SidebarView {
     fn select_conversation(id: ConversationId, cx: &mut Context<'_, Self>) {
         cx.emit(SidebarEvent::OpenConversation(id));
         cx.notify();
+    }
+
+    fn activate_project(&mut self, project: magenta_core::Project, cx: &mut Context<'_, Self>) {
+        self.expanded_projects.insert(project.root.clone());
+        self.active_project = Some(project.root.clone());
+        cx.emit(SidebarEvent::ActivateProject(project));
+        cx.notify();
+    }
+
+    fn project_conversations(&self, root: &Path) -> Vec<&ConversationSummary> {
+        self.conversations
+            .iter()
+            .filter(|conversation| {
+                conversation.mode == magenta_core::ConversationMode::Agent
+                    && conversation.workspace_root.as_deref() == Some(root)
+            })
+            .collect()
+    }
+
+    fn belongs_to_registered_project(&self, conversation: &ConversationSummary) -> bool {
+        conversation.mode == magenta_core::ConversationMode::Agent
+            && conversation
+                .workspace_root
+                .as_ref()
+                .is_some_and(|root| self.projects.iter().any(|project| project.root == *root))
+    }
+
+    pub(crate) fn set_projects(
+        &mut self,
+        projects: Vec<magenta_core::Project>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.projects = projects;
+        cx.notify();
+    }
+
+    pub(crate) fn set_active_project(&mut self, root: Option<PathBuf>, cx: &mut Context<'_, Self>) {
+        if let Some(root) = &root {
+            self.expanded_projects.insert(root.clone());
+        }
+        self.active_project = root;
+        cx.notify();
+    }
+
+    pub(crate) fn active_project(&self) -> Option<PathBuf> {
+        self.active_project.clone()
+    }
+
+    pub(crate) fn active_project_details(&self) -> Option<magenta_core::Project> {
+        let root = self.active_project.as_ref()?;
+        self.projects
+            .iter()
+            .find(|project| &project.root == root)
+            .cloned()
+    }
+
+    pub(crate) fn project_conversations_for(&self, root: &Path) -> Vec<ConversationSummary> {
+        self.project_conversations(root)
+            .into_iter()
+            .cloned()
+            .collect()
     }
 
     fn start_rename(

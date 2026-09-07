@@ -1,5 +1,5 @@
 use gpui::{App, SharedString};
-use gpui_component::{Theme, ThemeConfig, ThemeMode, ThemeRegistry};
+use gpui_component::{Theme, ThemeConfig, ThemeMode, ThemeRegistry, highlighter::HighlightTheme};
 use std::rc::Rc;
 
 use crate::{MagentaError, Result};
@@ -156,6 +156,7 @@ fn apply_default_dark(cx: &mut App) {
 
 fn apply_config(theme: Rc<ThemeConfig>, cx: &mut App) {
     let mode = theme.mode;
+    let has_custom_highlight = theme.highlight.is_some();
     let active_theme = Theme::global_mut(cx);
 
     if mode.is_dark() {
@@ -165,6 +166,13 @@ fn apply_config(theme: Rc<ThemeConfig>, cx: &mut App) {
     }
 
     Theme::change(mode, None, cx);
+    if !has_custom_highlight {
+        Theme::global_mut(cx).highlight_theme = if mode.is_dark() {
+            HighlightTheme::default_dark()
+        } else {
+            HighlightTheme::default_light()
+        };
+    }
     cx.refresh_windows();
 }
 

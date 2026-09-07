@@ -1,4 +1,5 @@
 use super::*;
+use gpui_component::resizable::{h_resizable, resizable_panel};
 
 impl MainView {
     fn titlebar_controls(&self, cx: &Context<'_, Self>) -> AnyElement {
@@ -37,15 +38,60 @@ impl MainView {
                     .read(cx)
                     .model_selector(self.composer.clone(), cx),
             )
+            .when(
+                self.workbench.is_some() && self.sidebar.read(cx).active_project().is_some(),
+                |this| {
+                    let open = self.workbench_open;
+                    this.child(
+                        Button::new("toggle-code-workbench")
+                            .ghost()
+                            .small()
+                            .child(Icon::empty().path("icons/code.svg").xsmall())
+                            .label(if open { "Conversation" } else { "Code" })
+                            .tooltip(if open {
+                                "Show conversation"
+                            } else {
+                                "Show code"
+                            })
+                            .on_click(cx.listener(|main, _, _, cx| {
+                                main.workbench_open = !main.workbench_open;
+                                cx.notify();
+                            })),
+                    )
+                },
+            )
             .into_any_element()
     }
 
-    fn conversation_content(&self, cx: &Context<'_, Self>) -> AnyElement {
-        if self.active_conversation.is_some() {
+    fn conversation_content(&self, narrow: bool, cx: &Context<'_, Self>) -> AnyElement {
+        let conversation = if self.active_conversation.is_some() {
             self.conversation.clone().into_any_element()
         } else {
             workspace::render(self.composer.clone(), &self.sidebar, cx)
+        };
+        let Some(workbench) = self.workbench.as_ref() else {
+            return conversation;
+        };
+        if !self.workbench_open {
+            return conversation;
         }
+        if narrow {
+            return workbench.clone().into_any_element();
+        }
+        h_resizable("conversation-workbench")
+            .child(
+                resizable_panel()
+                    .size(px(620.))
+                    .size_range(px(360.)..px(900.))
+                    .child(conversation),
+            )
+            .child(
+                resizable_panel()
+                    .size(px(760.))
+                    .size_range(px(280.)..px(900.))
+                    .child(workbench.clone()),
+            )
+            .into_any_element()
     }
 
     fn main_panel(&self, content: AnyElement, narrow: bool, cx: &Context<'_, Self>) -> AnyElement {
@@ -162,8 +208,8 @@ impl MainView {
 impl Render for MainView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let _ = &self.subscriptions;
-        let content = self.conversation_content(cx);
         let narrow = window.viewport_size().width < px(696.);
+        let content = self.conversation_content(narrow, cx);
         let sidebar_collapsed = self.sidebar.read(cx).is_collapsed();
         let show_sidebar = !narrow && !sidebar_collapsed;
         self.render_frame(content, narrow, show_sidebar, cx)

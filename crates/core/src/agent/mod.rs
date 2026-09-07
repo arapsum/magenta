@@ -106,8 +106,34 @@ pub enum AgentRunEvent {
     TextDelta(String),
     ToolCall(AgentToolCall),
     ToolResult(AgentToolOutput),
+    WorkspaceChange(AgentWorkspaceChange),
     ApprovalRequired(AgentApprovalRequest),
     Completed(GenerationOutcome),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkspaceChangeKind {
+    Create,
+    Modify,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkspaceChangeState {
+    Proposed,
+    Committed,
+    Rejected,
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentWorkspaceChange {
+    pub call_id: String,
+    pub path: String,
+    pub kind: WorkspaceChangeKind,
+    pub content: String,
+    pub diff: String,
+    pub state: WorkspaceChangeState,
+    pub error: Option<String>,
 }
 
 pub type AgentRunStream =

@@ -35,6 +35,8 @@ pub struct ConversationSummary {
     pub updated: String,
     pub period: ConversationPeriod,
     pub pinned: bool,
+    pub mode: magenta_core::ConversationMode,
+    pub workspace_root: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,92 +51,41 @@ pub enum SidebarEvent {
     SetPinned(ConversationId, bool),
     DeleteConversation(ConversationId),
     RetryHistory,
+    AddProject,
+    ActivateProject(magenta_core::Project),
+    ForgetProject(std::path::PathBuf),
 }
 
 #[cfg(test)]
 pub fn demo_conversations() -> Vec<ConversationSummary> {
-    vec![
-        ConversationSummary {
-            id: ConversationId(1),
-            title: "Designing Magenta's provider boundary".to_owned(),
-            preview: "How should the provider boundary stay extensible?".to_owned(),
-            updated: "3d".to_owned(),
-            period: ConversationPeriod::PreviousSevenDays,
-            pinned: true,
-        },
-        ConversationSummary {
-            id: ConversationId(2),
-            title: "Native Markdown rendering".to_owned(),
-            preview: "How can Markdown render natively in GPUI?".to_owned(),
-            updated: "5d".to_owned(),
-            period: ConversationPeriod::PreviousSevenDays,
-            pinned: true,
-        },
-        ConversationSummary {
-            id: ConversationId(3),
-            title: "Reducing idle memory usage".to_owned(),
-            preview: "What should remain resident while Magenta is idle?".to_owned(),
-            updated: "2h".to_owned(),
-            period: ConversationPeriod::Today,
-            pinned: false,
-        },
-        ConversationSummary {
-            id: ConversationId(4),
-            title: "Streaming responses in GPUI".to_owned(),
-            preview: "How should streaming updates invalidate the view?".to_owned(),
-            updated: "5h".to_owned(),
-            period: ConversationPeriod::Today,
-            pinned: false,
-        },
-        ConversationSummary {
-            id: ConversationId(5),
-            title: "SQLite conversation schema".to_owned(),
-            preview: "Which conversation fields belong in SQLite?".to_owned(),
-            updated: "1d".to_owned(),
-            period: ConversationPeriod::Yesterday,
-            pinned: false,
-        },
-        ConversationSummary {
-            id: ConversationId(6),
-            title: "Keyboard shortcut map".to_owned(),
-            preview: "Which shortcuts should the first release support?".to_owned(),
-            updated: "1d".to_owned(),
-            period: ConversationPeriod::Yesterday,
-            pinned: false,
-        },
-        ConversationSummary {
-            id: ConversationId(7),
-            title: "Cross-provider model mapping".to_owned(),
-            preview: "How should model capabilities map across providers?".to_owned(),
-            updated: "3d".to_owned(),
-            period: ConversationPeriod::PreviousSevenDays,
-            pinned: false,
-        },
-        ConversationSummary {
-            id: ConversationId(8),
-            title: "Accessible code blocks".to_owned(),
-            preview: "How can code blocks remain readable and accessible?".to_owned(),
-            updated: "5d".to_owned(),
-            period: ConversationPeriod::PreviousSevenDays,
-            pinned: false,
-        },
-        ConversationSummary {
-            id: ConversationId(9),
-            title: "Linux window integration".to_owned(),
-            preview: "What native window behavior do we need on Linux?".to_owned(),
-            updated: "8d".to_owned(),
-            period: ConversationPeriod::Older,
-            pinned: false,
-        },
-        ConversationSummary {
-            id: ConversationId(10),
-            title: "Conversation persistence boundaries".to_owned(),
-            preview: "Where should durable state stop at the application boundary?".to_owned(),
-            updated: "12d".to_owned(),
-            period: ConversationPeriod::Older,
-            pinned: false,
-        },
+    [
+        (1, "Designing Magenta's provider boundary", "3d", true),
+        (2, "Native Markdown rendering", "5d", true),
+        (3, "Reducing idle memory usage", "2h", false),
+        (4, "Streaming responses in GPUI", "5h", false),
+        (5, "SQLite conversation schema", "1d", false),
+        (6, "Keyboard shortcut map", "1d", false),
+        (7, "Cross-provider model mapping", "3d", false),
+        (8, "Accessible code blocks", "5d", false),
+        (9, "Linux window integration", "8d", false),
+        (10, "Conversation persistence boundaries", "12d", false),
     ]
+    .into_iter()
+    .map(|(id, title, updated, pinned)| ConversationSummary {
+        id: ConversationId(id),
+        title: title.to_owned(),
+        preview: String::new(),
+        updated: updated.to_owned(),
+        period: if updated.ends_with('h') {
+            ConversationPeriod::Today
+        } else {
+            ConversationPeriod::PreviousSevenDays
+        },
+        pinned,
+        mode: magenta_core::ConversationMode::Chat,
+        workspace_root: None,
+    })
+    .collect()
 }
 
 impl From<magenta_core::ConversationSummary> for ConversationSummary {
@@ -173,6 +124,8 @@ impl From<magenta_core::ConversationSummary> for ConversationSummary {
             updated,
             period,
             pinned: summary.pinned,
+            mode: summary.mode,
+            workspace_root: summary.workspace_root,
         }
     }
 }

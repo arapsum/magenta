@@ -164,6 +164,9 @@ impl ConversationView {
                     cx,
                 );
             }
+            AgentRunEvent::WorkspaceChange(change) => {
+                cx.emit(ConversationViewEvent::WorkspaceChange(change));
+            }
             AgentRunEvent::Completed(outcome) => return AgentStreamControl::Completed(outcome),
         }
         AgentStreamControl::Continue

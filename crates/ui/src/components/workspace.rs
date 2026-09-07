@@ -1,9 +1,10 @@
 use gpui::{AnyElement, Context, Entity, IntoElement, ParentElement as _, Styled as _, div, px};
 use gpui_component::{
-    ActiveTheme as _, StyledExt as _,
+    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     h_flex, v_flex,
 };
+use magenta_core::Project;
 
 use crate::app::MainView;
 use crate::components::{
@@ -84,19 +85,31 @@ fn render_recent_rows(
     rows.into_any_element()
 }
 
-#[must_use]
-pub fn render(
-    composer: Entity<PromptComposer>,
+fn render_landing_copy(
+    project: Option<&Project>,
+    recent: Vec<ConversationSummary>,
+    show_recent: bool,
     sidebar: &Entity<SidebarView>,
     cx: &Context<'_, MainView>,
 ) -> AnyElement {
-    let show_recent = sidebar.read(cx).history_available();
-    let recent = if show_recent {
-        sidebar.read(cx).recent_conversations()
-    } else {
-        Vec::new()
-    };
+    let has_recent = !recent.is_empty();
     let recent_rows = render_recent_rows(recent, sidebar, cx);
+    let (heading, description, section_label) = project.as_ref().map_or_else(
+        || {
+            (
+                "Where were we?".to_owned(),
+                "Nothing here yet. Ask anything, or pick up a thread.".to_owned(),
+                "CONTINUE",
+            )
+        },
+        |project| {
+            (
+                format!("Ready to work in {}", project.name),
+                "Ask the agent to inspect, create, or edit files in this workspace.".to_owned(),
+                "PROJECT THREADS",
+            )
+        },
+    );
 
     let mut copy = v_flex()
         .w_full()
@@ -104,32 +117,74 @@ pub fn render(
         .items_start()
         .gap(px(8.))
         .child(
-            div()
-                .text_size(px(28.))
-                .line_height(px(34.))
-                .font_semibold()
-                .child("Where were we?"),
+            h_flex()
+                .items_center()
+                .gap(px(9.))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(30.))
+                        .rounded(px(9.))
+                        .bg(cx.theme().sidebar_accent)
+                        .text_color(cx.theme().sidebar_accent_foreground)
+                        .child(
+                            Icon::new(if project.is_some() {
+                                IconName::FolderOpen
+                            } else {
+                                IconName::Bot
+                            })
+                            .small(),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_size(px(28.))
+                        .line_height(px(34.))
+                        .font_semibold()
+                        .child(heading),
+                ),
         )
         .child(
             div()
                 .text_size(px(13.))
                 .line_height(px(20.))
                 .text_color(cx.theme().muted_foreground)
-                .child("Nothing here yet. Ask anything, or pick up a thread."),
+                .child(description),
         );
-    if show_recent {
+    if let Some(project) = project {
+        copy = copy.child(
+            h_flex()
+                .gap(px(7.))
+                .items_center()
+                .mt(px(8.))
+                .text_size(px(11.))
+                .text_color(cx.theme().muted_foreground)
+                .child(Icon::new(IconName::Folder).xsmall())
+                .child(project.root.display().to_string()),
+        );
+    }
+    if (project.is_some() && has_recent) || (project.is_none() && show_recent) {
         copy = copy
             .child(
                 div()
-                    .mt(px(30.))
+                    .mt(px(26.))
                     .text_size(px(10.))
                     .font_medium()
                     .text_color(cx.theme().muted_foreground)
-                    .child("CONTINUE"),
+                    .child(section_label),
             )
             .child(recent_rows);
     }
+    copy.into_any_element()
+}
 
+fn render_landing_shell(
+    copy: AnyElement,
+    composer: Entity<PromptComposer>,
+    cx: &Context<'_, MainView>,
+) -> AnyElement {
     div()
         .relative()
         .flex()
@@ -159,4 +214,27 @@ pub fn render(
                 .child(div().w_full().max_w(px(608.)).mx_auto().child(composer)),
         )
         .into_any_element()
+}
+
+#[must_use]
+pub fn render(
+    composer: Entity<PromptComposer>,
+    sidebar: &Entity<SidebarView>,
+    cx: &Context<'_, MainView>,
+) -> AnyElement {
+    let sidebar_state = sidebar.read(cx);
+    let project = sidebar_state.active_project_details();
+    let show_recent = sidebar_state.history_available();
+    let recent = project.as_ref().map_or_else(
+        || {
+            if show_recent {
+                sidebar_state.recent_conversations()
+            } else {
+                Vec::new()
+            }
+        },
+        |project| sidebar_state.project_conversations_for(&project.root),
+    );
+    let copy = render_landing_copy(project.as_ref(), recent, show_recent, sidebar, cx);
+    render_landing_shell(copy, composer, cx)
 }

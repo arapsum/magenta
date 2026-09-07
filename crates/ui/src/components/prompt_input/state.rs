@@ -56,6 +56,7 @@ pub struct PromptRequest {
 pub enum PromptComposerEvent {
     Submit(PromptRequest),
     Cancel,
+    WorkspaceSelected(PathBuf),
 }
 
 pub struct PromptComposer {
@@ -208,6 +209,14 @@ impl PromptComposer {
         };
         self.workspace_root = workspace_root;
         cx.notify();
+    }
+
+    pub(crate) fn activate_workspace(&mut self, root: PathBuf, cx: &mut Context<'_, Self>) {
+        if self.agent_available {
+            self.mode = ConversationMode::Agent;
+            self.workspace_root = Some(root);
+            cx.notify();
+        }
     }
 
     pub(crate) fn set_storage_ready(&mut self, ready: bool, cx: &mut Context<'_, Self>) {
@@ -376,6 +385,9 @@ impl PromptComposer {
                 composer.workspace_root = selection
                     .and_then(|paths| paths.into_iter().next())
                     .filter(|path| path.is_dir());
+                if let Some(root) = composer.workspace_root.clone() {
+                    cx.emit(PromptComposerEvent::WorkspaceSelected(root));
+                }
                 cx.notify();
             });
         }));

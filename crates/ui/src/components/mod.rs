@@ -1,3 +1,4 @@
+pub mod agent_workbench;
 mod code_fence;
 pub mod conversation;
 mod inline_code;

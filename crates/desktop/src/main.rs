@@ -9,7 +9,9 @@ use gpui::{
 #[cfg(target_os = "linux")]
 use gpui::{WindowBackgroundAppearance, WindowDecorations};
 use gpui_component::Root;
-use magenta_application::{ConversationHistory, RegenerateMessage, RunWorkspaceAgent, SendMessage};
+use magenta_application::{
+    ConversationHistory, ProjectCatalog, RegenerateMessage, RunWorkspaceAgent, SendMessage,
+};
 use magenta_core::{
     AgentProvider, ChatProvider, ConversationStore, ModelCatalog, ProviderAuthenticator,
     SettingsStore, WorkspaceAccess,
@@ -36,6 +38,7 @@ impl AssetSource for MagentaAssets {
             "icons/generation-stop.svg" => {
                 Some(include_bytes!("../assets/icons/generation-stop.svg").as_slice())
             }
+            "icons/code.svg" => Some(include_bytes!("../assets/icons/code.svg").as_slice()),
             _ => None,
         };
 
@@ -53,6 +56,7 @@ impl AssetSource for MagentaAssets {
                 "icons/conversation-rename.svg".into(),
                 "icons/conversation-delete.svg".into(),
                 "icons/generation-stop.svg".into(),
+                "icons/code.svg".into(),
             ]);
         }
         Ok(assets)
@@ -175,10 +179,11 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
             std::io::Error::other("local data directory unavailable"),
         ),
     })?;
-    let store: Arc<dyn ConversationStore> =
-        Arc::new(magenta_storage::SqliteConversationStore::new(
-            data_dir.join("magenta/conversations.sqlite3"),
-        ));
+    let sqlite_store = Arc::new(magenta_storage::SqliteConversationStore::new(
+        data_dir.join("magenta/conversations.sqlite3"),
+    ));
+    let store: Arc<dyn ConversationStore> = sqlite_store.clone();
+    let project_store: Arc<dyn magenta_core::ProjectStore> = sqlite_store;
     let config_dir = dirs::config_dir().ok_or_else(|| MagentaError::StorageInitialize {
         source: magenta_core::StorageError::new(
             magenta_core::StorageErrorKind::Unavailable,
@@ -192,7 +197,10 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     let regenerate_provider = Arc::clone(&chat_provider);
     let regenerate_store = Arc::clone(&store);
     let regenerate_message = RegenerateMessage::new(regenerate_provider, regenerate_store);
-    let workspace: Arc<dyn WorkspaceAccess> = Arc::new(LocalWorkspace);
+    let local_workspace = Arc::new(LocalWorkspace);
+    let workspace: Arc<dyn WorkspaceAccess> = local_workspace.clone();
+    let workspace_browser: Arc<dyn magenta_core::WorkspaceBrowser> = local_workspace;
+    let projects = ProjectCatalog::new(project_store, workspace_browser);
     let agent = RunWorkspaceAgent::new(agent_provider, Arc::clone(&store), workspace);
     let history = ConversationHistory::new(store);
     cx.open_window(window_options, move |window, cx| {
@@ -206,6 +214,7 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
                     model_catalog: Arc::clone(&model_catalog),
                     settings_store: Arc::clone(&settings_store),
                     agent: Some(agent),
+                    projects: Some(projects),
                 },
                 window,
                 cx,
