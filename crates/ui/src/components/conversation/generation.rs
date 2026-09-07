@@ -71,7 +71,7 @@ impl ConversationView {
         cx.emit(ConversationViewEvent::GenerationStarted);
     }
 
-    fn start_generation_clock(
+    pub(super) fn start_generation_clock(
         &mut self,
         generation: u64,
         assistant_id: MessageId,
@@ -183,7 +183,7 @@ impl ConversationView {
         cx.notify();
     }
 
-    fn finish_stream(
+    pub(super) fn finish_stream(
         &mut self,
         generation: u64,
         assistant_id: MessageId,
@@ -195,6 +195,7 @@ impl ConversationView {
         }
 
         let progress = self.clear_generation_progress();
+        self.clear_agent_state();
         if let Some(progress) = progress.as_ref() {
             trace_generation_terminal(progress, "completed");
         }
@@ -220,7 +221,7 @@ impl ConversationView {
         cx.notify();
     }
 
-    fn fail_stream(
+    pub(super) fn fail_stream(
         &mut self,
         generation: u64,
         assistant_id: MessageId,
@@ -234,6 +235,7 @@ impl ConversationView {
 
         let provider = error.provider.clone();
         let progress = self.clear_generation_progress();
+        self.clear_agent_state();
         let model = progress
             .as_ref()
             .and_then(|progress| progress.configuration.as_ref())
@@ -283,11 +285,13 @@ impl ConversationView {
         let Some(assistant_id) = self.streaming_message.take() else {
             self.generation_task.take();
             self.clear_generation_progress();
+            self.clear_agent_state();
             return;
         };
 
         self.generation = self.generation.wrapping_add(1);
         self.generation_task.take();
+        self.clear_agent_state();
         if let Some(progress) = self.clear_generation_progress().as_ref() {
             trace_generation_terminal(progress, "stopped");
         }
@@ -313,5 +317,10 @@ impl ConversationView {
     pub(super) fn clear_generation_progress(&mut self) -> Option<GenerationProgress> {
         self.generation_clock_task.take();
         self.generation_progress.take()
+    }
+
+    pub(super) fn clear_agent_state(&mut self) {
+        self.agent_controller.take();
+        self.pending_agent_approval.take();
     }
 }

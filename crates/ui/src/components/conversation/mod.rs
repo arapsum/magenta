@@ -1,3 +1,4 @@
+mod agent;
 mod generation;
 mod rendering;
 mod state;
@@ -25,12 +26,15 @@ use gpui_component::{
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     h_flex,
+    scroll::ScrollableElement as _,
     text::{TextView, TextViewState, TextViewStyle},
     v_flex,
 };
+use magenta_application::AgentApprovalController;
 use magenta_core::{
-    Conversation, GenerationConfig, GenerationEvent, GenerationOutcome, GenerationStream, Message,
-    MessageId, MessageRole, MessageStatus, ProviderError, ProviderId,
+    AgentActivityKind, AgentApprovalRequest, Conversation, GenerationConfig, GenerationEvent,
+    GenerationOutcome, GenerationStream, Message, MessageId, MessageRole, MessageStatus,
+    ProviderError, ProviderId,
 };
 
 use crate::components::{
@@ -159,6 +163,8 @@ pub struct ConversationView {
     generation_task: Option<Task<()>>,
     generation_clock_task: Option<Task<()>>,
     generation_progress: Option<GenerationProgress>,
+    agent_controller: Option<AgentApprovalController>,
+    pending_agent_approval: Option<(MessageId, AgentApprovalRequest)>,
     older_cursor: Option<magenta_core::MessageSequence>,
     has_older: bool,
     loading_earlier: bool,
@@ -243,8 +249,7 @@ impl Render for ConversationView {
             })
             .child(
                 list(list_state, move |index, window, cx| {
-                    view.read(cx)
-                        .render_message(index, window, cx, view.clone())
+                    view.read(cx).render_message(index, window, cx, &view)
                 })
                 .with_sizing_behavior(ListSizingBehavior::Auto)
                 .flex_grow_1()

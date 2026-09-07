@@ -3,7 +3,7 @@ mod operations;
 use gpui::{Context, Window};
 use gpui_component::WindowExt as _;
 use magenta_application::{SendMessageInput, SendTarget};
-use magenta_core::{AttachmentDraft, ConversationId, MessageStatus};
+use magenta_core::{AttachmentDraft, ConversationId, ConversationMode, MessageStatus};
 
 use super::{AccountState, CloseState, MainView, StorageState};
 use crate::{MagentaError, components::prompt_input::PromptRequest, notification_for_error};
@@ -115,6 +115,9 @@ impl MainView {
         let Navigation::Conversation(id) = id else {
             self.active_conversation = None;
             self.conversation.update(cx, super::ConversationView::clear);
+            self.composer.update(cx, |composer, cx| {
+                composer.set_conversation_context(ConversationMode::Chat, None, cx);
+            });
             self.sidebar
                 .update(cx, |sidebar, cx| sidebar.set_active(None, cx));
             self.update_composer_availability(cx);
@@ -137,6 +140,11 @@ impl MainView {
                     Ok(loaded) => {
                         main.composer.update(cx, |composer, cx| {
                             composer.set_configuration(&loaded.conversation.generation, cx);
+                            composer.set_conversation_context(
+                                loaded.conversation.mode.clone(),
+                                loaded.conversation.workspace_root.clone(),
+                                cx,
+                            );
                         });
                         main.conversation
                             .update(cx, |view, cx| view.load_page(loaded, cx));
@@ -199,7 +207,7 @@ impl MainView {
     pub(super) fn submit(
         &mut self,
         request: &PromptRequest,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
         if !matches!(self.account_state, AccountState::Connected(_)) {
@@ -207,6 +215,10 @@ impl MainView {
             return;
         }
         if !self.can_write(cx) {
+            return;
+        }
+        if request.mode == ConversationMode::Agent {
+            self.submit_agent(request, window, cx);
             return;
         }
         let workflow = self.send_message.clone();
@@ -229,6 +241,8 @@ impl MainView {
                 })
                 .collect(),
             generation: request.generation.clone(),
+            mode: ConversationMode::Chat,
+            workspace_root: None,
         };
         self.operation = Operation::Preparing;
         self.update_composer_availability(cx);

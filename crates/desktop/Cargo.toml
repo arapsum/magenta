@@ -14,6 +14,7 @@ magenta-core.workspace = true
 magenta-providers.workspace = true
 magenta-storage.workspace = true
 magenta-ui.workspace = true
+magenta-workspace.workspace = true
 gpui.workspace = true
 gpui_platform.workspace = true
 gpui-component.workspace = true

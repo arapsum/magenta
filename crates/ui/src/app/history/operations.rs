@@ -1,11 +1,79 @@
 use gpui::{Context, Window};
-use magenta_application::{PendingGeneration, RegenerateMessageInput};
+use magenta_application::{
+    AgentSendTarget, PendingAgentGeneration, PendingGeneration, RegenerateMessageInput,
+    RunWorkspaceAgentInput,
+};
 use magenta_core::{ConversationId, Message, MessageId};
 
 use super::{AccountState, CloseState, MainView, Operation};
 use crate::{MagentaError, components::conversation::ConversationThread};
 
 impl MainView {
+    pub(super) fn submit_agent(
+        &mut self,
+        request: &crate::components::prompt_input::PromptRequest,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(agent) = self.agent.clone() else {
+            Self::present_storage_error(
+                &MagentaError::SendMessage {
+                    source: magenta_application::SendMessageError::WorkspaceUnavailable,
+                },
+                window,
+                cx,
+            );
+            return;
+        };
+        let Some(workspace_root) = request.workspace_root.clone() else {
+            Self::present_storage_error(
+                &MagentaError::SendMessage {
+                    source: magenta_application::SendMessageError::WorkspaceUnavailable,
+                },
+                window,
+                cx,
+            );
+            return;
+        };
+
+        let input = RunWorkspaceAgentInput {
+            target: self
+                .active_conversation
+                .map_or(AgentSendTarget::New, AgentSendTarget::Existing),
+            prompt: request.prompt.to_string(),
+            generation: request.generation.clone(),
+            workspace_root,
+        };
+        let submitted = request.clone();
+        self.operation = Operation::Preparing;
+        self.update_composer_availability(cx);
+        self.operation_task = Some(cx.spawn_in(window, async move |view, window| {
+            let result = agent.execute(input).await;
+            _ = view.update_in(window, |main, window, cx| {
+                main.operation_task = None;
+                main.operation = Operation::Idle;
+                match result {
+                    Ok(pending) => {
+                        main.composer.update(cx, |composer, cx| {
+                            composer.clear_submitted(&submitted, window, cx);
+                        });
+                        main.start_agent_pending(pending, window, cx);
+                    }
+                    Err(source) => {
+                        Self::present_storage_error(
+                            &MagentaError::SendMessage { source },
+                            window,
+                            cx,
+                        );
+                        main.continue_navigation(window, cx);
+                    }
+                }
+                main.update_composer_availability(cx);
+                cx.notify();
+            });
+        }));
+    }
+
     pub(super) fn start_pending(
         &mut self,
         pending: PendingGeneration,
@@ -14,6 +82,7 @@ impl MainView {
     ) {
         let id = pending.conversation.id;
         let provider = pending.conversation.generation.provider.clone();
+        let conversation = pending.conversation.clone();
         if self.active_conversation.is_none() {
             self.conversation.update(cx, |view, cx| {
                 view.load(
@@ -26,7 +95,7 @@ impl MainView {
             });
         } else {
             self.conversation.update(cx, |view, cx| {
-                view.set_generation(pending.conversation.generation, cx);
+                view.set_generation(conversation.generation.clone(), cx);
             });
         }
         self.active_conversation = Some(id);
@@ -41,6 +110,41 @@ impl MainView {
                 window,
                 cx,
             );
+        });
+        self.refresh_summaries(window, cx);
+        if self.deferred_navigation.is_some() || self.close_requested.is_requested() {
+            self.cancel_generation(cx);
+        }
+    }
+
+    pub(super) fn start_agent_pending(
+        &mut self,
+        pending: PendingAgentGeneration,
+        window: &Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let id = pending.conversation.id;
+        let conversation = pending.conversation.clone();
+        if self.active_conversation.is_none() {
+            self.conversation.update(cx, |view, cx| {
+                view.load(
+                    ConversationThread {
+                        conversation: conversation.clone(),
+                        messages: Vec::new(),
+                    },
+                    cx,
+                );
+            });
+        } else {
+            self.conversation.update(cx, |view, cx| {
+                view.set_generation(conversation.generation.clone(), cx);
+            });
+        }
+        self.active_conversation = Some(id);
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.set_active(Some(id), cx));
+        self.conversation.update(cx, |view, cx| {
+            view.start_agent_generation(pending, window, cx);
         });
         self.refresh_summaries(window, cx);
         if self.deferred_navigation.is_some() || self.close_requested.is_requested() {

@@ -81,6 +81,9 @@ impl ConversationStore for TestPorts {
     fn set_pinned(&self, _: ConversationId, _: bool) -> StorageFuture<()> {
         failure()
     }
+    fn append_agent_activity(&self, _: AgentActivityRecord) -> StorageFuture<()> {
+        failure()
+    }
 }
 
 impl ChatProvider for TestPorts {
@@ -136,6 +139,8 @@ fn page(id: u64) -> ConversationPage {
                 ModelId::new("model"),
                 EffortLevel::Medium,
             ),
+            mode: ConversationMode::Chat,
+            workspace_root: None,
         },
         page: MessagePage {
             messages: Vec::new(),
@@ -175,6 +180,7 @@ fn setup(cx: &mut TestAppContext, ports: Arc<TestPorts>) -> TestWindow {
                     authenticator: ports.clone(),
                     model_catalog: ports.clone(),
                     settings_store: ports.clone(),
+                    agent: None,
                 },
                 window,
                 cx,
@@ -272,6 +278,7 @@ fn failed_finalization_retains_response_until_retry_before_navigation(cx: &mut T
         status: MessageStatus::Complete,
         attachments: Vec::new(),
         generation_outcome: None,
+        agent_activities: Vec::new(),
     };
     window
         .update(cx, |_, window, cx| {

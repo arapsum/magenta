@@ -13,10 +13,72 @@ use gpui_component::{
     text::{TextView, TextViewStyle},
     v_flex,
 };
+use magenta_core::ConversationMode;
 
 use super::{MAX_ATTACHMENTS, PromptComposer};
 
 impl PromptComposer {
+    fn mode_selector(&self, view: Entity<Self>) -> AnyElement {
+        let mode = self.mode.clone();
+        let agent_available = self.agent_available;
+        let label = match mode {
+            ConversationMode::Chat => "Chat",
+            ConversationMode::Agent => "Agent",
+        };
+
+        option_button("prompt-mode", label, IconName::Bot)
+            .accessibility_id("prompt-mode-selector")
+            .dropdown_menu(move |menu, window, _cx| {
+                let chat_view = view.clone();
+                let agent_view = view.clone();
+                menu.min_w(px(170.))
+                    .label("Run mode")
+                    .item(
+                        PopupMenuItem::new("Chat")
+                            .checked(mode == ConversationMode::Chat)
+                            .on_click(window.listener_for(&chat_view, |composer, _, _, cx| {
+                                composer.select_mode(ConversationMode::Chat, cx);
+                            })),
+                    )
+                    .item(
+                        PopupMenuItem::new("Agent")
+                            .checked(mode == ConversationMode::Agent)
+                            .disabled(!agent_available)
+                            .on_click(window.listener_for(&agent_view, |composer, _, _, cx| {
+                                composer.select_mode(ConversationMode::Agent, cx);
+                            })),
+                    )
+            })
+            .into_any_element()
+    }
+
+    fn workspace_button(&self, view: Entity<Self>, cx: &Context<'_, Self>) -> AnyElement {
+        let label = self
+            .workspace_root
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str())
+            .map_or_else(
+                || "Choose workspace".to_owned(),
+                |name| format!("Workspace · {name}"),
+            );
+        let button = Button::new("prompt-workspace")
+            .compact()
+            .h(px(28.))
+            .px(px(8.))
+            .rounded(px(6.))
+            .label(label)
+            .tooltip("Choose the workspace this agent can access")
+            .on_click(move |_, window, cx| {
+                view.update(cx, |composer, cx| composer.choose_workspace(window, cx));
+            });
+        button
+            .when(self.workspace_root.is_none(), |button| {
+                button.text_color(cx.theme().warning)
+            })
+            .into_any_element()
+    }
+
     fn attachment_strip(&self, cx: &Context<'_, Self>) -> impl IntoElement {
         let view = cx.entity();
 
@@ -226,6 +288,69 @@ impl PromptComposer {
                     ),
             )
     }
+
+    fn footer(
+        &self,
+        submit_view: Entity<Self>,
+        generating: bool,
+        ready: bool,
+        can_add_attachment: bool,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        h_flex()
+            .w_full()
+            .h(px(30.))
+            .items_center()
+            .justify_between()
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .when(can_add_attachment, |this| {
+                        this.child(Self::attachment_button(cx))
+                    })
+                    .child(self.mode_selector(submit_view.clone()))
+                    .when(self.mode == ConversationMode::Agent, |this| {
+                        this.child(self.workspace_button(submit_view.clone(), cx))
+                    }),
+            )
+            .child(
+                Button::new("prompt-submit")
+                    .when(generating, ButtonVariants::secondary)
+                    .when(!generating, ButtonVariants::primary)
+                    .disabled(!ready && !generating)
+                    .accessibility_id(if generating {
+                        "prompt-stop-response"
+                    } else {
+                        "prompt-submit"
+                    })
+                    .tooltip(if generating {
+                        "Stop response"
+                    } else if ready {
+                        "Send message"
+                    } else {
+                        "Add a message before sending"
+                    })
+                    .size(px(30.))
+                    .p_0()
+                    .rounded_full()
+                    .icon(if generating {
+                        Icon::empty().path("icons/generation-stop.svg")
+                    } else {
+                        Icon::new(IconName::ChevronUp)
+                    })
+                    .on_click(move |_, _window, cx| {
+                        submit_view.update(cx, |composer, cx| {
+                            if generating {
+                                composer.cancel(cx);
+                            } else {
+                                composer.submit(cx);
+                            }
+                        });
+                    }),
+            )
+            .into_any_element()
+    }
 }
 
 impl Render for PromptComposer {
@@ -278,51 +403,7 @@ impl Render for PromptComposer {
                             .line_height(px(20.)),
                     ),
             )
-            .child(
-                h_flex()
-                    .w_full()
-                    .h(px(30.))
-                    .items_center()
-                    .justify_between()
-                    .child(h_flex().items_center().when(can_add_attachment, |this| {
-                        this.child(Self::attachment_button(cx))
-                    }))
-                    .child(
-                        Button::new("prompt-submit")
-                            .when(generating, ButtonVariants::secondary)
-                            .when(!generating, ButtonVariants::primary)
-                            .disabled(!ready && !generating)
-                            .accessibility_id(if generating {
-                                "prompt-stop-response"
-                            } else {
-                                "prompt-submit"
-                            })
-                            .tooltip(if generating {
-                                "Stop response"
-                            } else if ready {
-                                "Send message"
-                            } else {
-                                "Add a message before sending"
-                            })
-                            .size(px(30.))
-                            .p_0()
-                            .rounded_full()
-                            .icon(if generating {
-                                Icon::empty().path("icons/generation-stop.svg")
-                            } else {
-                                Icon::new(IconName::ChevronUp)
-                            })
-                            .on_click(move |_, _window, cx| {
-                                submit_view.update(cx, |composer, cx| {
-                                    if generating {
-                                        composer.cancel(cx);
-                                    } else {
-                                        composer.submit(cx);
-                                    }
-                                });
-                            }),
-                    ),
-            )
+            .child(self.footer(submit_view, generating, ready, can_add_attachment, cx))
     }
 }
 

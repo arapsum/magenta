@@ -22,7 +22,7 @@ use gpui_component::{
     scroll::ScrollableElement as _,
     v_flex,
 };
-use magenta_application::{ConversationHistory, RegenerateMessage, SendMessage};
+use magenta_application::{ConversationHistory, RegenerateMessage, RunWorkspaceAgent, SendMessage};
 use magenta_core::{
     ConversationId, ModelCatalog, ProviderAccount, ProviderAuthenticator, SettingsStore,
 };
@@ -73,6 +73,7 @@ pub struct MainView {
     composer: Entity<PromptComposer>,
     conversation: Entity<ConversationView>,
     send_message: SendMessage,
+    agent: Option<RunWorkspaceAgent>,
     regenerate_message: RegenerateMessage,
     authenticator: Arc<dyn ProviderAuthenticator>,
     model_catalog: Arc<dyn ModelCatalog>,
@@ -115,6 +116,7 @@ pub struct MainServices {
     pub authenticator: Arc<dyn ProviderAuthenticator>,
     pub model_catalog: Arc<dyn ModelCatalog>,
     pub settings_store: Arc<dyn SettingsStore>,
+    pub agent: Option<RunWorkspaceAgent>,
 }
 
 #[derive(Clone, Debug)]
@@ -199,6 +201,10 @@ impl MainView {
             ),
         ]);
         composer.update(cx, |composer, cx| composer.set_storage_ready(false, cx));
+        let agent_available = services.agent.is_some();
+        composer.update(cx, |composer, cx| {
+            composer.set_agent_available(agent_available, cx);
+        });
         let subscriptions = Self::subscribe_to_children(
             &composer,
             &sidebar,
@@ -213,6 +219,7 @@ impl MainView {
             composer,
             conversation,
             send_message,
+            agent: services.agent,
             regenerate_message,
             authenticator: services.authenticator,
             model_catalog: services.model_catalog,

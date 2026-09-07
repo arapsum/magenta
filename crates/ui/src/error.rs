@@ -191,6 +191,12 @@ const fn send_message_presentation(source: &SendMessageError) -> ErrorPresentati
             title: "Add a message or image",
             message: "Write a message or attach an image before sending.",
         },
+        SendMessageError::WorkspaceUnavailable => ErrorPresentation {
+            code: "MAG-WORKSPACE-UNAVAILABLE",
+            severity: ErrorSeverity::Warning,
+            title: "Workspace unavailable",
+            message: "Choose an existing workspace directory before starting agent mode.",
+        },
         SendMessageError::Storage(error) => match error.kind {
             StorageErrorKind::TooManyAttachments => ErrorPresentation {
                 code: "MAG-ATTACHMENT-COUNT",

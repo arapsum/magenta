@@ -14,7 +14,8 @@ use futures_util::{Stream, stream};
 use gpui::{TestAppContext, size};
 use gpui_component::Root;
 use magenta_core::{
-    ConversationId, EffortLevel, FinishReason, GenerationConfig, ModelId, TokenUsage,
+    ConversationId, ConversationMode, EffortLevel, FinishReason, GenerationConfig, ModelId,
+    TokenUsage,
 };
 
 use super::*;
@@ -28,6 +29,8 @@ fn conversation() -> Conversation {
             ModelId::new("magenta-demo"),
             EffortLevel::Medium,
         ),
+        mode: ConversationMode::Chat,
+        workspace_root: None,
     }
 }
 
@@ -39,6 +42,7 @@ fn stored_page(range: std::ops::Range<u64>) -> magenta_core::MessagePage {
             sequence: magenta_core::MessageSequence(i64::try_from(id).unwrap()),
             created_at: magenta_core::Timestamp(0),
             generation: conversation().generation,
+            agent_activities: Vec::new(),
         })
         .collect::<Vec<_>>();
     magenta_core::MessagePage {
@@ -231,6 +235,7 @@ fn message(id: u64, role: MessageRole, status: MessageStatus) -> Message {
         status,
         attachments: Vec::new(),
         generation_outcome: None,
+        agent_activities: Vec::new(),
     }
 }
 
@@ -293,6 +298,7 @@ fn user_messages_keep_prose_literal_and_isolate_fenced_code(cx: &mut TestAppCont
                 status: MessageStatus::Complete,
                 attachments: Vec::new(),
                 generation_outcome: None,
+                agent_activities: Vec::new(),
             };
             let rendered = ConversationView::rendered_message(message, cx);
 

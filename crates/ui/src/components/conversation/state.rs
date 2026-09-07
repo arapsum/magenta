@@ -91,6 +91,8 @@ impl ConversationView {
             generation_task: None,
             generation_clock_task: None,
             generation_progress: None,
+            agent_controller: None,
+            pending_agent_approval: None,
             older_cursor: None,
             has_older: false,
             loading_earlier: false,
@@ -243,6 +245,7 @@ impl ConversationView {
         let id = self.streaming_message.take()?;
         self.generation = self.generation.wrapping_add(1);
         self.generation_task.take();
+        self.clear_agent_state();
         if let Some(progress) = self.clear_generation_progress().as_ref() {
             trace_generation_terminal(progress, "interrupted");
         }

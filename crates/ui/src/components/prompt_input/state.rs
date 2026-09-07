@@ -15,7 +15,7 @@ use gpui_component::{
     notification::{Notification, NotificationType},
     text::TextViewState,
 };
-use magenta_core::{EffortLevel, GenerationConfig, ModelDescriptor};
+use magenta_core::{ConversationMode, EffortLevel, GenerationConfig, ModelDescriptor};
 
 use super::{MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS};
 use crate::{MagentaError, components::code_fence, notification_for_error};
@@ -48,6 +48,8 @@ pub struct PromptRequest {
     pub prompt: SharedString,
     pub generation: GenerationConfig,
     pub attachments: Vec<PathBuf>,
+    pub mode: ConversationMode,
+    pub workspace_root: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -64,10 +66,14 @@ pub struct PromptComposer {
     pub(super) models: Vec<ModelDescriptor>,
     pub(super) model: Option<ModelDescriptor>,
     pub(super) effort: Option<EffortLevel>,
+    pub(super) mode: ConversationMode,
+    pub(super) workspace_root: Option<PathBuf>,
+    pub(super) agent_available: bool,
     pub(super) generating: bool,
     storage_ready: bool,
     pub(super) attachments: Vec<ReferenceImage>,
     attachment_task: Option<Task<()>>,
+    workspace_task: Option<Task<()>>,
     preview_task: Option<Task<()>>,
     preview_generation: u64,
     pub(super) subscriptions: Vec<Subscription>,
@@ -104,10 +110,14 @@ impl PromptComposer {
             models: Vec::new(),
             model: None,
             effort: None,
+            mode: ConversationMode::Chat,
+            workspace_root: None,
+            agent_available: false,
             generating: false,
             storage_ready: true,
             attachments: Vec::new(),
             attachment_task: None,
+            workspace_task: None,
             preview_task: None,
             preview_generation: 0,
             subscriptions,
@@ -175,6 +185,29 @@ impl PromptComposer {
             self.generating = generating;
             cx.notify();
         }
+    }
+
+    pub(crate) fn set_agent_available(&mut self, available: bool, cx: &mut Context<'_, Self>) {
+        self.agent_available = available;
+        if !available && self.mode == ConversationMode::Agent {
+            self.mode = ConversationMode::Chat;
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn set_conversation_context(
+        &mut self,
+        mode: ConversationMode,
+        workspace_root: Option<PathBuf>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.mode = if mode == ConversationMode::Agent && !self.agent_available {
+            ConversationMode::Chat
+        } else {
+            mode
+        };
+        self.workspace_root = workspace_root;
+        cx.notify();
     }
 
     pub(crate) fn set_storage_ready(&mut self, ready: bool, cx: &mut Context<'_, Self>) {
@@ -291,7 +324,61 @@ impl PromptComposer {
     }
 
     pub(super) fn is_ready(&self, cx: &App) -> bool {
-        self.storage_ready && self.has_content(cx) && self.model.is_some() && self.effort.is_some()
+        let workspace_ready = self.mode == ConversationMode::Chat
+            || (self.agent_available
+                && self
+                    .workspace_root
+                    .as_deref()
+                    .is_some_and(std::path::Path::is_dir));
+        self.storage_ready
+            && self.has_content(cx)
+            && self.model.is_some()
+            && self.effort.is_some()
+            && workspace_ready
+    }
+
+    pub(super) fn select_mode(&mut self, mode: ConversationMode, cx: &mut Context<'_, Self>) {
+        if mode == ConversationMode::Agent && !self.agent_available {
+            return;
+        }
+        if self.mode != mode {
+            self.mode = mode;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn choose_workspace(&mut self, window: &Window, cx: &Context<'_, Self>) {
+        if self.mode != ConversationMode::Agent || !self.agent_available {
+            return;
+        }
+
+        let picker = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Choose workspace".into()),
+        });
+        self.workspace_task = Some(cx.spawn_in(window, async move |composer, window| {
+            let selection = match picker.await {
+                Ok(Ok(paths)) => paths,
+                Ok(Err(source)) => {
+                    _ = composer.update_in(window, |composer, window, cx| {
+                        composer.workspace_task = None;
+                        let error = MagentaError::AttachmentPicker { source };
+                        window.push_notification(notification_for_error(&error), cx);
+                    });
+                    return;
+                }
+                Err(_) => return,
+            };
+            _ = composer.update_in(window, |composer, _, cx| {
+                composer.workspace_task = None;
+                composer.workspace_root = selection
+                    .and_then(|paths| paths.into_iter().next())
+                    .filter(|path| path.is_dir());
+                cx.notify();
+            });
+        }));
     }
 
     pub(super) fn select_model(&mut self, model: ModelDescriptor, cx: &mut Context<'_, Self>) {
@@ -455,6 +542,8 @@ impl PromptComposer {
                 .iter()
                 .map(|attachment| attachment.path.clone())
                 .collect(),
+            mode: self.mode.clone(),
+            workspace_root: self.workspace_root.clone(),
         })
     }
 

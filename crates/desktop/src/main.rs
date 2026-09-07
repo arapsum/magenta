@@ -9,11 +9,13 @@ use gpui::{
 #[cfg(target_os = "linux")]
 use gpui::{WindowBackgroundAppearance, WindowDecorations};
 use gpui_component::Root;
-use magenta_application::{ConversationHistory, RegenerateMessage, SendMessage};
+use magenta_application::{ConversationHistory, RegenerateMessage, RunWorkspaceAgent, SendMessage};
 use magenta_core::{
-    ChatProvider, ConversationStore, ModelCatalog, ProviderAuthenticator, SettingsStore,
+    AgentProvider, ChatProvider, ConversationStore, ModelCatalog, ProviderAuthenticator,
+    SettingsStore, WorkspaceAccess,
 };
 use magenta_providers::OpenAiProvider;
+use magenta_workspace::LocalWorkspace;
 
 use magenta_ui::{notification_for_error, MagentaError, MainServices, MainView, Result};
 
@@ -164,6 +166,7 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     let window_options = main_window_options(cx);
     let provider = Arc::new(OpenAiProvider::new());
     let chat_provider: Arc<dyn ChatProvider> = provider.clone();
+    let agent_provider: Arc<dyn AgentProvider> = provider.clone();
     let authenticator: Arc<dyn ProviderAuthenticator> = provider.clone();
     let model_catalog: Arc<dyn ModelCatalog> = provider;
     let data_dir = dirs::data_local_dir().ok_or_else(|| MagentaError::StorageInitialize {
@@ -189,6 +192,8 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     let regenerate_provider = Arc::clone(&chat_provider);
     let regenerate_store = Arc::clone(&store);
     let regenerate_message = RegenerateMessage::new(regenerate_provider, regenerate_store);
+    let workspace: Arc<dyn WorkspaceAccess> = Arc::new(LocalWorkspace);
+    let agent = RunWorkspaceAgent::new(agent_provider, Arc::clone(&store), workspace);
     let history = ConversationHistory::new(store);
     cx.open_window(window_options, move |window, cx| {
         let main_view = cx.new(|cx| {
@@ -200,6 +205,7 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
                     authenticator: Arc::clone(&authenticator),
                     model_catalog: Arc::clone(&model_catalog),
                     settings_store: Arc::clone(&settings_store),
+                    agent: Some(agent),
                 },
                 window,
                 cx,
