@@ -33,11 +33,6 @@ impl MainView {
                         sidebar_view.update(cx, SidebarView::toggle_collapsed);
                     }),
             )
-            .child(
-                self.composer
-                    .read(cx)
-                    .model_selector(self.composer.clone(), cx),
-            )
             .when(
                 self.workbench.is_some() && self.sidebar.read(cx).active_project().is_some(),
                 |this| {

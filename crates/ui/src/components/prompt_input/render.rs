@@ -159,7 +159,7 @@ impl PromptComposer {
             })
     }
 
-    pub(crate) fn model_selector(&self, view: Entity<Self>, _cx: &App) -> AnyElement {
+    fn model_selector(&self, view: Entity<Self>, _cx: &App) -> AnyElement {
         let selected_model = self.model.clone();
         let selected_effort = self.effort.clone();
         let models = self.models.clone();
@@ -306,11 +306,13 @@ impl PromptComposer {
     ) -> AnyElement {
         h_flex()
             .w_full()
-            .h(px(30.))
+            .min_h(px(30.))
             .items_center()
             .justify_between()
+            .gap(px(10.))
             .child(
                 h_flex()
+                    .min_w_0()
                     .items_center()
                     .gap(px(4.))
                     .when(can_add_attachment, |this| {
@@ -322,39 +324,46 @@ impl PromptComposer {
                     }),
             )
             .child(
-                Button::new("prompt-submit")
-                    .when(generating, ButtonVariants::secondary)
-                    .when(!generating, ButtonVariants::primary)
-                    .disabled(!ready && !generating)
-                    .accessibility_id(if generating {
-                        "prompt-stop-response"
-                    } else {
-                        "prompt-submit"
-                    })
-                    .tooltip(if generating {
-                        "Stop response"
-                    } else if ready {
-                        "Send message"
-                    } else {
-                        "Add a message before sending"
-                    })
-                    .size(px(30.))
-                    .p_0()
-                    .rounded_full()
-                    .icon(if generating {
-                        Icon::empty().path("icons/generation-stop.svg")
-                    } else {
-                        Icon::new(IconName::ChevronUp)
-                    })
-                    .on_click(move |_, _window, cx| {
-                        submit_view.update(cx, |composer, cx| {
-                            if generating {
-                                composer.cancel(cx);
+                h_flex()
+                    .min_w_0()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(self.model_selector(submit_view.clone(), cx))
+                    .child(
+                        Button::new("prompt-submit")
+                            .when(generating, ButtonVariants::secondary)
+                            .when(!generating, ButtonVariants::primary)
+                            .disabled(!ready && !generating)
+                            .accessibility_id(if generating {
+                                "prompt-stop-response"
                             } else {
-                                composer.submit(cx);
-                            }
-                        });
-                    }),
+                                "prompt-submit"
+                            })
+                            .tooltip(if generating {
+                                "Stop response"
+                            } else if ready {
+                                "Send message"
+                            } else {
+                                "Add a message before sending"
+                            })
+                            .size(px(30.))
+                            .p_0()
+                            .rounded_full()
+                            .icon(if generating {
+                                Icon::empty().path("icons/generation-stop.svg")
+                            } else {
+                                Icon::new(IconName::ChevronUp)
+                            })
+                            .on_click(move |_, _window, cx| {
+                                submit_view.update(cx, |composer, cx| {
+                                    if generating {
+                                        composer.cancel(cx);
+                                    } else {
+                                        composer.submit(cx);
+                                    }
+                                });
+                            }),
+                    ),
             )
             .into_any_element()
     }
@@ -370,22 +379,25 @@ impl Render for PromptComposer {
         let can_add_attachment = self.attachments.len() < MAX_ATTACHMENTS;
 
         v_flex()
+            .id("prompt-composer-surface")
+            .debug_selector(|| "prompt-composer-surface".into())
             .w_full()
-            .max_w(px(608.))
+            .max_w(px(672.))
             .mx_auto()
-            .min_h(px(90.))
-            .p(px(12.))
-            .gap(px(6.))
+            .min_h(px(104.))
+            .p(px(14.))
+            .gap(px(8.))
             .justify_between()
-            .rounded(px(22.))
+            .rounded(px(18.))
             .border_1()
             .border_color(if focused {
-                cx.theme().ring.opacity(0.9)
+                cx.theme().ring
             } else {
                 cx.theme().border.opacity(0.82)
             })
             .bg(cx.theme().popover)
-            .shadow_sm()
+            .when(focused, gpui::Styled::shadow_md)
+            .when(!focused, gpui::Styled::shadow_sm)
             .child(
                 v_flex()
                     .flex_1()
@@ -407,7 +419,7 @@ impl Render for PromptComposer {
                             .min_h(px(30.))
                             .p_0()
                             .text_size(px(14.))
-                            .line_height(px(20.)),
+                            .line_height(px(21.)),
                     ),
             )
             .child(self.footer(submit_view, generating, ready, can_add_attachment, cx))

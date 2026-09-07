@@ -84,7 +84,7 @@ impl PromptComposer {
     pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Ask anything")
+                .placeholder("Ask Magenta anything…")
                 .auto_grow(2, 5)
                 .submit_on_enter(true)
         });

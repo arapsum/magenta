@@ -166,13 +166,21 @@ fn summary(id: u64, title: &str) -> ConversationSummary {
 type TestWindow = (WindowHandle<Root>, Entity<MainView>);
 
 fn setup(cx: &mut TestAppContext, ports: Arc<TestPorts>) -> TestWindow {
+    setup_at(cx, ports, size(px(1000.), px(700.)))
+}
+
+fn setup_at(
+    cx: &mut TestAppContext,
+    ports: Arc<TestPorts>,
+    window_size: gpui::Size<gpui::Pixels>,
+) -> TestWindow {
     cx.update(|cx| {
         gpui_component::init(cx);
         crate::settings::init(cx);
     });
     let slot = Rc::new(RefCell::new(None));
     let view_slot = Rc::clone(&slot);
-    let window = cx.open_window(size(px(1000.), px(700.)), move |window, cx| {
+    let window = cx.open_window(window_size, move |window, cx| {
         let view = cx.new(|cx| {
             MainView::new(
                 SendMessage::new(ports.clone(), ports.clone()),
@@ -194,6 +202,58 @@ fn setup(cx: &mut TestAppContext, ports: Arc<TestPorts>) -> TestWindow {
     });
     let view = slot.borrow().clone().unwrap();
     (window, view)
+}
+
+#[gpui::test]
+fn new_chat_layout_keeps_primary_content_visible(cx: &mut TestAppContext) {
+    let ports = Arc::new(TestPorts::default());
+    ports
+        .summaries
+        .lock()
+        .extend([summary(1, "A recent thread"), summary(2, "Another thread")]);
+    let (window, _) = setup(cx, ports);
+    cx.run_until_parked();
+
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+
+    let start = visual
+        .debug_bounds("new-chat-start-content")
+        .expect("the new-chat start content should be rendered");
+    let composer = visual
+        .debug_bounds("prompt-composer-surface")
+        .expect("the prompt composer should be rendered");
+    let account = visual
+        .debug_bounds("account-dropdown-trigger")
+        .expect("the sidebar account control should be rendered");
+
+    assert!(start.origin.x >= px(272.));
+    assert!(composer.origin.y >= px(32.));
+    assert!(composer.origin.y + composer.size.height <= px(700.));
+    assert!(composer.size.width <= px(672.));
+    assert!(account.origin.y + account.size.height <= px(700.));
+}
+
+#[gpui::test]
+fn narrow_new_chat_layout_keeps_the_composer_in_view(cx: &mut TestAppContext) {
+    let (window, _) = setup_at(cx, Arc::new(TestPorts::default()), size(px(680.), px(640.)));
+    cx.run_until_parked();
+
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+
+    let start = visual
+        .debug_bounds("new-chat-start-content")
+        .expect("the narrow start content should be rendered");
+    let composer = visual
+        .debug_bounds("prompt-composer-surface")
+        .expect("the narrow prompt composer should be rendered");
+
+    assert!(start.origin.x >= px(16.));
+    assert!(composer.origin.y >= px(32.));
+    assert!(composer.origin.y + composer.size.height <= px(640.));
+    assert!(composer.size.width <= px(616.));
+    assert!(visual.debug_bounds("account-dropdown-trigger").is_none());
 }
 
 #[gpui::test]
