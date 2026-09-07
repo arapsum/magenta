@@ -22,7 +22,7 @@ impl SidebarView {
             .accessibility_id("sidebar-account-menu")
             .tooltip(tooltip)
             .w_full()
-            .h(px(56.))
+            .h(px(52.))
             .items_center()
             .gap(px(8.))
             .p(px(8.))
@@ -75,9 +75,9 @@ impl SidebarView {
 
         v_flex()
             .w_full()
-            .pt(px(8.))
+            .pt(px(6.))
             .border_t_1()
-            .border_color(cx.theme().sidebar_border)
+            .border_color(cx.theme().sidebar_border.opacity(0.78))
             .child(AccountDropdown::new(
                 "sidebar-account-dropdown",
                 trigger,

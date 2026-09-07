@@ -38,8 +38,8 @@ pub use model::{ConversationId, ConversationPeriod, ConversationSummary, Sidebar
 
 use self::model::title_matches;
 
-const EXPANDED_WIDTH: gpui::Pixels = px(260.);
-const ROW_HEIGHT: gpui::Pixels = px(30.);
+const EXPANDED_WIDTH: gpui::Pixels = px(272.);
+const ROW_HEIGHT: gpui::Pixels = px(34.);
 const INITIAL_RECENCY_LIMIT: usize = 6;
 const RECENCY_PAGE_SIZE: usize = 6;
 const ACCOUNT_MENU_WIDTH: gpui::Pixels = px(240.);
@@ -406,6 +406,13 @@ impl SidebarView {
 
     fn toggle_pinned_expanded(&mut self, cx: &mut Context<'_, Self>) {
         self.pinned_expanded = !self.pinned_expanded;
+        cx.notify();
+    }
+
+    fn toggle_project_expanded(&mut self, root: PathBuf, cx: &mut Context<'_, Self>) {
+        if !self.expanded_projects.remove(&root) {
+            self.expanded_projects.insert(root);
+        }
         cx.notify();
     }
 
