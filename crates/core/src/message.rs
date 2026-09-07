@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::{ConversationId, GenerationOutcome, MessageId};
+use super::{AgentActivity, ConversationId, GenerationOutcome, MessageId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MessageRole {
@@ -40,6 +40,7 @@ pub struct Message {
     pub status: MessageStatus,
     pub attachments: Vec<Attachment>,
     pub generation_outcome: Option<GenerationOutcome>,
+    pub agent_activities: Vec<AgentActivity>,
 }
 
 #[cfg(test)]
@@ -62,6 +63,7 @@ mod tests {
                 managed: true,
             }],
             generation_outcome: None,
+            agent_activities: Vec::new(),
         };
 
         assert_eq!(message.role, MessageRole::User);

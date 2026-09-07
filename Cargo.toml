@@ -6,6 +6,7 @@ members = [
     "crates/desktop",
     "crates/providers",
     "crates/storage",
+    "crates/workspace",
     "crates/ui",
 ]
 default-members = ["crates/desktop"]
@@ -19,6 +20,9 @@ anyhow = "1"
 async-lock = "3"
 async-net = "2"
 async-stream = "0.3"
+async-channel = "2"
+ignore = "0.4"
+globset = "0.4"
 base64 = "0.22"
 dirs = "6"
 futures-core = "0.3"
@@ -30,6 +34,7 @@ magenta-application = { path = "crates/application" }
 magenta-core = { path = "crates/core" }
 magenta-providers = { path = "crates/providers" }
 magenta-storage = { path = "crates/storage" }
+magenta-workspace = { path = "crates/workspace" }
 rusqlite = { version = "0.37", features = ["bundled"] }
 chrono = "0.4"
 tempfile = "3"

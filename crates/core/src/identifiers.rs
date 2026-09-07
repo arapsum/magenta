@@ -11,6 +11,9 @@ impl ConversationId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MessageId(pub u64);
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct AgentRunId(pub u64);
+
 impl MessageId {
     #[must_use]
     pub const fn new(value: u64) -> Self {

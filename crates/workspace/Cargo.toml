@@ -1,0 +1,15 @@
+[package]
+name = "magenta-workspace"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+globset.workspace = true
+ignore.workspace = true
+magenta-core.workspace = true
+sha2.workspace = true
+smol.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

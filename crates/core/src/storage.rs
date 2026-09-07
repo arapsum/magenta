@@ -2,7 +2,10 @@
 
 use std::{error::Error, future::Future, pin::Pin};
 
-use crate::{AttachmentDraft, Conversation, ConversationId, GenerationConfig, Message, MessageId};
+use crate::{
+    AgentActivity, AgentActivityRecord, AgentRunId, AttachmentDraft, Conversation, ConversationId,
+    ConversationMode, GenerationConfig, Message, MessageId,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Timestamp(pub i64);
@@ -26,6 +29,7 @@ pub struct StoredMessage {
     pub sequence: MessageSequence,
     pub created_at: Timestamp,
     pub generation: GenerationConfig,
+    pub agent_activities: Vec<AgentActivity>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,6 +52,8 @@ pub struct BeginTurn {
     pub prompt: String,
     pub attachments: Vec<AttachmentDraft>,
     pub generation: GenerationConfig,
+    pub mode: ConversationMode,
+    pub workspace_root: Option<std::path::PathBuf>,
 }
 
 pub struct PreparedTurn {
@@ -55,6 +61,7 @@ pub struct PreparedTurn {
     pub user_message: Message,
     pub assistant_message: Message,
     pub context: Vec<Message>,
+    pub agent_run_id: Option<AgentRunId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,4 +114,5 @@ pub trait ConversationStore: Send + Sync {
     fn delete(&self, id: ConversationId) -> StorageFuture<()>;
     fn rename(&self, id: ConversationId, title: String) -> StorageFuture<()>;
     fn set_pinned(&self, id: ConversationId, pinned: bool) -> StorageFuture<()>;
+    fn append_agent_activity(&self, activity: AgentActivityRecord) -> StorageFuture<()>;
 }

@@ -1,6 +1,7 @@
 //! Provider-independent conversation values shared by Magenta's UI and
 //! future storage/provider adapters.
 
+mod agent;
 mod auth;
 mod conversation;
 mod error;
@@ -10,7 +11,14 @@ mod message;
 mod models;
 mod settings;
 mod storage;
+mod workspace;
 
+pub use agent::{
+    AgentActivity, AgentActivityKind, AgentActivityRecord, AgentApprovalDecision,
+    AgentApprovalRequest, AgentContinuation, AgentProvider, AgentProviderEvent,
+    AgentProviderStream, AgentRequest, AgentResumeRequest, AgentRunEvent, AgentRunStream,
+    AgentToolCall, AgentToolDefinition, AgentToolOutput, ConversationMode,
+};
 pub use auth::{
     AuthenticationFuture, AuthorizationSession, ProviderAccount, ProviderAuthenticator,
 };
@@ -20,7 +28,7 @@ pub use generation::{
     ChatProvider, EffortLevel, FinishReason, GenerationConfig, GenerationEvent, GenerationOutcome,
     GenerationRequest, GenerationStream, TokenUsage,
 };
-pub use identifiers::{ConversationId, MessageId, ModelId, ProviderId};
+pub use identifiers::{AgentRunId, ConversationId, MessageId, ModelId, ProviderId};
 pub use message::{Attachment, AttachmentDraft, Message, MessageRole, MessageStatus};
 pub use models::{ModelCatalog, ModelCatalogFuture, ModelDescriptor};
 pub use settings::{
@@ -31,4 +39,8 @@ pub use storage::{
     BeginTurn, ConversationPage, ConversationStore, ConversationSummary, MessagePage,
     MessageSequence, PreparedTurn, StorageError, StorageErrorKind, StorageFuture, StoredMessage,
     Timestamp,
+};
+pub use workspace::{
+    WorkspaceAccess, WorkspaceError, WorkspaceFuture, WorkspaceMutation, WorkspaceOperation,
+    WorkspacePreview,
 };
