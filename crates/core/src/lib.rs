@@ -9,6 +9,7 @@ mod generation;
 mod identifiers;
 mod message;
 mod models;
+mod project;
 mod settings;
 mod storage;
 mod workspace;
@@ -31,6 +32,9 @@ pub use generation::{
 pub use identifiers::{AgentRunId, ConversationId, MessageId, ModelId, ProviderId};
 pub use message::{Attachment, AttachmentDraft, Message, MessageRole, MessageStatus};
 pub use models::{ModelCatalog, ModelCatalogFuture, ModelDescriptor};
+pub use project::{
+    Project, ProjectStore, WorkspaceBrowser, WorkspaceDocument, WorkspaceEntry, WorkspaceEntryKind,
+};
 pub use settings::{
     AppSettings, AppearanceMode, FontChoice, MathFontStyle, SETTINGS_VERSION, SettingsError,
     SettingsFuture, SettingsStore, TypographySettings,

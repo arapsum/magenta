@@ -20,7 +20,7 @@ use std::{
 use magenta_core::{
     AgentActivityKind, AgentActivityRecord, BeginTurn, ConversationId, ConversationPage,
     ConversationStore, ConversationSummary, Message, MessageId, MessagePage, MessageSequence,
-    PreparedTurn, StorageError, StorageErrorKind, StorageFuture, Timestamp,
+    PreparedTurn, Project, ProjectStore, StorageError, StorageErrorKind, StorageFuture, Timestamp,
 };
 use rusqlite::{Connection, TransactionBehavior, params};
 
@@ -130,6 +130,8 @@ impl ConversationStore for SqliteConversationStore {
                                 ''
                             ) AS preview,
                             pinned,
+                            mode,
+                            workspace_root,
                             created_at,
                             updated_at
                         FROM conversations AS conversation
@@ -144,8 +146,20 @@ impl ConversationStore for SqliteConversationStore {
                         title: row.get(1)?,
                         preview: row.get(2)?,
                         pinned: row.get(3)?,
-                        created_at: Timestamp(row.get(4)?),
-                        updated_at: Timestamp(row.get(5)?),
+                        mode: decode_mode(&row.get::<_, String>(4)?)?,
+                        workspace_root: row
+                            .get::<_, Option<Vec<u8>>>(5)?
+                            .map(records::decode_path)
+                            .transpose()
+                            .map_err(|error| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    5,
+                                    rusqlite::types::Type::Blob,
+                                    Box::new(error),
+                                )
+                            })?,
+                        created_at: Timestamp(row.get(6)?),
+                        updated_at: Timestamp(row.get(7)?),
                     })
                 })
                 .map_err(database_error)?;
@@ -361,6 +375,88 @@ impl ConversationStore for SqliteConversationStore {
                 .map_err(database_error)?;
             Ok(())
         })
+    }
+}
+
+impl ProjectStore for SqliteConversationStore {
+    fn projects(&self) -> StorageFuture<Vec<Project>> {
+        self.run(|connection| {
+            let mut statement = connection
+                .prepare(
+                    "SELECT name, root, added_at, last_opened_at FROM projects \
+                     ORDER BY last_opened_at DESC, name COLLATE NOCASE",
+                )
+                .map_err(database_error)?;
+            let rows = statement
+                .query_map([], |row| {
+                    let root = records::decode_path(row.get(1)?).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            1,
+                            rusqlite::types::Type::Blob,
+                            Box::new(error),
+                        )
+                    })?;
+                    Ok(Project {
+                        name: row.get(0)?,
+                        root,
+                        added_at: Timestamp(row.get(2)?),
+                        last_opened_at: Timestamp(row.get(3)?),
+                    })
+                })
+                .map_err(database_error)?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(database_error)
+        })
+    }
+
+    fn upsert_project(&self, project: Project) -> StorageFuture<()> {
+        self.run(move |connection| {
+            connection
+                .execute(
+                    r"
+                        INSERT INTO projects(root, name, added_at, last_opened_at)
+                        VALUES (?1, ?2, ?3, ?4)
+                        ON CONFLICT(root) DO UPDATE SET
+                            name = excluded.name,
+                            last_opened_at = excluded.last_opened_at
+                    ",
+                    params![
+                        records::encode_path(&project.root),
+                        project.name,
+                        project.added_at.0,
+                        project.last_opened_at.0,
+                    ],
+                )
+                .map_err(database_error)?;
+            Ok(())
+        })
+    }
+
+    fn remove_project(&self, root: PathBuf) -> StorageFuture<()> {
+        self.run(move |connection| {
+            connection
+                .execute(
+                    "DELETE FROM projects WHERE root = ?1",
+                    [records::encode_path(&root)],
+                )
+                .map_err(database_error)?;
+            Ok(())
+        })
+    }
+}
+
+fn decode_mode(mode: &str) -> rusqlite::Result<magenta_core::ConversationMode> {
+    match mode {
+        "chat" => Ok(magenta_core::ConversationMode::Chat),
+        "agent" => Ok(magenta_core::ConversationMode::Agent),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            4,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unknown conversation mode {other}"),
+            )),
+        )),
     }
 }
 

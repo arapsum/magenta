@@ -19,6 +19,8 @@ pub struct ConversationSummary {
     pub title: String,
     pub preview: String,
     pub pinned: bool,
+    pub mode: ConversationMode,
+    pub workspace_root: Option<std::path::PathBuf>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }

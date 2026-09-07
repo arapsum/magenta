@@ -28,6 +28,15 @@ CREATE UNIQUE INDEX one_stream_per_conversation
 
 CREATE INDEX conversation_recency ON conversations(updated_at DESC, id DESC);
 
+CREATE TABLE projects (
+    root BLOB PRIMARY KEY,
+    name TEXT NOT NULL,
+    added_at INTEGER NOT NULL,
+    last_opened_at INTEGER NOT NULL
+);
+
+CREATE INDEX project_recency ON projects(last_opened_at DESC, name);
+
 CREATE TABLE agent_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -64,4 +73,4 @@ CREATE TABLE attachments (
     PRIMARY KEY (message_id, position)
 );
 
-PRAGMA user_version = 3;
+PRAGMA user_version = 4;
