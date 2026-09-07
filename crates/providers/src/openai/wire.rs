@@ -2,17 +2,24 @@ use std::fs;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use magenta_core::{
-    Attachment, EffortLevel, FinishReason, ModelDescriptor, ModelId, ProviderId, TokenUsage,
+    AgentRequest, AgentResumeRequest, AgentToolDefinition, Attachment, EffortLevel, FinishReason,
+    ModelDescriptor, ModelId, ProviderId, TokenUsage,
 };
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
 pub struct ResponsesRequest {
     pub model: String,
-    pub input: Vec<InputItem>,
+    pub input: serde_json::Value,
     pub stream: bool,
     pub store: bool,
     pub reasoning: Reasoning,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<FunctionTool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -25,6 +32,16 @@ pub enum InputItem {
         #[serde(skip_serializing_if = "Option::is_none")]
         status: Option<String>,
     },
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct FunctionTool {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+    pub strict: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -60,6 +77,14 @@ pub struct StreamEvent {
     #[serde(default)]
     pub delta: Option<String>,
     #[serde(default)]
+    pub arguments: Option<String>,
+    #[serde(default)]
+    pub item_id: Option<String>,
+    #[serde(default)]
+    pub output_index: Option<u64>,
+    #[serde(default)]
+    pub item: Option<serde_json::Value>,
+    #[serde(default)]
     pub response: Option<ResponsePayload>,
     #[serde(default)]
     pub error: Option<ResponseError>,
@@ -73,6 +98,8 @@ pub struct ResponsePayload {
     pub incomplete_details: Option<IncompleteDetails>,
     #[serde(default)]
     pub error: Option<ResponseError>,
+    #[serde(default)]
+    pub output: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -189,14 +216,81 @@ impl ResponsesRequest {
 
         Ok(Self {
             model: model.to_owned(),
-            input,
+            input: serde_json::to_value(input).map_err(|error| error.to_string())?,
             stream: true,
             store: false,
             reasoning: Reasoning {
                 effort: effort.wire_value().to_owned(),
                 summary: "auto",
             },
+            instructions: None,
+            tools: Vec::new(),
+            tool_choice: None,
         })
+    }
+
+    pub fn from_agent_request(request: &AgentRequest) -> Result<Self, String> {
+        let mut wire = Self::from_request(
+            &request.generation.model.0,
+            &request.generation.effort,
+            &request.messages,
+        )?;
+        wire.instructions = Some(request.instructions.clone());
+        wire.tools = request
+            .tools
+            .iter()
+            .map(FunctionTool::from_definition)
+            .collect();
+        wire.tool_choice = (!wire.tools.is_empty()).then_some("required");
+        Ok(wire)
+    }
+
+    pub fn from_resume(
+        request: &AgentResumeRequest,
+        model: &str,
+        effort: &EffortLevel,
+    ) -> Result<Self, String> {
+        let mut input =
+            serde_json::from_slice::<Vec<serde_json::Value>>(&request.continuation.payload)
+                .map_err(|error| format!("invalid provider continuation: {error}"))?;
+        input.extend(request.outputs.iter().map(|output| {
+            serde_json::json!({
+                "type": "function_call_output",
+                "call_id": output.call_id,
+                "output": output.output,
+            })
+        }));
+        Ok(Self {
+            model: model.to_owned(),
+            input: serde_json::Value::Array(input),
+            stream: true,
+            store: false,
+            reasoning: Reasoning {
+                effort: effort.wire_value().to_owned(),
+                summary: "auto",
+            },
+            instructions: Some(request.instructions.clone()),
+            tools: request
+                .tools
+                .iter()
+                .map(FunctionTool::from_definition)
+                .collect(),
+            // The first request must enter the workspace loop. Once a tool result
+            // is available, the model needs to be able to finish with text.
+            tool_choice: None,
+        })
+    }
+}
+
+impl FunctionTool {
+    fn from_definition(definition: &AgentToolDefinition) -> Self {
+        Self {
+            kind: "function",
+            name: definition.name.clone(),
+            description: definition.description.clone(),
+            parameters: definition.parameters.clone(),
+            strict: true,
+        }
     }
 }
 
@@ -344,7 +438,8 @@ mod tests {
 
     use super::*;
     use magenta_core::{
-        Attachment, ConversationId, Message, MessageId, MessageRole, MessageStatus,
+        AgentContinuation, AgentToolOutput, Attachment, ConversationId, GenerationConfig, Message,
+        MessageId, MessageRole, MessageStatus,
     };
 
     fn message(role: MessageRole, content: &str) -> Message {
@@ -356,6 +451,7 @@ mod tests {
             status: MessageStatus::Complete,
             attachments: Vec::new(),
             generation_outcome: None,
+            agent_activities: Vec::new(),
         }
     }
 
@@ -378,6 +474,88 @@ mod tests {
         assert_eq!(value["reasoning"]["effort"], "high");
         assert_eq!(value["input"][0]["content"][0]["type"], "input_text");
         assert_eq!(value["input"][1]["content"][0]["type"], "output_text");
+    }
+
+    #[test]
+    fn agent_request_encodes_strict_workspace_tools_and_instructions() {
+        let request = AgentRequest {
+            generation: GenerationConfig::new(
+                ProviderId::new("openai-codex"),
+                ModelId::new("gpt-5.6-luna"),
+                EffortLevel::High,
+            ),
+            messages: vec![message(MessageRole::User, "Inspect the workspace")],
+            instructions: "Use only workspace tools.".to_owned(),
+            tools: vec![AgentToolDefinition {
+                name: "read_file".to_owned(),
+                description: "Read one file.".to_owned(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                    "additionalProperties": false
+                }),
+                mutating: false,
+                protected_read: true,
+            }],
+        };
+
+        let value = serde_json::to_value(
+            ResponsesRequest::from_agent_request(&request).expect("agent request should be valid"),
+        )
+        .expect("agent request should serialize");
+
+        assert_eq!(value["instructions"], "Use only workspace tools.");
+        assert_eq!(value["tools"][0]["type"], "function");
+        assert_eq!(value["tools"][0]["name"], "read_file");
+        assert_eq!(value["tools"][0]["strict"], true);
+        assert_eq!(value["tools"][0]["parameters"]["required"][0], "path");
+        assert_eq!(value["tool_choice"], "required");
+    }
+
+    #[test]
+    fn agent_resume_appends_tool_outputs_to_the_opaque_continuation() {
+        let continuation = AgentContinuation {
+            provider: ProviderId::new("openai-codex"),
+            model: ModelId::new("gpt-5.6-luna"),
+            effort: EffortLevel::Medium,
+            payload: serde_json::to_vec(&vec![
+                serde_json::json!({
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Inspect the workspace"}]
+                }),
+                serde_json::json!({
+                    "type": "function_call",
+                    "call_id": "call-1"
+                }),
+            ])
+            .expect("continuation should serialize"),
+        };
+        let request = AgentResumeRequest {
+            continuation,
+            outputs: vec![AgentToolOutput {
+                call_id: "call-1".to_owned(),
+                output: "src/main.rs".to_owned(),
+                is_error: false,
+            }],
+            instructions: "Use only workspace tools.".to_owned(),
+            tools: Vec::new(),
+        };
+
+        let value = serde_json::to_value(
+            ResponsesRequest::from_resume(&request, "gpt-5.6-luna", &EffortLevel::Medium)
+                .expect("resume request should be valid"),
+        )
+        .expect("resume request should serialize");
+
+        assert_eq!(value["input"][0]["type"], "message");
+        assert_eq!(value["input"][0]["role"], "user");
+        assert_eq!(value["input"][1]["type"], "function_call");
+        assert_eq!(value["input"][2]["type"], "function_call_output");
+        assert_eq!(value["input"][2]["call_id"], "call-1");
+        assert_eq!(value["input"][2]["output"], "src/main.rs");
+        assert!(value.get("tool_choice").is_none());
     }
 
     #[test]

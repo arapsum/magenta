@@ -113,6 +113,7 @@ mod tests {
             status: MessageStatus::Complete,
             attachments: Vec::new(),
             generation_outcome: None,
+            agent_activities: Vec::new(),
         }
     }
 
