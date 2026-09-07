@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use magenta_core::{
-    AttachmentDraft, BeginTurn, ChatProvider, Conversation, ConversationId, ConversationStore,
-    GenerationConfig, GenerationRequest, GenerationStream, Message,
+    AttachmentDraft, BeginTurn, ChatProvider, Conversation, ConversationId, ConversationMode,
+    ConversationStore, GenerationConfig, GenerationRequest, GenerationStream, Message,
 };
 
 use crate::SendMessageError;
@@ -19,6 +19,8 @@ pub struct SendMessageInput {
     pub prompt: String,
     pub attachments: Vec<AttachmentDraft>,
     pub generation: GenerationConfig,
+    pub mode: ConversationMode,
+    pub workspace_root: Option<std::path::PathBuf>,
 }
 
 pub struct PendingGeneration {
@@ -64,6 +66,8 @@ impl SendMessage {
                 prompt,
                 attachments: input.attachments,
                 generation: input.generation,
+                mode: input.mode,
+                workspace_root: input.workspace_root,
             })
             .await?;
         let stream = self.provider.stream(GenerationRequest {

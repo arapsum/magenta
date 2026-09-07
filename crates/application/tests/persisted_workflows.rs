@@ -2,8 +2,8 @@ use magenta_application::{
     RegenerateMessage, RegenerateMessageInput, SendMessage, SendMessageInput, SendTarget,
 };
 use magenta_core::{
-    ChatProvider, ConversationStore, EffortLevel, GenerationConfig, GenerationRequest,
-    GenerationStream, MessageStatus, ModelId, ProviderId,
+    ChatProvider, ConversationMode, ConversationStore, EffortLevel, GenerationConfig,
+    GenerationRequest, GenerationStream, MessageStatus, ModelId, ProviderId,
 };
 use magenta_storage::SqliteConversationStore;
 use std::sync::{Arc, Mutex};
@@ -28,6 +28,8 @@ fn input(target: SendTarget) -> SendMessageInput {
             ModelId::new("model"),
             EffortLevel::High,
         ),
+        mode: ConversationMode::Chat,
+        workspace_root: None,
     }
 }
 

@@ -6,6 +6,8 @@ pub enum SendMessageError {
     EmptyPrompt,
     #[error("could not persist the message turn")]
     Storage(#[from] StorageError),
+    #[error("the selected workspace is unavailable")]
+    WorkspaceUnavailable,
 }
 
 #[derive(Debug, thiserror::Error)]

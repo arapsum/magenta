@@ -3843,9 +3843,12 @@ dependencies = [
 name = "magenta-application"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
+ "async-stream",
  "futures-util",
  "magenta-core",
  "magenta-storage",
+ "serde_json",
  "smol",
  "tempfile",
  "thiserror 2.0.20",
@@ -3858,6 +3861,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "serde",
+ "serde_json",
  "thiserror 2.0.20",
 ]
 
@@ -3875,6 +3879,7 @@ dependencies = [
  "magenta-providers",
  "magenta-storage",
  "magenta-ui",
+ "magenta-workspace",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -3940,6 +3945,18 @@ dependencies = [
  "ratex-types",
  "thiserror 2.0.20",
  "tracing",
+]
+
+[[package]]
+name = "magenta-workspace"
+version = "0.1.0"
+dependencies = [
+ "globset",
+ "ignore",
+ "magenta-core",
+ "sha2 0.10.9",
+ "smol",
+ "tempfile",
 ]
 
 [[package]]
