@@ -60,7 +60,8 @@ The product is guided by a few constraints:
   bundled theme cannot be loaded.
 - A responsive, collapsible chat sidebar with:
   - New Chat state;
-  - searchable persisted conversation titles;
+  - full-text search across persisted titles and message bodies, with matched
+    snippets and navigation to the matching message;
   - pinned conversations and grouped recent history;
   - durable pin/unpin, inline rename, selection, expansion, and “Show more”
     interactions;
@@ -103,7 +104,7 @@ The product is guided by a few constraints:
 ## Not implemented yet
 
 - Additional provider integrations.
-- Full-text search indexing and automatic context-budget management.
+- Automatic context-budget management.
 - Non-image attachments, remote image URLs, and clipboard image capture.
 - Rich provider events such as reasoning, tool calls, and citations.
 
@@ -168,13 +169,16 @@ unfinished placeholders recover as stopped; text streamed since the turn began
 may be lost. Failed saves retain the visible response and offer Retry before
 navigation. Existing in-memory demo history is not imported.
 
-The sidebar loads lightweight summaries and filters titles locally. Conversation
-titles can be renamed inline from a row’s overflow menu; Enter or focus loss
-saves a non-empty changed title, while Escape cancels. Renaming preserves the
-conversation’s recency and pin state. The same menu can permanently delete a
-conversation after confirmation; this removes its SQLite records and
-Magenta-managed attachment copies, but never deletes the original files.
-Opening a thread loads its
+The sidebar loads lightweight summaries. Ctrl+K opens a debounced SQLite FTS5
+search across conversation titles and message bodies, including prefix matches,
+highlighted snippets, and direct navigation to older matched messages. Search
+indexes are backfilled during migration and maintained transactionally as titles
+and messages change. Conversation titles can be renamed inline from a row’s
+overflow menu; Enter or focus loss saves a non-empty changed title, while Escape
+cancels. Renaming preserves the conversation’s recency and pin state. The same
+menu can permanently delete a conversation after confirmation; this removes its
+SQLite records and Magenta-managed attachment copies, but never deletes the
+original files. Opening a thread loads its
 latest 50 messages. Earlier pages load on demand, and leaving a thread releases
 its rendered messages. Provider context currently includes all
 completed messages preceding the response, even when they are outside the
@@ -311,9 +315,8 @@ recovery, privacy, and asynchronous-work conventions.
 ## Roadmap
 
 1. Continue visual and keyboard/accessibility QA for the conversation surface.
-2. Add full-text history search.
-3. Bound provider context and evict distant loaded message pages.
-4. Add document attachments and additional providers.
+2. Bound provider context and evict distant loaded message pages.
+3. Add document attachments and additional providers.
 
 ## Contributing
 
