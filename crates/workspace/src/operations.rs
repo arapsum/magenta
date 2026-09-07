@@ -6,8 +6,8 @@ use std::{
 use globset::{Glob, GlobSetBuilder};
 use ignore::WalkBuilder;
 use magenta_core::{
-    WorkspaceAccess, WorkspaceError, WorkspaceFuture, WorkspaceMutation, WorkspaceOperation,
-    WorkspacePreview,
+    WorkspaceAccess, WorkspaceBrowser, WorkspaceDocument, WorkspaceEntry, WorkspaceEntryKind,
+    WorkspaceError, WorkspaceFuture, WorkspaceMutation, WorkspaceOperation, WorkspacePreview,
 };
 use sha2::{Digest, Sha256};
 
@@ -34,6 +34,123 @@ impl WorkspaceAccess for LocalWorkspace {
         Box::pin(smol::unblock(move || {
             commit(&root, &mutation).map_err(WorkspaceError::new)
         }))
+    }
+}
+
+impl WorkspaceBrowser for LocalWorkspace {
+    fn canonicalize_root(&self, root: PathBuf) -> WorkspaceFuture<PathBuf> {
+        Box::pin(smol::unblock(move || {
+            path::canonical_root(&root).map_err(WorkspaceError::new)
+        }))
+    }
+
+    fn list_directory(
+        &self,
+        root: PathBuf,
+        relative: String,
+    ) -> WorkspaceFuture<Vec<WorkspaceEntry>> {
+        Box::pin(smol::unblock(move || {
+            browse_directory(&root, &relative).map_err(WorkspaceError::new)
+        }))
+    }
+
+    fn read_document(&self, root: PathBuf, relative: String) -> WorkspaceFuture<WorkspaceDocument> {
+        Box::pin(smol::unblock(move || {
+            browse_document(&root, &relative).map_err(WorkspaceError::new)
+        }))
+    }
+}
+
+fn browse_directory(root: &Path, relative: &str) -> io::Result<Vec<WorkspaceEntry>> {
+    let root = path::canonical_root(root)?;
+    let directory = if relative.trim().is_empty() || relative == "." {
+        root.clone()
+    } else {
+        path::safe_path(&root, relative, true)?
+    };
+    if !directory.is_dir() {
+        return Err(invalid("workspace browser requires a directory"));
+    }
+
+    let mut entries = Vec::new();
+    for entry in WalkBuilder::new(&directory)
+        .hidden(false)
+        .standard_filters(true)
+        .max_depth(Some(1))
+        .build()
+    {
+        let entry = entry.map_err(|error| invalid(&error.to_string()))?;
+        if entry.depth() == 0 || entry.file_name() == ".git" {
+            continue;
+        }
+        let Some(file_type) = entry.file_type() else {
+            continue;
+        };
+        let kind = if file_type.is_dir() {
+            WorkspaceEntryKind::Directory
+        } else if file_type.is_file() {
+            WorkspaceEntryKind::File
+        } else {
+            continue;
+        };
+        entries.push(WorkspaceEntry {
+            path: path::relative(&root, entry.path()),
+            name: entry.file_name().to_string_lossy().into_owned(),
+            kind,
+        });
+    }
+    entries.sort_by(|left, right| {
+        let left_rank = matches!(left.kind, WorkspaceEntryKind::File);
+        let right_rank = matches!(right.kind, WorkspaceEntryKind::File);
+        left_rank
+            .cmp(&right_rank)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+    });
+    Ok(entries)
+}
+
+fn browse_document(root: &Path, relative: &str) -> io::Result<WorkspaceDocument> {
+    let root = path::canonical_root(root)?;
+    let file = path::safe_path(&root, relative, true)?;
+    if !file.is_file() {
+        return Err(invalid("workspace browser requires a regular file"));
+    }
+    if fs::metadata(&file)?.len() > path::MAX_FILE_BYTES {
+        return Err(invalid("file exceeds the one MiB read limit"));
+    }
+    let content = fs::read_to_string(file)
+        .map_err(|_| invalid("workspace browser only supports UTF-8 text files"))?;
+    Ok(WorkspaceDocument {
+        path: relative.to_owned(),
+        content,
+        language: language_for(relative).to_owned(),
+    })
+}
+
+fn language_for(path: &str) -> &'static str {
+    let name = Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    let extension = Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default();
+    match (name, extension) {
+        ("CMakeLists.txt", _) | (_, "cmake") => "cmake",
+        (_, "rs") => "rust",
+        (_, "c" | "h") => "c",
+        (_, "cc" | "cpp" | "cxx" | "hpp") => "cpp",
+        (_, "sh" | "bash") => "bash",
+        (_, "json") => "json",
+        (_, "toml") => "toml",
+        (_, "yaml" | "yml") => "yaml",
+        (_, "md" | "markdown") => "markdown",
+        (_, "js" | "mjs" | "cjs") => "javascript",
+        (_, "ts") => "typescript",
+        (_, "tsx") => "tsx",
+        (_, "py") => "python",
+        _ => "text",
     }
 }
 
@@ -365,7 +482,7 @@ fn invalid(message: &str) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use magenta_core::WorkspaceOperation;
+    use magenta_core::{WorkspaceBrowser, WorkspaceEntryKind, WorkspaceOperation};
 
     #[test]
     fn creating_a_file_can_materialize_missing_parent_directories() {
@@ -386,5 +503,35 @@ mod tests {
                 .expect("created file should be readable"),
             "int main(void) { return 0; }\n"
         );
+    }
+
+    #[test]
+    fn browser_lists_direct_children_and_reads_supported_documents() {
+        smol::block_on(async {
+            let directory = tempfile::tempdir().expect("workspace should exist");
+            fs::create_dir(directory.path().join("src")).expect("directory should be created");
+            fs::create_dir(directory.path().join(".git")).expect("git directory should exist");
+            fs::write(directory.path().join("src/main.rs"), "fn main() {}\n")
+                .expect("source should be written");
+            fs::write(directory.path().join("README.md"), "# Workspace\n")
+                .expect("readme should be written");
+
+            let workspace = LocalWorkspace;
+            let entries = workspace
+                .list_directory(directory.path().to_path_buf(), String::new())
+                .await
+                .expect("root should be browsable");
+            assert_eq!(entries.len(), 2);
+            assert_eq!(entries[0].kind, WorkspaceEntryKind::Directory);
+            assert_eq!(entries[0].path, "src");
+            assert!(entries.iter().all(|entry| entry.name != ".git"));
+
+            let document = workspace
+                .read_document(directory.path().to_path_buf(), "src/main.rs".to_owned())
+                .await
+                .expect("source should be readable");
+            assert_eq!(document.language, "rust");
+            assert_eq!(document.content, "fn main() {}\n");
+        });
     }
 }
