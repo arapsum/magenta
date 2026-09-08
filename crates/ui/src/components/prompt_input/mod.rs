@@ -3,6 +3,7 @@ mod state;
 #[cfg(test)]
 mod tests;
 
+pub use state::AgentCapability;
 pub use state::{PromptComposer, PromptComposerEvent, PromptRequest};
 
 const MAX_ATTACHMENTS: usize = 4;

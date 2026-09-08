@@ -7,6 +7,7 @@ impl ConversationView {
         cx: &mut Context<'_, Self>,
     ) {
         self.cancel_generation(cx);
+        self.live_commands.clear();
         self.conversation = Some(loaded.conversation);
         self.origins = loaded
             .page
@@ -184,6 +185,7 @@ impl ConversationView {
             generation_progress: None,
             agent_controller: None,
             pending_agent_approval: None,
+            live_commands: HashMap::new(),
             older_cursor: None,
             has_older: false,
             page_load: PageLoadState::Idle,
@@ -198,6 +200,7 @@ impl ConversationView {
 
     pub(crate) fn load(&mut self, thread: ConversationThread, cx: &mut Context<'_, Self>) {
         self.cancel_generation(cx);
+        self.live_commands.clear();
         self.older_cursor = None;
         self.has_older = false;
         self.page_load = PageLoadState::Idle;
@@ -220,6 +223,7 @@ impl ConversationView {
 
     pub(crate) fn clear(&mut self, cx: &mut Context<'_, Self>) {
         self.cancel_generation(cx);
+        self.live_commands.clear();
         self.conversation = None;
         self.messages.clear();
         self.origins.clear();

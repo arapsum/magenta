@@ -1,8 +1,9 @@
 use futures_util::StreamExt as _;
 use magenta_application::PendingAgentGeneration;
 use magenta_core::{
-    AgentActivity, AgentActivityKind, AgentApprovalDecision, AgentRunEvent, AgentRunStream,
-    MessageId, ProviderError, ProviderId,
+    AgentActivity, AgentActivityKind, AgentApprovalDecision, AgentApprovalSubject, AgentRunEvent,
+    AgentRunStream, AgentToolOutput, MessageId, ProviderError, ProviderId,
+    WorkspaceCommandOutputStream, WorkspaceCommandResult,
 };
 
 use super::*;
@@ -144,48 +145,114 @@ impl ConversationView {
                 cx,
             ),
             AgentRunEvent::ApprovalRequired(approval) => {
-                self.pending_agent_approval = Some((assistant_id, approval.clone()));
-                self.push_agent_activity(
-                    generation,
-                    assistant_id,
-                    AgentActivity {
-                        kind: AgentActivityKind::ApprovalRequested,
-                        call_id: approval.tool_call_id.clone(),
-                        tool_name: approval.tool_name.clone(),
-                        status: "awaiting-approval".to_owned(),
-                        summary: approval.reason.clone(),
-                        detail: approval.diff.unwrap_or_default(),
-                    },
-                    cx,
-                );
+                self.apply_approval_event(generation, assistant_id, approval, cx);
             }
             AgentRunEvent::ToolResult(result) => {
-                let tool_name = self.tool_name_for_result(assistant_id, &result.call_id);
-                self.pending_agent_approval = None;
-                self.push_agent_activity(
-                    generation,
-                    assistant_id,
-                    AgentActivity {
-                        kind: AgentActivityKind::ToolResult,
-                        call_id: result.call_id,
-                        tool_name,
-                        status: if result.is_error {
-                            "failed".to_owned()
-                        } else {
-                            "completed".to_owned()
-                        },
-                        summary: "Tool result".to_owned(),
-                        detail: result.output,
-                    },
-                    cx,
-                );
+                self.apply_tool_result_event(generation, assistant_id, result, cx);
             }
             AgentRunEvent::WorkspaceChange(change) => {
                 cx.emit(ConversationViewEvent::WorkspaceChange(change));
             }
+            AgentRunEvent::CommandStarted { call_id, command } => {
+                self.live_commands.insert(
+                    (assistant_id, call_id),
+                    LiveCommand {
+                        command,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        result: None,
+                    },
+                );
+                self.list_state.remeasure_items(0..self.messages.len());
+                cx.notify();
+            }
+            AgentRunEvent::CommandOutput {
+                call_id,
+                stream,
+                chunk,
+            } => {
+                if let Some(command) = self.live_commands.get_mut(&(assistant_id, call_id)) {
+                    let output = match stream {
+                        WorkspaceCommandOutputStream::Stdout => &mut command.stdout,
+                        WorkspaceCommandOutputStream::Stderr => &mut command.stderr,
+                    };
+                    append_bounded(output, &chunk);
+                    self.list_state.remeasure_items(0..self.messages.len());
+                    cx.notify();
+                }
+            }
+            AgentRunEvent::WorkspaceInvalidated => {
+                cx.emit(ConversationViewEvent::WorkspaceInvalidated);
+            }
             AgentRunEvent::Completed(outcome) => return AgentStreamControl::Completed(outcome),
         }
         AgentStreamControl::Continue
+    }
+
+    fn apply_approval_event(
+        &mut self,
+        generation: u64,
+        assistant_id: MessageId,
+        approval: magenta_core::AgentApprovalRequest,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.pending_agent_approval = Some((assistant_id, approval.clone()));
+        let detail = match &approval.subject {
+            AgentApprovalSubject::Workspace { diff, .. } => diff.clone().unwrap_or_default(),
+            AgentApprovalSubject::Command(command) => command.display(),
+        };
+        self.push_agent_activity(
+            generation,
+            assistant_id,
+            AgentActivity {
+                kind: AgentActivityKind::ApprovalRequested,
+                call_id: approval.tool_call_id,
+                tool_name: approval.tool_name,
+                status: "awaiting-approval".to_owned(),
+                summary: approval.reason,
+                detail,
+            },
+            cx,
+        );
+    }
+
+    fn apply_tool_result_event(
+        &mut self,
+        generation: u64,
+        assistant_id: MessageId,
+        result: AgentToolOutput,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let tool_name = self.tool_name_for_result(assistant_id, &result.call_id);
+        if tool_name == "run_command"
+            && let Ok(command_result) =
+                serde_json::from_str::<WorkspaceCommandResult>(&result.output)
+            && let Some(command) = self
+                .live_commands
+                .get_mut(&(assistant_id, result.call_id.clone()))
+        {
+            command.stdout.clone_from(&command_result.stdout);
+            command.stderr.clone_from(&command_result.stderr);
+            command.result = Some(command_result);
+        }
+        self.pending_agent_approval = None;
+        self.push_agent_activity(
+            generation,
+            assistant_id,
+            AgentActivity {
+                kind: AgentActivityKind::ToolResult,
+                call_id: result.call_id,
+                tool_name,
+                status: if result.is_error {
+                    "failed".to_owned()
+                } else {
+                    "completed".to_owned()
+                },
+                summary: "Tool result".to_owned(),
+                detail: result.output,
+            },
+            cx,
+        );
     }
 
     fn tool_name_for_result(&self, assistant_id: MessageId, call_id: &str) -> String {
@@ -241,4 +308,18 @@ impl ConversationView {
         }
         cx.notify();
     }
+}
+
+fn append_bounded(output: &mut String, chunk: &str) {
+    const MAX_LIVE_OUTPUT_BYTES: usize = 128 * 1024;
+
+    output.push_str(chunk);
+    if output.len() <= MAX_LIVE_OUTPUT_BYTES {
+        return;
+    }
+    let mut start = output.len() - MAX_LIVE_OUTPUT_BYTES;
+    while !output.is_char_boundary(start) {
+        start += 1;
+    }
+    output.drain(..start);
 }

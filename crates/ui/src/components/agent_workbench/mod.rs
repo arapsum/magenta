@@ -128,6 +128,17 @@ impl AgentWorkbench {
         cx.notify();
     }
 
+    pub fn refresh(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
+        self.load_task.take();
+        self.directories.clear();
+        self.expanded.clear();
+        self.load_directory(String::new(), cx);
+        if let Some(path) = self.selected_path.clone() {
+            self.open_entry(path, window, cx);
+        }
+        cx.notify();
+    }
+
     fn load_directory(&mut self, path: String, cx: &Context<'_, Self>) {
         if self.directories.contains_key(&path) || self.load_task.is_some() {
             return;

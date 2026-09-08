@@ -36,7 +36,7 @@ use self::settings_window::{AccountSettingsState, SettingsWindow, SettingsWindow
 use crate::components::{
     agent_workbench::{AgentWorkbench, AgentWorkbenchEvent},
     conversation::{ConversationView, ConversationViewEvent},
-    prompt_input::{PromptComposer, PromptComposerEvent},
+    prompt_input::{AgentCapability, PromptComposer, PromptComposerEvent},
     sidebar::{SidebarEvent, SidebarView},
     titlebar, workspace,
 };
@@ -134,6 +134,23 @@ pub struct MainServices {
     pub projects: Option<ProjectCatalog>,
 }
 
+fn configure_agent_composer(
+    composer: &Entity<PromptComposer>,
+    agent: Option<&RunWorkspaceAgent>,
+    cx: &mut Context<'_, MainView>,
+) {
+    let capability = agent.map_or(AgentCapability::Unavailable, |agent| {
+        if agent.supports_commands() {
+            AgentCapability::Commands
+        } else {
+            AgentCapability::Files
+        }
+    });
+    composer.update(cx, |composer, cx| {
+        composer.set_agent_capability(capability, cx);
+    });
+}
+
 #[derive(Clone, Debug)]
 enum AccountState {
     Restoring,
@@ -229,10 +246,7 @@ impl MainView {
             ),
         ]);
         composer.update(cx, |composer, cx| composer.set_storage_ready(false, cx));
-        let agent_available = services.agent.is_some();
-        composer.update(cx, |composer, cx| {
-            composer.set_agent_available(agent_available, cx);
-        });
+        configure_agent_composer(&composer, services.agent.as_ref(), cx);
         let subscriptions = Self::subscribe_to_children(
             &composer,
             &sidebar,
@@ -437,6 +451,15 @@ impl MainView {
                             workbench.show_change(change.clone(), window, cx);
                         });
                         cx.notify();
+                    }
+                }
+                ConversationViewEvent::WorkspaceInvalidated => {
+                    if main.workbench_open
+                        && let Some(workbench) = &main.workbench
+                    {
+                        workbench.update(cx, |workbench, cx| {
+                            workbench.refresh(window, cx);
+                        });
                     }
                 }
             },

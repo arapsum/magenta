@@ -22,7 +22,12 @@ use super::{MAX_ATTACHMENTS, PromptComposer};
 impl PromptComposer {
     fn mode_selector(&self, view: Entity<Self>) -> AnyElement {
         let mode = self.mode.clone();
-        let agent_available = self.agent_available;
+        let agent_available = self.agent_capability.available();
+        let agent_label = if self.agent_capability.commands() {
+            "Agent"
+        } else {
+            "Agent · files only"
+        };
         let label = match mode {
             ConversationMode::Chat => "Chat",
             ConversationMode::Agent => "Agent",
@@ -43,7 +48,7 @@ impl PromptComposer {
                             })),
                     )
                     .item(
-                        PopupMenuItem::new("Agent")
+                        PopupMenuItem::new(agent_label)
                             .checked(mode == ConversationMode::Agent)
                             .disabled(!agent_available)
                             .on_click(window.listener_for(&agent_view, |composer, _, _, cx| {
@@ -70,7 +75,11 @@ impl PromptComposer {
             .px(px(8.))
             .rounded(px(7.))
             .label(label)
-            .tooltip("Choose the workspace this agent can access")
+            .tooltip(if self.agent_capability.commands() {
+                "Choose the workspace this agent can access"
+            } else {
+                "Choose a workspace. Sandboxed commands are unavailable; file tools still work"
+            })
             .on_click(move |_, window, cx| {
                 view.update(cx, |composer, cx| composer.choose_workspace(window, cx));
             });

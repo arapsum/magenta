@@ -59,6 +59,24 @@ pub enum PromptComposerEvent {
     WorkspaceSelected(PathBuf),
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AgentCapability {
+    #[default]
+    Unavailable,
+    Files,
+    Commands,
+}
+
+impl AgentCapability {
+    pub(super) const fn available(self) -> bool {
+        !matches!(self, Self::Unavailable)
+    }
+
+    pub(super) const fn commands(self) -> bool {
+        matches!(self, Self::Commands)
+    }
+}
+
 pub struct PromptComposer {
     pub(super) input: Entity<TextareaState>,
     pub(super) preview: Entity<TextViewState>,
@@ -69,7 +87,7 @@ pub struct PromptComposer {
     pub(super) effort: Option<EffortLevel>,
     pub(super) mode: ConversationMode,
     pub(super) workspace_root: Option<PathBuf>,
-    pub(super) agent_available: bool,
+    pub(super) agent_capability: AgentCapability,
     pub(super) generating: bool,
     storage_ready: bool,
     pub(super) attachments: Vec<ReferenceImage>,
@@ -113,7 +131,7 @@ impl PromptComposer {
             effort: None,
             mode: ConversationMode::Chat,
             workspace_root: None,
-            agent_available: false,
+            agent_capability: AgentCapability::Unavailable,
             generating: false,
             storage_ready: true,
             attachments: Vec::new(),
@@ -189,9 +207,13 @@ impl PromptComposer {
         }
     }
 
-    pub(crate) fn set_agent_available(&mut self, available: bool, cx: &mut Context<'_, Self>) {
-        self.agent_available = available;
-        if !available && self.mode == ConversationMode::Agent {
+    pub(crate) fn set_agent_capability(
+        &mut self,
+        capability: AgentCapability,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.agent_capability = capability;
+        if !capability.available() && self.mode == ConversationMode::Agent {
             self.mode = ConversationMode::Chat;
         }
         cx.notify();
@@ -203,7 +225,7 @@ impl PromptComposer {
         workspace_root: Option<PathBuf>,
         cx: &mut Context<'_, Self>,
     ) {
-        self.mode = if mode == ConversationMode::Agent && !self.agent_available {
+        self.mode = if mode == ConversationMode::Agent && !self.agent_capability.available() {
             ConversationMode::Chat
         } else {
             mode
@@ -213,7 +235,7 @@ impl PromptComposer {
     }
 
     pub(crate) fn activate_workspace(&mut self, root: PathBuf, cx: &mut Context<'_, Self>) {
-        if self.agent_available {
+        if self.agent_capability.available() {
             self.mode = ConversationMode::Agent;
             self.workspace_root = Some(root);
             cx.notify();
@@ -335,7 +357,7 @@ impl PromptComposer {
 
     pub(super) fn is_ready(&self, cx: &App) -> bool {
         let workspace_ready = self.mode == ConversationMode::Chat
-            || (self.agent_available
+            || (self.agent_capability.available()
                 && self
                     .workspace_root
                     .as_deref()
@@ -348,7 +370,7 @@ impl PromptComposer {
     }
 
     pub(super) fn select_mode(&mut self, mode: ConversationMode, cx: &mut Context<'_, Self>) {
-        if mode == ConversationMode::Agent && !self.agent_available {
+        if mode == ConversationMode::Agent && !self.agent_capability.available() {
             return;
         }
         if self.mode != mode {
@@ -358,7 +380,7 @@ impl PromptComposer {
     }
 
     pub(super) fn choose_workspace(&mut self, window: &Window, cx: &Context<'_, Self>) {
-        if self.mode != ConversationMode::Agent || !self.agent_available {
+        if self.mode != ConversationMode::Agent || !self.agent_capability.available() {
             return;
         }
 

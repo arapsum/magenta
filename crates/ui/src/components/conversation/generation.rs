@@ -322,5 +322,17 @@ impl ConversationView {
     pub(super) fn clear_agent_state(&mut self) {
         self.agent_controller.take();
         self.pending_agent_approval.take();
+        for command in self.live_commands.values_mut() {
+            if command.result.is_none() {
+                command.result = Some(WorkspaceCommandResult {
+                    status: WorkspaceCommandStatus::Cancelled,
+                    exit_code: None,
+                    duration_ms: 0,
+                    stdout: command.stdout.clone(),
+                    stderr: command.stderr.clone(),
+                    truncated: false,
+                });
+            }
+        }
     }
 }

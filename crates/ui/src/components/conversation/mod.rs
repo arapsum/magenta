@@ -32,9 +32,10 @@ use gpui_component::{
 };
 use magenta_application::AgentApprovalController;
 use magenta_core::{
-    AgentActivityKind, AgentApprovalRequest, AgentWorkspaceChange, Conversation, GenerationConfig,
-    GenerationEvent, GenerationOutcome, GenerationStream, Message, MessageId, MessageRole,
-    MessageStatus, ProviderError, ProviderId,
+    AgentActivity, AgentActivityKind, AgentApprovalRequest, AgentApprovalSubject,
+    AgentWorkspaceChange, Conversation, GenerationConfig, GenerationEvent, GenerationOutcome,
+    GenerationStream, Message, MessageId, MessageRole, MessageStatus, ProviderError, ProviderId,
+    WorkspaceCommand, WorkspaceCommandResult, WorkspaceCommandStatus,
 };
 
 use crate::components::{
@@ -143,6 +144,15 @@ pub enum ConversationViewEvent {
     ReturnToLatest,
     Regenerate(MessageId),
     WorkspaceChange(AgentWorkspaceChange),
+    WorkspaceInvalidated,
+}
+
+#[derive(Clone, Debug)]
+struct LiveCommand {
+    command: WorkspaceCommand,
+    stdout: String,
+    stderr: String,
+    result: Option<WorkspaceCommandResult>,
 }
 
 struct RenderedMessage {
@@ -180,6 +190,7 @@ pub struct ConversationView {
     generation_progress: Option<GenerationProgress>,
     agent_controller: Option<AgentApprovalController>,
     pending_agent_approval: Option<(MessageId, AgentApprovalRequest)>,
+    live_commands: HashMap<(MessageId, String), LiveCommand>,
     older_cursor: Option<magenta_core::MessageSequence>,
     has_older: bool,
     page_load: PageLoadState,
