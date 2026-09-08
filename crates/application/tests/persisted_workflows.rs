@@ -2,8 +2,9 @@ use magenta_application::{
     RegenerateMessage, RegenerateMessageInput, SendMessage, SendMessageInput, SendTarget,
 };
 use magenta_core::{
-    ChatProvider, ConversationMode, ConversationStore, EffortLevel, GenerationConfig,
-    GenerationRequest, GenerationStream, MessageStatus, ModelId, ProviderId,
+    ChatProvider, ConversationMode, ConversationStore, EffortLevel, FinishReason, GenerationConfig,
+    GenerationEvent, GenerationLimits, GenerationOutcome, GenerationRequest, GenerationStream,
+    MessageStatus, ModelId, ProviderId,
 };
 use magenta_storage::SqliteConversationStore;
 use std::sync::{Arc, Mutex};
@@ -15,6 +16,23 @@ impl ChatProvider for RecordingProvider {
     fn stream(&self, request: GenerationRequest) -> GenerationStream {
         self.0.lock().unwrap().push(request);
         Box::pin(futures_util::stream::empty())
+    }
+}
+
+struct TitleProvider;
+
+impl ChatProvider for TitleProvider {
+    fn stream(&self, _: GenerationRequest) -> GenerationStream {
+        Box::pin(futures_util::stream::iter([
+            Ok(GenerationEvent::Started),
+            Ok(GenerationEvent::TextDelta(
+                "\"Automatic Context Budgets.\"".to_owned(),
+            )),
+            Ok(GenerationEvent::Completed(GenerationOutcome::new(
+                FinishReason::Stop,
+                None,
+            ))),
+        ]))
     }
 }
 
@@ -94,6 +112,94 @@ fn reopened_send_and_regeneration_use_committed_history() {
         assert_eq!(
             store.load(id).await.unwrap().page.messages[3].message,
             stopped
+        );
+    });
+}
+
+#[test]
+fn send_bounds_provider_context_and_rejects_oversized_messages_before_invocation() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteConversationStore::new(
+            directory.path().join("history.sqlite3"),
+        ));
+        store.initialize().await.unwrap();
+        let provider = Arc::new(RecordingProvider::default());
+        let workflow = SendMessage::new(provider.clone(), store.clone());
+        let limits = GenerationLimits {
+            context_window_tokens: 350,
+            max_output_tokens: 20,
+        };
+        let mut first = input(SendTarget::New);
+        first.prompt = "a".repeat(120);
+        first.generation = first.generation.with_limits(limits);
+        let first = workflow.execute(first).await.unwrap();
+        let id = first.conversation.id;
+        let mut assistant = first.assistant_message;
+        assistant.content = "b".repeat(120);
+        assistant.status = MessageStatus::Complete;
+        store.finalize(assistant).await.unwrap();
+
+        let mut next = input(SendTarget::Existing(id));
+        next.prompt = "latest".into();
+        next.generation = next.generation.with_limits(limits);
+        let next = workflow.execute(next).await.unwrap();
+        assert_eq!(provider.0.lock().unwrap()[1].messages.len(), 1);
+        let mut next_assistant = next.assistant_message;
+        next_assistant.status = MessageStatus::Complete;
+        store.finalize(next_assistant).await.unwrap();
+
+        let mut oversized = input(SendTarget::Existing(id));
+        oversized.prompt = "x".repeat(300);
+        oversized.generation = oversized.generation.with_limits(limits);
+        assert!(workflow.execute(oversized).await.is_err());
+        assert_eq!(provider.0.lock().unwrap().len(), 2);
+    });
+}
+
+#[test]
+fn generated_title_is_persisted_without_overwriting_a_manual_rename() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteConversationStore::new(
+            directory.path().join("history.sqlite3"),
+        ));
+        store.initialize().await.unwrap();
+        let workflow = SendMessage::new(Arc::new(TitleProvider), store.clone());
+        let pending = workflow.execute(input(SendTarget::New)).await.unwrap();
+        let id = pending.conversation.id;
+        let fallback = pending.conversation.title;
+        let generation = pending.conversation.generation;
+
+        let generated = workflow
+            .generate_title(
+                id,
+                "Plan automatic context budgets",
+                fallback,
+                generation.clone(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(generated.as_deref(), Some("Automatic Context Budgets"));
+        assert_eq!(
+            store.load(id).await.unwrap().conversation.title,
+            generated.unwrap()
+        );
+
+        store.rename(id, "My chosen title".into()).await.unwrap();
+        let unchanged = workflow
+            .generate_title(
+                id,
+                "Try another title",
+                "Automatic Context Budgets".into(),
+                generation,
+            )
+            .await
+            .unwrap();
+        assert!(unchanged.is_none());
+        assert_eq!(
+            store.load(id).await.unwrap().conversation.title,
+            "My chosen title"
         );
     });
 }

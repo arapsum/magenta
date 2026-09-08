@@ -312,6 +312,7 @@ impl MainView {
             return;
         }
         let workflow = self.send_message.clone();
+        let should_generate_title = self.active_conversation.is_none();
         let submitted = request.clone();
         let input = SendMessageInput {
             target: self
@@ -343,10 +344,23 @@ impl MainView {
                 main.operation = Operation::Idle;
                 match result {
                     Ok(pending) => {
+                        let title_details = should_generate_title.then(|| {
+                            (
+                                pending.conversation.id,
+                                submitted.prompt.to_string(),
+                                pending.conversation.title.clone(),
+                                pending.conversation.generation.clone(),
+                            )
+                        });
                         main.composer.update(cx, |composer, cx| {
                             composer.clear_submitted(&submitted, window, cx);
                         });
                         main.start_pending(pending, window, cx);
+                        if let Some((id, prompt, current, generation)) = title_details {
+                            main.generate_conversation_title(
+                                id, prompt, current, generation, window, cx,
+                            );
+                        }
                     }
                     Err(source) => {
                         Self::present_storage_error(

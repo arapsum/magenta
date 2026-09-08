@@ -11,7 +11,7 @@ pub use agent::{
     AgentApprovalController, AgentSendTarget, PendingAgentGeneration, RunWorkspaceAgent,
     RunWorkspaceAgentInput,
 };
-pub use error::{RegenerateMessageError, SendMessageError};
+pub use error::{RegenerateMessageError, SendMessageError, TitleConversationError};
 pub use history::ConversationHistory;
 pub use projects::{ProjectCatalog, ProjectCatalogError};
 pub use regenerate_message::{PendingRegeneration, RegenerateMessage, RegenerateMessageInput};

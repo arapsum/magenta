@@ -138,6 +138,22 @@ impl SidebarView {
             .map(|conversation| conversation.title.clone())
     }
 
+    pub(crate) fn apply_generated_title(
+        &mut self,
+        id: ConversationId,
+        title: String,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if let Some(conversation) = self
+            .conversations
+            .iter_mut()
+            .find(|conversation| conversation.id == id)
+        {
+            conversation.title = title;
+            cx.notify();
+        }
+    }
+
     pub(crate) const fn history_available(&self) -> bool {
         self.history_status.is_none() && !self.conversations.is_empty()
     }

@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
+use futures_util::StreamExt as _;
 use magenta_core::{
     AttachmentDraft, BeginTurn, ChatProvider, Conversation, ConversationId, ConversationMode,
-    ConversationStore, GenerationConfig, GenerationRequest, GenerationStream, Message,
+    ConversationStore, GenerationConfig, GenerationEvent, GenerationRequest, GenerationStream,
+    Message, MessageId, MessageRole, MessageStatus,
 };
 
-use crate::SendMessageError;
+use crate::{SendMessageError, TitleConversationError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SendTarget {
@@ -88,6 +90,101 @@ impl SendMessage {
             context_report: prepared.context_report,
         })
     }
+
+    /// Generates and conditionally persists a concise title for a new conversation.
+    ///
+    /// The conditional write prevents a late model response from replacing a manual rename.
+    ///
+    /// # Errors
+    /// Returns an error when generation fails, produces no usable title, or storage is unavailable.
+    pub async fn generate_title(
+        &self,
+        conversation_id: ConversationId,
+        opening_prompt: &str,
+        current_title: String,
+        generation: GenerationConfig,
+    ) -> Result<Option<String>, TitleConversationError> {
+        let opening_prompt = opening_prompt.chars().take(4_000).collect::<String>();
+        let request = format!(
+            "Name this conversation from the opening message below. Return only a concise, specific title of 3 to 7 words. Do not use quotation marks, markdown, or a trailing period.\n\nOpening message:\n{opening_prompt}"
+        );
+        let message = Message {
+            id: MessageId(0),
+            conversation_id,
+            role: MessageRole::User,
+            content: request,
+            status: MessageStatus::Complete,
+            attachments: Vec::new(),
+            generation_outcome: None,
+            agent_activities: Vec::new(),
+        };
+        let mut stream = self.provider.stream(GenerationRequest {
+            generation,
+            messages: vec![message],
+        });
+        let mut output = String::new();
+        let mut completed = false;
+        while let Some(event) = stream.next().await {
+            match event? {
+                GenerationEvent::Started => {}
+                GenerationEvent::TextDelta(delta) => output.push_str(&delta),
+                GenerationEvent::Completed(_) => {
+                    completed = true;
+                    break;
+                }
+            }
+        }
+        if !completed {
+            return Err(TitleConversationError::Incomplete);
+        }
+        let title = normalize_generated_title(&output).ok_or(TitleConversationError::Empty)?;
+        let changed = self
+            .store
+            .rename_if_current(conversation_id, current_title, title.clone())
+            .await?;
+        Ok(changed.then_some(title))
+    }
+}
+
+fn normalize_generated_title(value: &str) -> Option<String> {
+    let mut title = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if title.len() >= 2 {
+        let quoted = (title.starts_with('"') && title.ends_with('"'))
+            || (title.starts_with('`') && title.ends_with('`'));
+        if quoted {
+            title.remove(0);
+            title.pop();
+            trim_in_place(&mut title);
+        }
+    }
+    if title
+        .get(..10)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("**title:**"))
+    {
+        title.drain(..10);
+        trim_in_place(&mut title);
+    }
+    if title
+        .get(..6)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("title:"))
+    {
+        title.drain(..6);
+        trim_in_place(&mut title);
+    }
+    while title.ends_with('.') {
+        title.pop();
+    }
+    trim_in_place(&mut title);
+    if title.chars().count() > 60 {
+        title = format!("{}…", title.chars().take(59).collect::<String>());
+    }
+    (!title.is_empty()).then_some(title)
+}
+
+fn trim_in_place(value: &mut String) {
+    let leading = value.len().saturating_sub(value.trim_start().len());
+    value.drain(..leading);
+    value.truncate(value.trim_end().len());
 }
 
 fn title_from_prompt(prompt: &str, attachments: &[AttachmentDraft]) -> String {
@@ -125,5 +222,25 @@ mod tests {
         }];
 
         assert_eq!(title_from_prompt("   ", &attachments), "Image: diagram.png");
+    }
+
+    #[test]
+    fn generated_titles_are_normalized_and_bounded() {
+        assert_eq!(
+            normalize_generated_title("  **Title:**  Context Budget Design.  "),
+            Some("Context Budget Design".to_owned())
+        );
+        assert_eq!(
+            normalize_generated_title("\"Provider-Aware Conversation Titles.\""),
+            Some("Provider-Aware Conversation Titles".to_owned())
+        );
+        assert!(normalize_generated_title("   ").is_none());
+        assert!(
+            normalize_generated_title(&"x".repeat(80))
+                .unwrap()
+                .chars()
+                .count()
+                <= 60
+        );
     }
 }

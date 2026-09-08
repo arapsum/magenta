@@ -36,6 +36,7 @@ impl MainView {
             return;
         };
 
+        let should_generate_title = self.active_conversation.is_none();
         let input = RunWorkspaceAgentInput {
             target: self
                 .active_conversation
@@ -54,10 +55,23 @@ impl MainView {
                 main.operation = Operation::Idle;
                 match result {
                     Ok(pending) => {
+                        let title_details = should_generate_title.then(|| {
+                            (
+                                pending.conversation.id,
+                                submitted.prompt.to_string(),
+                                pending.conversation.title.clone(),
+                                pending.conversation.generation.clone(),
+                            )
+                        });
                         main.composer.update(cx, |composer, cx| {
                             composer.clear_submitted(&submitted, window, cx);
                         });
                         main.start_agent_pending(pending, window, cx);
+                        if let Some((id, prompt, current, generation)) = title_details {
+                            main.generate_conversation_title(
+                                id, prompt, current, generation, window, cx,
+                            );
+                        }
                     }
                     Err(source) => {
                         Self::present_storage_error(
@@ -236,6 +250,46 @@ impl MainView {
     pub(crate) fn cancel_generation(&self, cx: &mut Context<'_, Self>) {
         self.conversation
             .update(cx, super::super::ConversationView::cancel);
+    }
+
+    pub(super) fn generate_conversation_title(
+        &mut self,
+        id: ConversationId,
+        prompt: String,
+        current_title: String,
+        generation: magenta_core::GenerationConfig,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) {
+        if prompt.trim().is_empty() {
+            return;
+        }
+        let workflow = self.send_message.clone();
+        self.title_task = Some(cx.spawn_in(window, async move |view, window| {
+            let result = workflow
+                .generate_title(id, &prompt, current_title, generation)
+                .await;
+            _ = view.update_in(window, |main, window, cx| {
+                main.title_task = None;
+                match result {
+                    Ok(Some(title)) => {
+                        main.conversation.update(cx, |conversation, cx| {
+                            conversation.rename(id, title.clone(), cx);
+                        });
+                        main.sidebar.update(cx, |sidebar, cx| {
+                            sidebar.apply_generated_title(id, title, cx);
+                        });
+                        main.refresh_summaries(window, cx);
+                    }
+                    Ok(None) => {}
+                    Err(error) => tracing::debug!(
+                        error = ?error,
+                        operation = "conversation.generate_title",
+                        "kept fallback conversation title"
+                    ),
+                }
+            });
+        }));
     }
 
     pub(crate) fn save_response(
