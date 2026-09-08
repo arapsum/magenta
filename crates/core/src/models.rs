@@ -1,6 +1,6 @@
 use std::{future::Future, pin::Pin};
 
-use super::{EffortLevel, ModelId, ProviderError, ProviderId};
+use super::{EffortLevel, GenerationLimits, ModelId, ProviderError, ProviderId};
 
 pub type ModelCatalogFuture =
     Pin<Box<dyn Future<Output = Result<Vec<ModelDescriptor>, ProviderError>> + Send + 'static>>;
@@ -14,6 +14,7 @@ pub struct ModelDescriptor {
     pub priority: i32,
     pub default_effort: EffortLevel,
     pub supported_efforts: Vec<EffortLevel>,
+    pub limits: GenerationLimits,
 }
 
 pub trait ModelCatalog: Send + Sync {

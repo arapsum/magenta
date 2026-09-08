@@ -419,6 +419,12 @@ impl MainView {
                     main.save_response(message.clone(), window, cx);
                 }
                 ConversationViewEvent::LoadEarlier => main.load_earlier(window, cx),
+                ConversationViewEvent::LoadNewer => main.load_newer(window, cx),
+                ConversationViewEvent::ReturnToLatest => {
+                    if let Some(id) = main.active_conversation {
+                        main.navigate(Some(id), window, cx);
+                    }
+                }
                 ConversationViewEvent::Regenerate(message_id) => {
                     main.regenerate(*message_id, window, cx);
                 }

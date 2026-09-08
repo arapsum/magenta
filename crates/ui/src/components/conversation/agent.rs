@@ -25,6 +25,9 @@ impl ConversationView {
             assistant_message,
             stream,
             controller,
+            user_sequence,
+            assistant_sequence,
+            context_report,
         } = pending;
         let provider_id = conversation.generation.provider.clone();
         self.cancel_generation(cx);
@@ -38,7 +41,20 @@ impl ConversationView {
         let assistant_id = assistant.message.id;
         self.messages.push(user);
         self.messages.push(assistant);
-        self.list_state.splice(old_count..old_count, 2);
+        self.set_pending_metadata(
+            self.messages[old_count].message.id,
+            user_sequence,
+            assistant_id,
+            assistant_sequence,
+            context_report.omitted_messages,
+            cx,
+        );
+        if self.trim_oldest_to_limit(cx) == 0 {
+            self.list_state.splice(old_count..old_count, 2);
+        } else {
+            self.list_state
+                .reset_with_uniform_height(self.messages.len(), px(96.));
+        }
         self.list_state.set_follow_mode(FollowMode::Tail);
         self.list_state.scroll_to_end();
         self.agent_controller = Some(controller);

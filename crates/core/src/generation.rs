@@ -94,6 +94,23 @@ pub struct GenerationConfig {
     pub provider: ProviderId,
     pub model: ModelId,
     pub effort: EffortLevel,
+    #[serde(default)]
+    pub limits: GenerationLimits,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GenerationLimits {
+    pub context_window_tokens: u64,
+    pub max_output_tokens: u64,
+}
+
+impl Default for GenerationLimits {
+    fn default() -> Self {
+        Self {
+            context_window_tokens: 128_000,
+            max_output_tokens: 16_384,
+        }
+    }
 }
 
 impl GenerationConfig {
@@ -103,7 +120,17 @@ impl GenerationConfig {
             provider,
             model,
             effort,
+            limits: GenerationLimits {
+                context_window_tokens: 128_000,
+                max_output_tokens: 16_384,
+            },
         }
+    }
+
+    #[must_use]
+    pub const fn with_limits(mut self, limits: GenerationLimits) -> Self {
+        self.limits = limits;
+        self
     }
 }
 
@@ -177,6 +204,19 @@ mod tests {
         assert_eq!(configuration.provider, ProviderId::new("anthropic"));
         assert_eq!(configuration.model, ModelId::new("sonnet"));
         assert_eq!(configuration.effort, EffortLevel::High);
+        assert_eq!(configuration.limits, GenerationLimits::default());
+    }
+
+    #[test]
+    fn persisted_configuration_without_limits_uses_conservative_defaults() {
+        let configuration: GenerationConfig = serde_json::from_value(serde_json::json!({
+            "provider": "openai",
+            "model": "legacy-model",
+            "effort": "Medium"
+        }))
+        .expect("legacy configuration should deserialize");
+
+        assert_eq!(configuration.limits, GenerationLimits::default());
     }
 
     #[test]

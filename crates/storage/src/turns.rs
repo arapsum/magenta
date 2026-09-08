@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use magenta_core::{
     AgentRunId, Attachment, BeginTurn, Conversation, ConversationId, ConversationMode,
-    GenerationConfig, Message, MessageId, MessageRole, MessageStatus, PreparedTurn,
-    StorageErrorKind,
+    GenerationConfig, Message, MessageId, MessageRole, MessageSequence, MessageStatus,
+    PreparedTurn, StorageErrorKind, select_context,
 };
 use rusqlite::{Connection, Transaction, TransactionBehavior, params};
 
@@ -22,6 +22,7 @@ pub fn begin(
         generation: generation_config,
         mode,
         workspace_root,
+        request_overhead_tokens,
     } = input;
 
     if prompt.trim().is_empty() && attachments.is_empty() {
@@ -65,18 +66,27 @@ pub fn begin(
         timestamp,
     )?;
 
+    context.push(user_message.clone());
+    let (context, context_report) = select_context(
+        &context,
+        conversation.generation.limits,
+        request_overhead_tokens,
+    )
+    .map_err(|error| magenta_core::StorageError::new(StorageErrorKind::ContextTooLarge, error))?;
+    trace_context_budget(&context_report);
+
     let assistant_message = insert_assistant_message(
         &transaction,
         conversation.id,
         sequence,
         &generation,
         timestamp,
+        context_report.omitted_messages,
     )?;
 
     let agent_run_id =
         insert_agent_run(&transaction, &conversation, &assistant_message, timestamp)?;
 
-    context.push(user_message.clone());
     transaction.commit().map_err(database_error)?;
 
     Ok(PreparedTurn {
@@ -85,6 +95,13 @@ pub fn begin(
         assistant_message,
         context,
         agent_run_id,
+        user_sequence: MessageSequence(sequence),
+        assistant_sequence: MessageSequence(
+            sequence.checked_add(1).ok_or_else(|| {
+                failure(StorageErrorKind::InvalidData, "message sequence overflow")
+            })?,
+        ),
+        context_report,
     })
 }
 
@@ -251,6 +268,7 @@ fn insert_assistant_message(
     sequence: i64,
     generation: &str,
     timestamp: i64,
+    omitted_context_messages: usize,
 ) -> Result<Message> {
     let assistant_sequence = sequence
         .checked_add(1)
@@ -259,11 +277,18 @@ fn insert_assistant_message(
         .execute(
             r"
                 INSERT INTO messages(
-                    conversation_id, sequence, role, content, status, generation, created_at
+                    conversation_id, sequence, role, content, status, generation,
+                    omitted_context_messages, created_at
                 )
-                VALUES (?1, ?2, 'assistant', '', 'streaming', ?3, ?4)
+                VALUES (?1, ?2, 'assistant', '', 'streaming', ?3, ?4, ?5)
             ",
-            params![conversation_id.0, assistant_sequence, generation, timestamp],
+            params![
+                conversation_id.0,
+                assistant_sequence,
+                generation,
+                i64::try_from(omitted_context_messages).map_err(invalid)?,
+                timestamp
+            ],
         )
         .map_err(database_error)?;
 
@@ -283,6 +308,7 @@ pub fn regenerate(
     connection: &mut Connection,
     id: ConversationId,
     target: MessageId,
+    request_overhead_tokens: u64,
 ) -> Result<PreparedTurn> {
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -314,6 +340,13 @@ pub fn regenerate(
         .find(|message| message.role == MessageRole::User)
         .cloned()
         .ok_or_else(|| failure(StorageErrorKind::InvalidData, "missing user context"))?;
+    let (context, context_report) = select_context(
+        &context,
+        conversation.generation.limits,
+        request_overhead_tokens,
+    )
+    .map_err(|error| magenta_core::StorageError::new(StorageErrorKind::ContextTooLarge, error))?;
+    trace_context_budget(&context_report);
 
     let generation = serde_json::to_string(&conversation.generation).map_err(invalid)?;
 
@@ -321,10 +354,15 @@ pub fn regenerate(
         .execute(
             r"
                 UPDATE messages
-                SET content = '', status = 'streaming', outcome = NULL, generation = ?1
-                WHERE id = ?2
+                SET content = '', status = 'streaming', outcome = NULL, generation = ?1,
+                    omitted_context_messages = ?2
+                WHERE id = ?3
             ",
-            params![generation, target.0],
+            params![
+                generation,
+                i64::try_from(context_report.omitted_messages).map_err(invalid)?,
+                target.0
+            ],
         )
         .map_err(database_error)?;
 
@@ -354,6 +392,9 @@ pub fn regenerate(
         assistant_message,
         context,
         agent_run_id: None,
+        user_sequence: MessageSequence(sequence.saturating_sub(1)),
+        assistant_sequence: MessageSequence(sequence),
+        context_report,
     })
 }
 
@@ -387,4 +428,14 @@ fn ensure_idle(connection: &Connection, id: ConversationId) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn trace_context_budget(report: &magenta_core::ContextBudgetReport) {
+    tracing::info!(
+        estimated_input_tokens = report.estimated_input_tokens,
+        input_budget_tokens = report.input_budget_tokens,
+        omitted_messages = report.omitted_messages,
+        operation = "conversation.context_budget",
+        "selected bounded conversation context"
+    );
 }

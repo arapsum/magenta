@@ -168,14 +168,21 @@ impl MagentaError {
                 ),
             },
             Self::SendMessage { source } => send_message_presentation(source),
-            Self::RegenerateMessage { .. } => ErrorPresentation {
-                code: "MAG-REGENERATE-MESSAGE",
-                severity: ErrorSeverity::Error,
-                title: "Response could not be regenerated",
-                message: concat!(
-                    "Magenta could not prepare this response. ",
-                    "Try another completed response."
-                ),
+            Self::RegenerateMessage { source } => match source {
+                RegenerateMessageError::Storage(error) => match error.kind {
+                    magenta_core::StorageErrorKind::ContextTooLarge => {
+                        context_too_large_presentation()
+                    }
+                    _ => ErrorPresentation {
+                        code: "MAG-REGENERATE-MESSAGE",
+                        severity: ErrorSeverity::Error,
+                        title: "Response could not be regenerated",
+                        message: concat!(
+                            "Magenta could not prepare this response. ",
+                            "Try another completed response."
+                        ),
+                    },
+                },
             },
         }
     }
@@ -228,6 +235,7 @@ const fn send_message_presentation(source: &SendMessageError) -> ErrorPresentati
                 title: "Image is too large",
                 message: "Each image must be 10 MiB or smaller.",
             },
+            StorageErrorKind::ContextTooLarge => context_too_large_presentation(),
             _ => ErrorPresentation {
                 code: "MAG-SEND-MESSAGE",
                 severity: ErrorSeverity::Error,
@@ -235,6 +243,15 @@ const fn send_message_presentation(source: &SendMessageError) -> ErrorPresentati
                 message: "Magenta could not save this message. Try again.",
             },
         },
+    }
+}
+
+const fn context_too_large_presentation() -> ErrorPresentation {
+    ErrorPresentation {
+        code: "MAG-CONTEXT-TOO-LARGE",
+        severity: ErrorSeverity::Warning,
+        title: "Message is too large",
+        message: "Shorten this message or remove some images, then try again.",
     }
 }
 

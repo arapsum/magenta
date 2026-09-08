@@ -254,6 +254,46 @@ impl MainView {
         }));
     }
 
+    pub(super) fn load_newer(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
+        if self.page_task.is_some() || self.loading_conversation.is_some() {
+            return;
+        }
+        let Some(id) = self.active_conversation else {
+            return;
+        };
+        let Some(cursor) = self.conversation.read(cx).later_cursor() else {
+            return;
+        };
+        let generation = self.load_generation;
+        let history = self.history.clone();
+        self.conversation
+            .update(cx, |view, cx| view.set_loading_newer(true, cx));
+        self.page_task = Some(cx.spawn_in(window, async move |view, window| {
+            let result = history.later(id, cursor).await;
+            _ = view.update_in(window, |main, window, cx| {
+                if main.active_conversation != Some(id) || main.load_generation != generation {
+                    return;
+                }
+                main.page_task = None;
+                match result {
+                    Ok(page) => main
+                        .conversation
+                        .update(cx, |view, cx| view.append_page(page, cx)),
+                    Err(source) => {
+                        main.conversation
+                            .update(cx, |view, cx| view.set_loading_newer(false, cx));
+                        Self::present_storage_error(
+                            &MagentaError::StorageLoad { source },
+                            window,
+                            cx,
+                        );
+                    }
+                }
+                main.update_composer_availability(cx);
+            });
+        }));
+    }
+
     pub(super) fn submit(
         &mut self,
         request: &PromptRequest,
@@ -329,6 +369,7 @@ impl MainView {
             && self.unsaved.is_none()
             && self.loading_conversation.is_none()
             && !self.conversation.read(cx).is_streaming()
+            && !self.conversation.read(cx).is_viewing_older_messages()
     }
 
     pub(super) fn update_composer_availability(&self, cx: &mut Context<'_, Self>) {

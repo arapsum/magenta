@@ -43,7 +43,8 @@ pub fn page(
     let mut statement = connection
         .prepare(
             r"
-                SELECT id, sequence, role, content, status, generation, outcome, created_at
+                SELECT id, sequence, role, content, status, generation, outcome, created_at,
+                       omitted_context_messages
                 FROM messages
                 WHERE conversation_id = ?1
                   AND (?2 IS NULL OR sequence < ?2)
@@ -63,10 +64,56 @@ pub fn page(
     messages.truncate(50);
     messages.reverse();
     let older_cursor = messages.first().map(|message| message.sequence);
+    let newer_cursor = messages.last().map(|message| message.sequence);
+    let has_newer = if let Some(cursor) = newer_cursor {
+        has_messages_after(connection, id, cursor)?
+    } else {
+        false
+    };
     Ok(MessagePage {
         messages,
         older_cursor,
         has_older,
+        newer_cursor,
+        has_newer,
+    })
+}
+
+pub fn page_after(
+    connection: &Connection,
+    id: ConversationId,
+    after: MessageSequence,
+) -> Result<MessagePage> {
+    let mut statement = connection
+        .prepare(
+            r"
+                SELECT id, sequence, role, content, status, generation, outcome, created_at,
+                       omitted_context_messages
+                FROM messages
+                WHERE conversation_id = ?1 AND sequence > ?2
+                ORDER BY sequence
+                LIMIT 51
+            ",
+        )
+        .map_err(database_error)?;
+    let mut rows = statement
+        .query(params![id.0, after.0])
+        .map_err(database_error)?;
+    let mut messages = Vec::new();
+    while let Some(row) = rows.next().map_err(database_error)? {
+        messages.push(read_message(connection, id, row)?);
+    }
+    let has_newer = messages.len() > 50;
+    messages.truncate(50);
+    let older_cursor = messages.first().map(|message| message.sequence);
+    let newer_cursor = messages.last().map(|message| message.sequence);
+    let has_older = older_cursor.is_some_and(|cursor| cursor.0 > 0);
+    Ok(MessagePage {
+        messages,
+        older_cursor,
+        has_older,
+        newer_cursor,
+        has_newer,
     })
 }
 
@@ -80,7 +127,8 @@ pub fn page_around(
     let mut statement = connection
         .prepare(
             r"
-                SELECT id, sequence, role, content, status, generation, outcome, created_at
+                SELECT id, sequence, role, content, status, generation, outcome, created_at,
+                       omitted_context_messages
                 FROM messages
                 WHERE conversation_id = ?1
                   AND sequence BETWEEN ?2 AND ?3
@@ -108,10 +156,17 @@ pub fn page_around(
             |row| row.get(0),
         )
         .map_err(database_error)?;
+    let newer_cursor = messages.last().map(|message| message.sequence);
+    let has_newer = match newer_cursor {
+        Some(cursor) => has_messages_after(connection, id, cursor)?,
+        None => false,
+    };
     Ok(MessagePage {
         messages,
         older_cursor: Some(older_cursor),
         has_older,
+        newer_cursor,
+        has_newer,
     })
 }
 
@@ -119,7 +174,8 @@ pub fn context(connection: &Connection, id: ConversationId, before: i64) -> Resu
     let mut statement = connection
         .prepare(
             r"
-                SELECT id, sequence, role, content, status, generation, outcome, created_at
+                SELECT id, sequence, role, content, status, generation, outcome, created_at,
+                       omitted_context_messages
                 FROM messages
                 WHERE conversation_id = ?1
                   AND sequence < ?2
@@ -182,6 +238,8 @@ fn read_message(
     let sequence = MessageSequence(row.get(1).map_err(database_error)?);
     let created_at = Timestamp(row.get(7).map_err(database_error)?);
     let generation = serde_json::from_str(&generation).map_err(invalid)?;
+    let omitted_context_messages =
+        usize::try_from(row.get::<_, i64>(8).map_err(database_error)?).map_err(invalid)?;
 
     Ok(StoredMessage {
         message: Message {
@@ -198,7 +256,22 @@ fn read_message(
         created_at,
         generation,
         agent_activities,
+        omitted_context_messages,
     })
+}
+
+fn has_messages_after(
+    connection: &Connection,
+    id: ConversationId,
+    cursor: MessageSequence,
+) -> Result<bool> {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM messages WHERE conversation_id = ?1 AND sequence > ?2)",
+            params![id.0, cursor.0],
+            |row| row.get(0),
+        )
+        .map_err(database_error)
 }
 
 fn agent_activities(connection: &Connection, message_id: MessageId) -> Result<Vec<AgentActivity>> {

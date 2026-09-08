@@ -4,7 +4,7 @@ use std::{error::Error, future::Future, ops::Range, pin::Pin};
 
 use crate::{
     AgentActivity, AgentActivityRecord, AgentRunId, AttachmentDraft, Conversation, ConversationId,
-    ConversationMode, GenerationConfig, Message, MessageId,
+    ConversationMode, GenerationConfig, Message, MessageId, ProviderId,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -21,6 +21,7 @@ pub struct ConversationSummary {
     pub pinned: bool,
     pub mode: ConversationMode,
     pub workspace_root: Option<std::path::PathBuf>,
+    pub provider: ProviderId,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -44,6 +45,7 @@ pub struct StoredMessage {
     pub created_at: Timestamp,
     pub generation: GenerationConfig,
     pub agent_activities: Vec<AgentActivity>,
+    pub omitted_context_messages: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,6 +53,8 @@ pub struct MessagePage {
     pub messages: Vec<StoredMessage>,
     pub older_cursor: Option<MessageSequence>,
     pub has_older: bool,
+    pub newer_cursor: Option<MessageSequence>,
+    pub has_newer: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,6 +72,7 @@ pub struct BeginTurn {
     pub generation: GenerationConfig,
     pub mode: ConversationMode,
     pub workspace_root: Option<std::path::PathBuf>,
+    pub request_overhead_tokens: u64,
 }
 
 pub struct PreparedTurn {
@@ -76,6 +81,9 @@ pub struct PreparedTurn {
     pub assistant_message: Message,
     pub context: Vec<Message>,
     pub agent_run_id: Option<AgentRunId>,
+    pub user_sequence: MessageSequence,
+    pub assistant_sequence: MessageSequence,
+    pub context_report: crate::ContextBudgetReport,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +98,7 @@ pub enum StorageErrorKind {
     UnsupportedAttachment,
     AnimatedImage,
     AttachmentTooLarge,
+    ContextTooLarge,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -124,15 +133,23 @@ pub trait ConversationStore: Send + Sync {
         sequence: MessageSequence,
     ) -> StorageFuture<ConversationPage>;
     fn earlier(&self, id: ConversationId, before: MessageSequence) -> StorageFuture<MessagePage>;
+    fn later(&self, id: ConversationId, after: MessageSequence) -> StorageFuture<MessagePage>;
     fn begin_turn(&self, input: BeginTurn) -> StorageFuture<PreparedTurn>;
     fn begin_regeneration(
         &self,
         id: ConversationId,
         target: MessageId,
+        request_overhead_tokens: u64,
     ) -> StorageFuture<PreparedTurn>;
     fn finalize(&self, message: Message) -> StorageFuture<()>;
     fn delete(&self, id: ConversationId) -> StorageFuture<()>;
     fn rename(&self, id: ConversationId, title: String) -> StorageFuture<()>;
+    fn rename_if_current(
+        &self,
+        id: ConversationId,
+        current: String,
+        title: String,
+    ) -> StorageFuture<bool>;
     fn set_pinned(&self, id: ConversationId, pinned: bool) -> StorageFuture<()>;
     fn append_agent_activity(&self, activity: AgentActivityRecord) -> StorageFuture<()>;
 }

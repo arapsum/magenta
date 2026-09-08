@@ -18,6 +18,8 @@ pub struct PendingRegeneration {
     pub assistant_message: Message,
     pub provider_id: ProviderId,
     pub stream: GenerationStream,
+    pub assistant_sequence: magenta_core::MessageSequence,
+    pub context_report: magenta_core::ContextBudgetReport,
 }
 
 #[derive(Clone)]
@@ -42,7 +44,7 @@ impl RegenerateMessage {
     ) -> Result<PendingRegeneration, RegenerateMessageError> {
         let prepared = self
             .store
-            .begin_regeneration(input.conversation_id, input.target_message_id)
+            .begin_regeneration(input.conversation_id, input.target_message_id, 0)
             .await?;
         let provider_id = prepared.conversation.generation.provider.clone();
         let stream = self.provider.stream(GenerationRequest {
@@ -54,6 +56,8 @@ impl RegenerateMessage {
             assistant_message: prepared.assistant_message,
             provider_id,
             stream,
+            assistant_sequence: prepared.assistant_sequence,
+            context_report: prepared.context_report,
         })
     }
 }

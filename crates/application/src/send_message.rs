@@ -28,6 +28,9 @@ pub struct PendingGeneration {
     pub user_message: Message,
     pub assistant_message: Message,
     pub stream: GenerationStream,
+    pub user_sequence: magenta_core::MessageSequence,
+    pub assistant_sequence: magenta_core::MessageSequence,
+    pub context_report: magenta_core::ContextBudgetReport,
 }
 
 #[derive(Clone)]
@@ -68,6 +71,7 @@ impl SendMessage {
                 generation: input.generation,
                 mode: input.mode,
                 workspace_root: input.workspace_root,
+                request_overhead_tokens: 0,
             })
             .await?;
         let stream = self.provider.stream(GenerationRequest {
@@ -79,6 +83,9 @@ impl SendMessage {
             user_message: prepared.user_message,
             assistant_message: prepared.assistant_message,
             stream,
+            user_sequence: prepared.user_sequence,
+            assistant_sequence: prepared.assistant_sequence,
+            context_report: prepared.context_report,
         })
     }
 }

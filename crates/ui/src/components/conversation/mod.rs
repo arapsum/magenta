@@ -57,6 +57,7 @@ const MESSAGE_MAX_WIDTH: gpui::Pixels = px(760.);
 const USER_MESSAGE_MAX_WIDTH: gpui::Pixels = px(560.);
 const LIST_OVERDRAW: gpui::Pixels = px(640.);
 const GENERATION_CLOCK_INTERVAL: Duration = Duration::from_secs(1);
+const MAX_RENDERED_MESSAGES: usize = 150;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
 #[action(namespace = magenta)]
@@ -71,6 +72,14 @@ enum GenerationPhase {
     Connecting,
     Thinking,
     Responding,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum PageLoadState {
+    #[default]
+    Idle,
+    Earlier,
+    Newer,
 }
 
 impl GenerationPhase {
@@ -130,6 +139,8 @@ pub enum ConversationViewEvent {
     GenerationStarted,
     GenerationFinished(Message),
     LoadEarlier,
+    LoadNewer,
+    ReturnToLatest,
     Regenerate(MessageId),
     WorkspaceChange(AgentWorkspaceChange),
 }
@@ -139,6 +150,8 @@ struct RenderedMessage {
     markdown: Option<Entity<TextViewState>>,
     markdown_source: Option<String>,
     user_segments: Vec<RenderedUserSegment>,
+    sequence: Option<magenta_core::MessageSequence>,
+    omitted_context_messages: usize,
 }
 
 #[derive(Clone)]
@@ -169,7 +182,9 @@ pub struct ConversationView {
     pending_agent_approval: Option<(MessageId, AgentApprovalRequest)>,
     older_cursor: Option<magenta_core::MessageSequence>,
     has_older: bool,
-    loading_earlier: bool,
+    page_load: PageLoadState,
+    newer_cursor: Option<magenta_core::MessageSequence>,
+    has_newer: bool,
     origins: HashMap<MessageId, GenerationConfig>,
     math_cache: Arc<MathCache>,
     math_tasks: HashMap<FormulaKey, Task<()>>,
@@ -237,12 +252,12 @@ impl Render for ConversationView {
                     Button::new("load-earlier-messages")
                         .ghost()
                         .small()
-                        .label(if self.loading_earlier {
+                        .label(if self.page_load == PageLoadState::Earlier {
                             "Loading earlier messages…"
                         } else {
                             "Load earlier messages"
                         })
-                        .disabled(self.loading_earlier)
+                        .disabled(self.page_load == PageLoadState::Earlier)
                         .accessibility_id("load-earlier-messages")
                         .on_click(
                             cx.listener(|_, _, _, cx| cx.emit(ConversationViewEvent::LoadEarlier)),
@@ -258,7 +273,46 @@ impl Render for ConversationView {
                 .min_h_0()
                 .w_full(),
             )
-            .child(
+            .child(if self.has_newer {
+                h_flex()
+                    .flex_none()
+                    .w_full()
+                    .justify_center()
+                    .gap(px(8.))
+                    .px(px(24.))
+                    .pt(px(10.))
+                    .pb(px(18.))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Viewing older messages"),
+                    )
+                    .child(
+                        Button::new("load-newer-messages")
+                            .ghost()
+                            .small()
+                            .label(if self.page_load == PageLoadState::Newer {
+                                "Loading newer messages…"
+                            } else {
+                                "Load newer"
+                            })
+                            .disabled(self.page_load == PageLoadState::Newer)
+                            .on_click(cx.listener(|_, _, _, cx| {
+                                cx.emit(ConversationViewEvent::LoadNewer);
+                            })),
+                    )
+                    .child(
+                        Button::new("return-to-latest")
+                            .outline()
+                            .small()
+                            .label("Return to latest")
+                            .on_click(cx.listener(|_, _, _, cx| {
+                                cx.emit(ConversationViewEvent::ReturnToLatest);
+                            })),
+                    )
+                    .into_any_element()
+            } else {
                 div()
                     .flex_none()
                     .w_full()
@@ -271,8 +325,9 @@ impl Render for ConversationView {
                             .max_w(MESSAGE_MAX_WIDTH)
                             .mx_auto()
                             .child(self.composer.clone()),
-                    ),
-            )
+                    )
+                    .into_any_element()
+            })
             .when_some(self.attachment_preview_overlay(cx), |this, overlay| {
                 this.child(overlay)
             })

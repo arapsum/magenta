@@ -80,6 +80,11 @@ impl MainView {
         window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
+        let user_id = pending.user_message.id;
+        let assistant_id = pending.assistant_message.id;
+        let user_sequence = pending.user_sequence;
+        let assistant_sequence = pending.assistant_sequence;
+        let omitted = pending.context_report.omitted_messages;
         let id = pending.conversation.id;
         let provider = pending.conversation.generation.provider.clone();
         let conversation = pending.conversation.clone();
@@ -108,6 +113,14 @@ impl MainView {
                 provider,
                 pending.stream,
                 window,
+                cx,
+            );
+            view.set_pending_metadata(
+                user_id,
+                user_sequence,
+                assistant_id,
+                assistant_sequence,
+                omitted,
                 cx,
             );
         });
@@ -179,6 +192,9 @@ impl MainView {
                 main.operation = Operation::Idle;
                 match result {
                     Ok(pending) => {
+                        let assistant_id = pending.assistant_message.id;
+                        let assistant_sequence = pending.assistant_sequence;
+                        let omitted = pending.context_report.omitted_messages;
                         main.conversation.update(cx, |view, cx| {
                             view.regenerate(
                                 pending.target_message_id,
@@ -186,6 +202,14 @@ impl MainView {
                                 pending.provider_id,
                                 pending.stream,
                                 window,
+                                cx,
+                            );
+                            view.set_pending_metadata(
+                                MessageId(0),
+                                magenta_core::MessageSequence(0),
+                                assistant_id,
+                                assistant_sequence,
+                                omitted,
                                 cx,
                             );
                         });

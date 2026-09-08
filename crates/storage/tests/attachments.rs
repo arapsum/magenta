@@ -31,6 +31,7 @@ fn begin_turn(attachments: Vec<AttachmentDraft>) -> BeginTurn {
         ),
         mode: ConversationMode::Chat,
         workspace_root: None,
+        request_overhead_tokens: 0,
     }
 }
 
@@ -237,7 +238,7 @@ fn version_one_attachments_remain_unmanaged_and_their_sources_are_not_deleted() 
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
     });
 }
 

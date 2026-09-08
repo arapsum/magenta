@@ -6,32 +6,50 @@ impl ConversationView {
         loaded: magenta_core::ConversationPage,
         cx: &mut Context<'_, Self>,
     ) {
-        let origins = loaded
+        self.cancel_generation(cx);
+        self.conversation = Some(loaded.conversation);
+        self.origins = loaded
             .page
             .messages
             .iter()
             .map(|item| (item.message.id, item.generation.clone()))
             .collect();
-        self.load(
-            ConversationThread {
-                conversation: loaded.conversation,
-                messages: loaded
-                    .page
-                    .messages
-                    .into_iter()
-                    .map(|item| item.message)
-                    .collect(),
-            },
-            cx,
-        );
-        self.origins = origins;
+        self.messages = loaded
+            .page
+            .messages
+            .into_iter()
+            .map(|item| Self::rendered_stored_message(item, cx))
+            .collect();
         self.has_older = loaded.page.has_older;
         self.older_cursor = loaded.page.older_cursor;
+        self.has_newer = loaded.page.has_newer;
+        self.newer_cursor = loaded.page.newer_cursor;
+        self.page_load = PageLoadState::Idle;
+        self.reset_math(cx);
+        self.list_state
+            .reset_with_uniform_height(self.messages.len(), px(96.));
+        self.list_state.set_follow_mode(FollowMode::Normal);
+        if self.has_newer {
+            self.list_state.scroll_to(gpui::ListOffset {
+                item_ix: self.messages.len().saturating_sub(1) / 2,
+                offset_in_item: px(0.),
+            });
+        } else {
+            self.list_state.scroll_to_end();
+        }
         cx.notify();
     }
 
     pub(crate) fn earlier_cursor(&self) -> Option<magenta_core::MessageSequence> {
         self.has_older.then_some(self.older_cursor).flatten()
+    }
+
+    pub(crate) fn later_cursor(&self) -> Option<magenta_core::MessageSequence> {
+        self.has_newer.then_some(self.newer_cursor).flatten()
+    }
+
+    pub(crate) const fn is_viewing_older_messages(&self) -> bool {
+        self.has_newer
     }
 
     pub(crate) fn scroll_to_message(&self, id: MessageId, cx: &mut Context<'_, Self>) {
@@ -49,7 +67,20 @@ impl ConversationView {
     }
 
     pub(crate) fn set_loading_earlier(&mut self, loading: bool, cx: &mut Context<'_, Self>) {
-        self.loading_earlier = loading;
+        self.page_load = if loading {
+            PageLoadState::Earlier
+        } else {
+            PageLoadState::Idle
+        };
+        cx.notify();
+    }
+
+    pub(crate) fn set_loading_newer(&mut self, loading: bool, cx: &mut Context<'_, Self>) {
+        self.page_load = if loading {
+            PageLoadState::Newer
+        } else {
+            PageLoadState::Idle
+        };
         cx.notify();
     }
 
@@ -58,6 +89,7 @@ impl ConversationView {
         page: magenta_core::MessagePage,
         cx: &mut Context<'_, Self>,
     ) {
+        let had_newer = self.has_newer;
         let mut anchor = self.list_state.logical_scroll_top();
         let mut earlier = Vec::new();
         for item in page.messages {
@@ -68,19 +100,64 @@ impl ConversationView {
             {
                 continue;
             }
-            self.origins.insert(item.message.id, item.generation);
-            earlier.push(Self::rendered_message(item.message, cx));
+            self.origins
+                .insert(item.message.id, item.generation.clone());
+            earlier.push(Self::rendered_stored_message(item, cx));
         }
         let count = earlier.len();
         earlier.append(&mut self.messages);
         self.messages = earlier;
-        self.list_state.splice(0..0, count);
+        let overflow = self.messages.len().saturating_sub(MAX_RENDERED_MESSAGES);
+        if overflow > 0 {
+            self.messages.truncate(MAX_RENDERED_MESSAGES);
+        }
+        self.release_unloaded_resources(cx);
+        self.list_state
+            .reset_with_uniform_height(self.messages.len(), px(96.));
         anchor.item_ix += count;
+        anchor.item_ix = anchor.item_ix.min(self.messages.len().saturating_sub(1));
         self.list_state.scroll_to(anchor);
         self.has_older = page.has_older;
         self.older_cursor = page.older_cursor;
-        self.loading_earlier = false;
-        self.queue_math_for_messages(0..self.messages.len(), cx);
+        self.has_newer = had_newer || overflow > 0;
+        self.newer_cursor = self.messages.last().and_then(|message| message.sequence);
+        self.page_load = PageLoadState::Idle;
+        cx.notify();
+    }
+
+    pub(crate) fn append_page(
+        &mut self,
+        page: magenta_core::MessagePage,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let had_older = self.has_older;
+        let mut anchor = self.list_state.logical_scroll_top();
+        for item in page.messages {
+            if self
+                .messages
+                .iter()
+                .any(|loaded| loaded.message.id == item.message.id)
+            {
+                continue;
+            }
+            self.origins
+                .insert(item.message.id, item.generation.clone());
+            self.messages.push(Self::rendered_stored_message(item, cx));
+        }
+        let overflow = self.messages.len().saturating_sub(MAX_RENDERED_MESSAGES);
+        if overflow > 0 {
+            self.messages.drain(..overflow);
+            anchor.item_ix = anchor.item_ix.saturating_sub(overflow);
+        }
+        self.release_unloaded_resources(cx);
+        self.list_state
+            .reset_with_uniform_height(self.messages.len(), px(96.));
+        self.list_state.scroll_to(anchor);
+        self.has_older = had_older || overflow > 0;
+        self.older_cursor = self.messages.first().and_then(|message| message.sequence);
+        self.has_newer = page.has_newer;
+        self.newer_cursor = page.newer_cursor;
+        self.page_load = PageLoadState::Idle;
         cx.notify();
     }
 
@@ -109,7 +186,9 @@ impl ConversationView {
             pending_agent_approval: None,
             older_cursor: None,
             has_older: false,
-            loading_earlier: false,
+            page_load: PageLoadState::Idle,
+            newer_cursor: None,
+            has_newer: false,
             origins: HashMap::new(),
             math_cache: Arc::new(MathCache::default()),
             math_tasks: HashMap::new(),
@@ -121,7 +200,9 @@ impl ConversationView {
         self.cancel_generation(cx);
         self.older_cursor = None;
         self.has_older = false;
-        self.loading_earlier = false;
+        self.page_load = PageLoadState::Idle;
+        self.newer_cursor = None;
+        self.has_newer = false;
         self.origins.clear();
         self.conversation = Some(thread.conversation);
         self.messages = thread
@@ -144,6 +225,9 @@ impl ConversationView {
         self.origins.clear();
         self.older_cursor = None;
         self.has_older = false;
+        self.newer_cursor = None;
+        self.has_newer = false;
+        self.page_load = PageLoadState::Idle;
         self.attachment_preview = None;
         self.list_state.reset(0);
         cx.notify();
@@ -210,7 +294,12 @@ impl ConversationView {
         let assistant_id = assistant.message.id;
         self.messages.push(user);
         self.messages.push(assistant);
-        self.list_state.splice(old_count..old_count, 2);
+        if self.trim_oldest_to_limit(cx) == 0 {
+            self.list_state.splice(old_count..old_count, 2);
+        } else {
+            self.list_state
+                .reset_with_uniform_height(self.messages.len(), px(96.));
+        }
         self.list_state.set_follow_mode(FollowMode::Tail);
         self.list_state.scroll_to_end();
         self.begin_stream(assistant_id, provider_id, stream, window, cx);
@@ -320,7 +409,69 @@ impl ConversationView {
             markdown,
             markdown_source,
             user_segments,
+            sequence: None,
+            omitted_context_messages: 0,
         }
+    }
+
+    fn rendered_stored_message(
+        item: magenta_core::StoredMessage,
+        cx: &mut Context<'_, Self>,
+    ) -> RenderedMessage {
+        let sequence = item.sequence;
+        let omitted_context_messages = item.omitted_context_messages;
+        let mut rendered = Self::rendered_message(item.message, cx);
+        rendered.sequence = Some(sequence);
+        rendered.omitted_context_messages = omitted_context_messages;
+        rendered
+    }
+
+    pub(crate) fn set_pending_metadata(
+        &mut self,
+        user_id: MessageId,
+        user_sequence: magenta_core::MessageSequence,
+        assistant_id: MessageId,
+        assistant_sequence: magenta_core::MessageSequence,
+        omitted_context_messages: usize,
+        cx: &mut Context<'_, Self>,
+    ) {
+        for rendered in &mut self.messages {
+            if rendered.message.id == user_id {
+                rendered.sequence = Some(user_sequence);
+            } else if rendered.message.id == assistant_id {
+                rendered.sequence = Some(assistant_sequence);
+                rendered.omitted_context_messages = omitted_context_messages;
+            }
+        }
+        self.newer_cursor = Some(assistant_sequence);
+        cx.notify();
+    }
+
+    fn release_unloaded_resources(&mut self, cx: &Context<'_, Self>) {
+        self.origins.retain(|id, _| {
+            self.messages
+                .iter()
+                .any(|message| message.message.id == *id)
+        });
+        self.reset_math(cx);
+    }
+
+    pub(super) fn trim_oldest_to_limit(&mut self, cx: &Context<'_, Self>) -> usize {
+        let overflow = self.messages.len().saturating_sub(MAX_RENDERED_MESSAGES);
+        if overflow == 0 {
+            return 0;
+        }
+        self.messages.drain(..overflow);
+        self.has_older = true;
+        self.older_cursor = self.messages.first().and_then(|message| message.sequence);
+        self.release_unloaded_resources(cx);
+        overflow
+    }
+
+    fn reset_math(&mut self, cx: &Context<'_, Self>) {
+        self.math_tasks.clear();
+        self.math_cache.clear();
+        self.queue_math_for_messages(0..self.messages.len(), cx);
     }
 
     pub(super) fn queue_math_for_messages(

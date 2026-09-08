@@ -43,12 +43,15 @@ fn stored_page(range: std::ops::Range<u64>) -> magenta_core::MessagePage {
             created_at: magenta_core::Timestamp(0),
             generation: conversation().generation,
             agent_activities: Vec::new(),
+            omitted_context_messages: 0,
         })
         .collect::<Vec<_>>();
     magenta_core::MessagePage {
         older_cursor: messages.first().map(|message| message.sequence),
+        newer_cursor: messages.last().map(|message| message.sequence),
         messages,
         has_older,
+        has_newer: false,
     }
 }
 
@@ -175,6 +178,54 @@ fn prepending_history_preserves_visible_message_and_offset(cx: &mut TestAppConte
             view.prepend_page(stored_page(0..50), cx);
             assert_eq!(view.messages.len(), 100);
             assert_eq!(view.list_state.logical_scroll_top().item_ix, 60);
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn bidirectional_pages_keep_only_the_bounded_render_window(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
+        let composer = cx.new(|cx| PromptComposer::new(window, cx));
+        ConversationView::new(composer, window, cx)
+    });
+    window
+        .update(cx, |view, _, cx| {
+            view.load_page(
+                magenta_core::ConversationPage {
+                    conversation: conversation(),
+                    page: stored_page(0..150),
+                },
+                cx,
+            );
+            view.append_page(stored_page(150..200), cx);
+            assert_eq!(view.messages.len(), MAX_RENDERED_MESSAGES);
+            assert_eq!(view.messages.first().unwrap().sequence.unwrap().0, 50);
+            assert_eq!(view.messages.last().unwrap().sequence.unwrap().0, 199);
+            assert!(view.has_older);
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn stored_context_omission_is_retained_for_the_assistant_notice(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
+        let composer = cx.new(|cx| PromptComposer::new(window, cx));
+        ConversationView::new(composer, window, cx)
+    });
+    window
+        .update(cx, |view, _, cx| {
+            let mut page = stored_page(0..1);
+            page.messages[0].omitted_context_messages = 4;
+            view.load_page(
+                magenta_core::ConversationPage {
+                    conversation: conversation(),
+                    page,
+                },
+                cx,
+            );
+            assert_eq!(view.messages[0].omitted_context_messages, 4);
         })
         .unwrap();
 }

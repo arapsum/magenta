@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use gpui::{TestAppContext, size};
-use magenta_core::{EffortLevel, GenerationConfig, ModelDescriptor};
+use magenta_core::{EffortLevel, GenerationConfig, GenerationLimits, ModelDescriptor};
 
 use super::{PromptComposer, PromptComposerEvent, is_supported_image};
 
@@ -14,6 +14,7 @@ fn model(id: &str, default_effort: EffortLevel) -> ModelDescriptor {
         priority: 0,
         default_effort,
         supported_efforts: EffortLevel::ALL.to_vec(),
+        limits: GenerationLimits::default(),
     }
 }
 
@@ -165,6 +166,7 @@ fn selecting_a_model_uses_only_its_advertised_efforts(cx: &mut TestAppContext) {
         priority: 0,
         default_effort: gemini_effort.clone(),
         supported_efforts: vec![gemini_effort.clone()],
+        limits: GenerationLimits::default(),
     };
 
     window

@@ -3,6 +3,7 @@
 
 mod agent;
 mod auth;
+mod context;
 mod conversation;
 mod error;
 mod generation;
@@ -24,11 +25,15 @@ pub use agent::{
 pub use auth::{
     AuthenticationFuture, AuthorizationSession, ProviderAccount, ProviderAuthenticator,
 };
+pub use context::{
+    ContextBudgetReport, ContextTooLarge, estimate_agent_overhead, estimate_text_tokens,
+    select_context,
+};
 pub use conversation::Conversation;
 pub use error::{ProviderError, ProviderErrorKind};
 pub use generation::{
-    ChatProvider, EffortLevel, FinishReason, GenerationConfig, GenerationEvent, GenerationOutcome,
-    GenerationRequest, GenerationStream, TokenUsage,
+    ChatProvider, EffortLevel, FinishReason, GenerationConfig, GenerationEvent, GenerationLimits,
+    GenerationOutcome, GenerationRequest, GenerationStream, TokenUsage,
 };
 pub use identifiers::{AgentRunId, ConversationId, MessageId, ModelId, ProviderId};
 pub use message::{Attachment, AttachmentDraft, Message, MessageRole, MessageStatus};

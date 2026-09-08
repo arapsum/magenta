@@ -18,6 +18,7 @@ CREATE TABLE messages (
     status TEXT NOT NULL CHECK (status IN ('complete', 'streaming', 'stopped', 'failed')),
     generation TEXT NOT NULL,
     outcome TEXT,
+    omitted_context_messages INTEGER NOT NULL DEFAULT 0 CHECK (omitted_context_messages >= 0),
     created_at INTEGER NOT NULL,
     UNIQUE (conversation_id, sequence)
 );
@@ -119,4 +120,4 @@ CREATE TRIGGER message_fts_update AFTER UPDATE OF content ON messages BEGIN
     INSERT INTO message_fts(rowid, content) VALUES (new.id, new.content);
 END;
 
-PRAGMA user_version = 5;
+PRAGMA user_version = 6;

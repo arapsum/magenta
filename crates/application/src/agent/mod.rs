@@ -9,7 +9,7 @@ use async_channel::Sender;
 use magenta_core::{
     AgentApprovalDecision, AgentProvider, AgentRequest, AgentRunStream, BeginTurn, Conversation,
     ConversationId, ConversationMode, ConversationStore, GenerationConfig, Message, ProviderId,
-    WorkspaceAccess,
+    WorkspaceAccess, estimate_agent_overhead,
 };
 
 use crate::SendMessageError;
@@ -37,6 +37,9 @@ pub struct PendingAgentGeneration {
     pub assistant_message: Message,
     pub stream: AgentRunStream,
     pub controller: AgentApprovalController,
+    pub user_sequence: magenta_core::MessageSequence,
+    pub assistant_sequence: magenta_core::MessageSequence,
+    pub context_report: magenta_core::ContextBudgetReport,
 }
 
 #[derive(Clone)]
@@ -108,6 +111,9 @@ impl RunWorkspaceAgent {
             return Err(SendMessageError::WorkspaceUnavailable);
         }
 
+        let instructions = agent_instructions(&input.workspace_root);
+        let tools = tools::tool_definitions();
+        let request_overhead_tokens = estimate_agent_overhead(&instructions, &tools);
         let prepared = self
             .store
             .begin_turn(BeginTurn {
@@ -121,6 +127,7 @@ impl RunWorkspaceAgent {
                 generation: input.generation,
                 mode: ConversationMode::Agent,
                 workspace_root: Some(input.workspace_root.clone()),
+                request_overhead_tokens,
             })
             .await?;
 
@@ -129,8 +136,8 @@ impl RunWorkspaceAgent {
         let request = AgentRequest {
             generation: prepared.conversation.generation.clone(),
             messages: prepared.context,
-            instructions: agent_instructions(&input.workspace_root),
-            tools: tools::tool_definitions(),
+            instructions,
+            tools,
         };
         let stream = stream::agent_stream(
             AgentStreamContext {
@@ -152,6 +159,9 @@ impl RunWorkspaceAgent {
             assistant_message: prepared.assistant_message,
             stream,
             controller,
+            user_sequence: prepared.user_sequence,
+            assistant_sequence: prepared.assistant_sequence,
+            context_report: prepared.context_report,
         })
     }
 }

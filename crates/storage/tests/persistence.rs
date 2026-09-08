@@ -33,6 +33,7 @@ fn input(id: Option<ConversationId>) -> BeginTurn {
         ),
         mode: ConversationMode::Chat,
         workspace_root: None,
+        request_overhead_tokens: 0,
     }
 }
 
@@ -252,6 +253,7 @@ fn version_four_migration_backfills_full_text_indexes() {
                     DROP TRIGGER message_fts_update;
                     DROP TABLE conversation_fts;
                     DROP TABLE message_fts;
+                    ALTER TABLE messages DROP COLUMN omitted_context_messages;
                     PRAGMA user_version = 4;
                 ",
             )
@@ -411,7 +413,7 @@ fn interrupted_stream_recovers_once_and_regeneration_keeps_identity() {
             MessageStatus::Stopped
         );
         let regenerated = store
-            .begin_regeneration(id, pending.assistant_message.id)
+            .begin_regeneration(id, pending.assistant_message.id, 0)
             .await
             .unwrap();
         assert_eq!(

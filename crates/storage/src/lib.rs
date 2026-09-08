@@ -1,8 +1,10 @@
 //! SQLite adapter. Connections and migrations are confined to blocking workers.
 
 mod attachments;
+mod managed_attachments;
 mod migrations;
 mod records;
+mod search;
 mod settings;
 mod turns;
 
@@ -134,7 +136,8 @@ impl ConversationStore for SqliteConversationStore {
                             mode,
                             workspace_root,
                             created_at,
-                            updated_at
+                            updated_at,
+                            json_extract(generation, '$.provider') AS provider
                         FROM conversations AS conversation
                         ORDER BY conversation.updated_at DESC, conversation.id DESC
                     ",
@@ -161,6 +164,7 @@ impl ConversationStore for SqliteConversationStore {
                             })?,
                         created_at: Timestamp(row.get(6)?),
                         updated_at: Timestamp(row.get(7)?),
+                        provider: magenta_core::ProviderId(row.get(8)?),
                     })
                 })
                 .map_err(database_error)?;
@@ -170,7 +174,7 @@ impl ConversationStore for SqliteConversationStore {
     }
 
     fn search(&self, query: String, limit: usize) -> StorageFuture<Vec<ConversationSearchResult>> {
-        self.run(move |connection| search(connection, &query, limit))
+        self.run(move |connection| search::search(connection, &query, limit))
     }
 
     fn load(&self, id: ConversationId) -> StorageFuture<ConversationPage> {
@@ -201,6 +205,10 @@ impl ConversationStore for SqliteConversationStore {
         self.run(move |connection| records::page(connection, id, Some(before)))
     }
 
+    fn later(&self, id: ConversationId, after: MessageSequence) -> StorageFuture<MessagePage> {
+        self.run(move |connection| records::page_after(connection, id, after))
+    }
+
     fn begin_turn(&self, input: BeginTurn) -> StorageFuture<PreparedTurn> {
         let path = Arc::clone(&self.path);
         let attachments_path = Arc::clone(&self.attachments_path);
@@ -229,8 +237,11 @@ impl ConversationStore for SqliteConversationStore {
         &self,
         id: ConversationId,
         target: MessageId,
+        request_overhead_tokens: u64,
     ) -> StorageFuture<PreparedTurn> {
-        self.run(move |connection| turns::regenerate(connection, id, target))
+        self.run(move |connection| {
+            turns::regenerate(connection, id, target, request_overhead_tokens)
+        })
     }
 
     fn finalize(&self, message: Message) -> StorageFuture<()> {
@@ -309,7 +320,7 @@ impl ConversationStore for SqliteConversationStore {
             let transaction = connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(database_error)?;
-            let managed_attachments = managed_attachments(&transaction, id)?;
+            let managed_attachments = managed_attachments::for_conversation(&transaction, id)?;
             let changed = transaction
                 .execute("DELETE FROM conversations WHERE id = ?1", [id.0])
                 .map_err(database_error)?;
@@ -340,6 +351,23 @@ impl ConversationStore for SqliteConversationStore {
                 ));
             }
             Ok(())
+        })
+    }
+
+    fn rename_if_current(
+        &self,
+        id: ConversationId,
+        current: String,
+        title: String,
+    ) -> StorageFuture<bool> {
+        self.run(move |connection| {
+            let changed = connection
+                .execute(
+                    "UPDATE conversations SET title = ?1 WHERE id = ?2 AND title = ?3",
+                    params![title, id.0, current],
+                )
+                .map_err(database_error)?;
+            Ok(changed == 1)
         })
     }
 
@@ -501,213 +529,6 @@ const fn agent_run_status(status: magenta_core::MessageStatus) -> &'static str {
         magenta_core::MessageStatus::Stopped => "stopped",
         magenta_core::MessageStatus::Failed => "failed",
     }
-}
-
-fn managed_attachments(
-    connection: &Connection,
-    id: ConversationId,
-) -> Result<Vec<magenta_core::Attachment>> {
-    let mut statement = connection
-        .prepare(
-            r"
-                SELECT attachment.name, attachment.source_path, attachment.mime_type,
-                       attachment.byte_size, attachment.managed
-                FROM attachments AS attachment
-                INNER JOIN messages AS message ON message.id = attachment.message_id
-                WHERE message.conversation_id = ?1
-                  AND attachment.managed = 1
-                ORDER BY message.sequence, attachment.position
-            ",
-        )
-        .map_err(database_error)?;
-    let rows = statement
-        .query_map([id.0], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Vec<u8>>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, bool>(4)?,
-            ))
-        })
-        .map_err(database_error)?;
-    rows.map(|row| {
-        let (name, path, mime_type, byte_size, managed) = row.map_err(database_error)?;
-        Ok(magenta_core::Attachment {
-            name,
-            path: records::decode_path(path)?,
-            mime_type,
-            byte_size: u64::try_from(byte_size).map_err(invalid)?,
-            managed,
-        })
-    })
-    .collect()
-}
-
-fn search(
-    connection: &Connection,
-    query: &str,
-    limit: usize,
-) -> Result<Vec<ConversationSearchResult>> {
-    let Some(query) = fts_query(query) else {
-        return Ok(Vec::new());
-    };
-    let limit = i64::try_from(limit.min(100)).map_err(invalid)?;
-    let result_limit = usize::try_from(limit).map_err(invalid)?;
-    let mut candidates = title_search_results(connection, &query, limit)?;
-    candidates.extend(message_search_results(connection, &query, limit)?);
-    candidates.sort_by(|left, right| {
-        left.1
-            .cmp(&right.1)
-            .then_with(|| left.2.total_cmp(&right.2))
-            .then_with(|| right.0.updated_at.cmp(&left.0.updated_at))
-    });
-    let mut seen = std::collections::HashSet::new();
-    Ok(candidates
-        .into_iter()
-        .filter_map(|(result, _, _)| seen.insert(result.conversation_id).then_some(result))
-        .take(result_limit)
-        .collect())
-}
-
-type RankedSearchResult = (ConversationSearchResult, u8, f64);
-
-fn title_search_results(
-    connection: &Connection,
-    query: &str,
-    limit: i64,
-) -> Result<Vec<RankedSearchResult>> {
-    let mut title_statement = connection
-        .prepare(
-            r"
-                SELECT conversation.id,
-                       highlight(conversation_fts, 0, char(1), char(2)),
-                       COALESCE(
-                           (
-                               SELECT substr(trim(message.content), 1, 240)
-                               FROM messages AS message
-                               WHERE message.conversation_id = conversation.id
-                                 AND message.role = 'user'
-                                 AND trim(message.content) <> ''
-                               ORDER BY message.sequence DESC
-                               LIMIT 1
-                           ),
-                           ''
-                       ),
-                       conversation.updated_at,
-                       bm25(conversation_fts)
-                FROM conversation_fts
-                INNER JOIN conversations AS conversation
-                    ON conversation.id = conversation_fts.rowid
-                WHERE conversation_fts MATCH ?1
-                ORDER BY bm25(conversation_fts), conversation.updated_at DESC
-                LIMIT ?2
-            ",
-        )
-        .map_err(database_error)?;
-    let title_rows = title_statement
-        .query_map(params![query, limit], |row| {
-            let marked_title = row.get::<_, String>(1)?;
-            let (title, title_highlights) = marked_text(&marked_title);
-            Ok((
-                ConversationSearchResult {
-                    conversation_id: ConversationId(row.get(0)?),
-                    message_id: None,
-                    message_sequence: None,
-                    title,
-                    title_highlights,
-                    snippet: row.get(2)?,
-                    snippet_highlights: Vec::new(),
-                    updated_at: Timestamp(row.get(3)?),
-                },
-                0_u8,
-                row.get::<_, f64>(4)?,
-            ))
-        })
-        .map_err(database_error)?;
-    title_rows
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(database_error)
-}
-
-fn message_search_results(
-    connection: &Connection,
-    query: &str,
-    limit: i64,
-) -> Result<Vec<RankedSearchResult>> {
-    let mut message_statement = connection
-        .prepare(
-            r"
-                SELECT conversation.id, message.id, message.sequence, conversation.title,
-                       snippet(message_fts, 0, char(1), char(2), ' … ', 24),
-                       conversation.updated_at, bm25(message_fts)
-                FROM message_fts
-                INNER JOIN messages AS message ON message.id = message_fts.rowid
-                INNER JOIN conversations AS conversation
-                    ON conversation.id = message.conversation_id
-                WHERE message_fts MATCH ?1
-                ORDER BY bm25(message_fts), conversation.updated_at DESC
-                LIMIT ?2
-            ",
-        )
-        .map_err(database_error)?;
-    let message_rows = message_statement
-        .query_map(params![query, limit], |row| {
-            let marked_snippet = row.get::<_, String>(4)?;
-            let (snippet, snippet_highlights) = marked_text(&marked_snippet);
-            Ok((
-                ConversationSearchResult {
-                    conversation_id: ConversationId(row.get(0)?),
-                    message_id: Some(MessageId(row.get(1)?)),
-                    message_sequence: Some(MessageSequence(row.get(2)?)),
-                    title: row.get(3)?,
-                    title_highlights: Vec::new(),
-                    snippet,
-                    snippet_highlights,
-                    updated_at: Timestamp(row.get(5)?),
-                },
-                1_u8,
-                row.get::<_, f64>(6)?,
-            ))
-        })
-        .map_err(database_error)?;
-    message_rows
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(database_error)
-}
-
-fn fts_query(query: &str) -> Option<String> {
-    let terms = query
-        .split_whitespace()
-        .filter(|term| !term.is_empty())
-        .map(|term| format!("\"{}\"*", term.replace('"', "\"\"")))
-        .collect::<Vec<_>>();
-    (!terms.is_empty()).then(|| terms.join(" AND "))
-}
-
-fn marked_text(marked: &str) -> (String, Vec<std::ops::Range<usize>>) {
-    let mut plain = String::with_capacity(marked.len());
-    let mut highlights = Vec::new();
-    let mut start = None;
-    for character in marked.chars() {
-        match character {
-            '\u{1}' => start = Some(plain.len()),
-            '\u{2}' => {
-                if let Some(start) = start.take()
-                    && start < plain.len()
-                {
-                    highlights.push(start..plain.len());
-                }
-            }
-            _ => plain.push(character),
-        }
-    }
-    if let Some(start) = start
-        && start < plain.len()
-    {
-        highlights.push(start..plain.len());
-    }
-    (plain, highlights)
 }
 
 fn connect(path: &std::path::Path) -> Result<Connection> {

@@ -60,6 +60,11 @@ impl ConversationHistory {
     }
 
     #[must_use]
+    pub fn later(&self, id: ConversationId, after: MessageSequence) -> StorageFuture<MessagePage> {
+        self.store.later(id, after)
+    }
+
+    #[must_use]
     pub fn finalize(&self, message: Message) -> StorageFuture<()> {
         self.store.finalize(message)
     }

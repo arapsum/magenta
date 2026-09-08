@@ -150,6 +150,7 @@ impl PromptComposer {
                 priority: 0,
                 default_effort: configuration.effort.clone(),
                 supported_efforts: EffortLevel::ALL.to_vec(),
+                limits: configuration.limits,
             });
         let uses_requested_model =
             model.provider.eq(&configuration.provider) && model.id.eq(&configuration.model);
@@ -548,7 +549,8 @@ impl PromptComposer {
         let effort = self.effort.clone()?;
         Some(PromptRequest {
             prompt: self.input.read(cx).value().trim().to_owned().into(),
-            generation: GenerationConfig::new(model.provider.clone(), model.id.clone(), effort),
+            generation: GenerationConfig::new(model.provider.clone(), model.id.clone(), effort)
+                .with_limits(model.limits),
             attachments: self
                 .attachments
                 .iter()
