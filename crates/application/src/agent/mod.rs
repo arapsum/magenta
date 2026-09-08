@@ -1,3 +1,4 @@
+mod commands;
 mod stream;
 #[cfg(test)]
 mod tool_tests;
@@ -9,7 +10,7 @@ use async_channel::Sender;
 use magenta_core::{
     AgentApprovalDecision, AgentProvider, AgentRequest, AgentRunStream, BeginTurn, Conversation,
     ConversationId, ConversationMode, ConversationStore, GenerationConfig, Message, ProviderId,
-    WorkspaceAccess, estimate_agent_overhead,
+    WorkspaceAccess, WorkspaceCommandRunner, estimate_agent_overhead,
 };
 
 use crate::SendMessageError;
@@ -47,6 +48,7 @@ pub struct AgentStreamContext {
     pub provider: Arc<dyn AgentProvider>,
     pub store: Arc<dyn ConversationStore>,
     pub workspace: Arc<dyn WorkspaceAccess>,
+    pub command_runner: Option<Arc<dyn WorkspaceCommandRunner>>,
     pub root: std::path::PathBuf,
     pub conversation: Conversation,
     pub assistant_message: Message,
@@ -79,6 +81,7 @@ pub struct RunWorkspaceAgent {
     provider: Arc<dyn AgentProvider>,
     store: Arc<dyn ConversationStore>,
     workspace: Arc<dyn WorkspaceAccess>,
+    command_runner: Option<Arc<dyn WorkspaceCommandRunner>>,
 }
 
 impl RunWorkspaceAgent {
@@ -87,12 +90,19 @@ impl RunWorkspaceAgent {
         provider: Arc<dyn AgentProvider>,
         store: Arc<dyn ConversationStore>,
         workspace: Arc<dyn WorkspaceAccess>,
+        command_runner: Option<Arc<dyn WorkspaceCommandRunner>>,
     ) -> Self {
         Self {
             provider,
             store,
             workspace,
+            command_runner,
         }
+    }
+
+    #[must_use]
+    pub const fn supports_commands(&self) -> bool {
+        self.command_runner.is_some()
     }
 
     /// Persists an agent turn before beginning provider work.
@@ -112,7 +122,7 @@ impl RunWorkspaceAgent {
         }
 
         let instructions = agent_instructions(&input.workspace_root);
-        let tools = tools::tool_definitions();
+        let tools = tools::tool_definitions(self.command_runner.is_some());
         let request_overhead_tokens = estimate_agent_overhead(&instructions, &tools);
         let prepared = self
             .store
@@ -144,6 +154,7 @@ impl RunWorkspaceAgent {
                 provider: self.provider.clone(),
                 store: self.store.clone(),
                 workspace: self.workspace.clone(),
+                command_runner: self.command_runner.clone(),
                 root: input.workspace_root,
                 conversation: prepared.conversation.clone(),
                 assistant_message: prepared.assistant_message.clone(),
@@ -176,7 +187,7 @@ pub fn agent_error(provider: &ProviderId, message: &str) -> magenta_core::Provid
 
 fn agent_instructions(root: &std::path::Path) -> String {
     format!(
-        "You are Magenta's constrained workspace execution agent operating in {}. You have actual access to this workspace through the supplied tools. You MUST use those tools to inspect, create, or edit files when the user asks for a workspace change. Do not answer with shell commands, code snippets, or instructions for the user to run, and never claim that you lack filesystem or terminal access. Paths are relative to the workspace root. Keep the user's requested outcome in focus across tool rounds, reuse prior tool results, and do not repeat an identical read unless a mutation may have changed it. Inspect existing files before editing them, but create explicitly requested new files directly instead of inspecting unrelated projects. For a requested new directory or file, call create_file with the relative file path; parent directories are created by the workspace adapter. Do not request shell commands, Git operations, deletion, renaming, or network access.",
+        "You are Magenta's constrained workspace execution agent operating in {}. You have actual access to this workspace through the supplied tools. You MUST use those tools to inspect, create, or edit files when the user asks for a workspace change. Use run_command after edits when a relevant non-interactive build, test, formatter, linter, or locally cached package installation is available. Every command requires user approval, has no network or stdin, and must use structured arguments rather than shell syntax. Do not answer with commands or instructions for the user to run, and never claim that you lack filesystem or command access when the corresponding tool is available. Paths and command working directories should be relative to the workspace root. Keep the requested outcome in focus, reuse prior results, and do not repeat an identical read or command unless a mutation changed its inputs. Inspect existing files before editing them, but create explicitly requested new files directly. Do not request Git operations, deletion, renaming, background processes, or network access.",
         root.display()
     )
 }

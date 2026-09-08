@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AgentRunId, ConversationId, EffortLevel, GenerationConfig, GenerationOutcome, Message,
-    MessageId, ModelId, ProviderError, ProviderId,
+    MessageId, ModelId, ProviderError, ProviderId, WorkspaceCommand, WorkspaceCommandOutputStream,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,10 +88,18 @@ pub struct AgentApprovalRequest {
     pub request_id: String,
     pub tool_call_id: String,
     pub tool_name: String,
-    pub path: String,
     pub reason: String,
-    pub diff: Option<String>,
-    pub protected_read: bool,
+    pub subject: AgentApprovalSubject,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AgentApprovalSubject {
+    Workspace {
+        path: String,
+        diff: Option<String>,
+        protected_read: bool,
+    },
+    Command(WorkspaceCommand),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +115,16 @@ pub enum AgentRunEvent {
     ToolCall(AgentToolCall),
     ToolResult(AgentToolOutput),
     WorkspaceChange(AgentWorkspaceChange),
+    CommandStarted {
+        call_id: String,
+        command: WorkspaceCommand,
+    },
+    CommandOutput {
+        call_id: String,
+        stream: WorkspaceCommandOutputStream,
+        chunk: String,
+    },
+    WorkspaceInvalidated,
     ApprovalRequired(AgentApprovalRequest),
     Completed(GenerationOutcome),
 }

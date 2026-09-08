@@ -2,10 +2,11 @@ use std::{path::Path, sync::Arc};
 
 use async_channel::Receiver;
 use magenta_core::{
-    AgentActivity, AgentActivityKind, AgentApprovalDecision, AgentApprovalRequest, AgentRunEvent,
-    AgentRunStream, AgentToolCall, AgentToolDefinition, AgentToolOutput, AgentWorkspaceChange,
-    Conversation, ConversationId, ConversationStore, ProviderId, WorkspaceAccess,
-    WorkspaceChangeKind, WorkspaceChangeState, WorkspaceOperation, WorkspacePreview,
+    AgentActivity, AgentActivityKind, AgentApprovalDecision, AgentApprovalRequest,
+    AgentApprovalSubject, AgentRunEvent, AgentRunStream, AgentToolCall, AgentToolDefinition,
+    AgentToolOutput, AgentWorkspaceChange, Conversation, ConversationId, ConversationStore,
+    ProviderId, WorkspaceAccess, WorkspaceChangeKind, WorkspaceChangeState, WorkspaceOperation,
+    WorkspacePreview,
 };
 
 use super::{AgentStreamContext, ApprovalResponse, agent_error};
@@ -18,6 +19,18 @@ pub fn execute_tools(
 ) -> AgentRunStream {
     Box::pin(async_stream::try_stream! {
         for call in calls {
+            if call.name == "run_command" {
+                let mut events = super::commands::execute_command(
+                    context.clone(),
+                    call,
+                    approvals.clone(),
+                    provider_id.clone(),
+                );
+                while let Some(event) = futures_util::StreamExt::next(&mut events).await {
+                    yield event?;
+                }
+                continue;
+            }
             let prepared = match prepare_tool(
                 &context.store,
                 &context.workspace,
@@ -41,19 +54,7 @@ pub fn execute_tools(
                 yield AgentRunEvent::WorkspaceChange(change);
             }
             if prepared.operation.is_mutating() || preview.protected {
-                let approval = AgentApprovalRequest {
-                    request_id: format!("{}-approval", call.id),
-                    tool_call_id: call.id.clone(),
-                    tool_name: call.name.clone(),
-                    path: prepared.operation.path().to_owned(),
-                    reason: if preview.protected {
-                        "This path may contain credentials or secrets.".to_owned()
-                    } else {
-                        preview.summary.clone()
-                    },
-                    diff: preview.diff.clone(),
-                    protected_read: preview.protected,
-                };
+                let approval = workspace_approval(&call, &prepared.operation, &preview);
                 record_approval(
                     &context.store,
                     context.run_id,
@@ -204,6 +205,28 @@ async fn finish_tool(
     Ok((output, change))
 }
 
+fn workspace_approval(
+    call: &AgentToolCall,
+    operation: &WorkspaceOperation,
+    preview: &WorkspacePreview,
+) -> AgentApprovalRequest {
+    AgentApprovalRequest {
+        request_id: format!("{}-approval", call.id),
+        tool_call_id: call.id.clone(),
+        tool_name: call.name.clone(),
+        reason: if preview.protected {
+            "This path may contain credentials or secrets.".to_owned()
+        } else {
+            preview.summary.clone()
+        },
+        subject: AgentApprovalSubject::Workspace {
+            path: operation.path().to_owned(),
+            diff: preview.diff.clone(),
+            protected_read: preview.protected,
+        },
+    }
+}
+
 fn workspace_change(
     call: &AgentToolCall,
     preview: &WorkspacePreview,
@@ -245,7 +268,7 @@ async fn record_failure(
     Ok(output)
 }
 
-async fn await_decision(
+pub(super) async fn await_decision(
     approvals: &Receiver<ApprovalResponse>,
     request_id: &str,
 ) -> AgentApprovalDecision {
@@ -257,7 +280,7 @@ async fn await_decision(
     AgentApprovalDecision::Reject
 }
 
-async fn record_approval(
+pub(super) async fn record_approval(
     store: &Arc<dyn ConversationStore>,
     run_id: Option<magenta_core::AgentRunId>,
     assistant_message: &magenta_core::Message,
@@ -275,14 +298,17 @@ async fn record_approval(
             tool_name: call.name.clone(),
             status: "awaiting-approval".to_owned(),
             summary: request.reason.clone(),
-            detail: request.diff.clone().unwrap_or_default(),
+            detail: match &request.subject {
+                AgentApprovalSubject::Workspace { diff, .. } => diff.clone().unwrap_or_default(),
+                AgentApprovalSubject::Command(command) => command.display(),
+            },
         },
         conversation_id,
     )
     .await
 }
 
-async fn record_activity(
+pub(super) async fn record_activity(
     store: &Arc<dyn ConversationStore>,
     run_id: Option<magenta_core::AgentRunId>,
     assistant_message: &magenta_core::Message,
@@ -303,7 +329,7 @@ async fn record_activity(
         .map_err(|error| error.to_string())
 }
 
-async fn record_result(
+pub(super) async fn record_result(
     store: &Arc<dyn ConversationStore>,
     run_id: Option<magenta_core::AgentRunId>,
     assistant_message: &magenta_core::Message,
@@ -401,8 +427,8 @@ fn workspace_error_detail(error: &magenta_core::WorkspaceError) -> String {
     error.source.to_string()
 }
 
-pub fn tool_definitions() -> Vec<AgentToolDefinition> {
-    vec![
+pub fn tool_definitions(commands_available: bool) -> Vec<AgentToolDefinition> {
+    let mut definitions = vec![
         definition(
             "list_files",
             "List workspace files and directories. Paths are relative; use '.' for the root.",
@@ -480,7 +506,27 @@ pub fn tool_definitions() -> Vec<AgentToolDefinition> {
             true,
             false,
         ),
-    ]
+    ];
+    if commands_available {
+        definitions.push(definition(
+            "run_command",
+            "Run one non-interactive command in the selected workspace after explicit user approval. Arguments are passed directly without shell interpolation; network and stdin are unavailable.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "program": {"type": "string"},
+                    "args": {"type": "array", "items": {"type": "string"}, "maxItems": 64},
+                    "cwd": {"type": "string"},
+                    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 600}
+                },
+                "required": ["program", "args", "cwd", "timeout_seconds"],
+                "additionalProperties": false
+            }),
+            true,
+            false,
+        ));
+    }
+    definitions
 }
 
 fn definition(
@@ -499,7 +545,7 @@ fn definition(
     }
 }
 
-fn rejected_output(call_id: &str, message: &str) -> AgentToolOutput {
+pub(super) fn rejected_output(call_id: &str, message: &str) -> AgentToolOutput {
     AgentToolOutput {
         call_id: call_id.to_owned(),
         output: message.to_owned(),
@@ -507,7 +553,7 @@ fn rejected_output(call_id: &str, message: &str) -> AgentToolOutput {
     }
 }
 
-fn failed_output(call_id: &str, message: &str) -> AgentToolOutput {
+pub(super) fn failed_output(call_id: &str, message: &str) -> AgentToolOutput {
     AgentToolOutput {
         call_id: call_id.to_owned(),
         output: message.to_owned(),
