@@ -13,7 +13,7 @@ use gpui_component::{
     text::{TextView, TextViewStyle},
     v_flex,
 };
-use magenta_core::ConversationMode;
+use magenta_core::{ConversationMode, ProviderId};
 
 use crate::components::provider_icon;
 
@@ -66,9 +66,9 @@ impl PromptComposer {
             );
         let button = Button::new("prompt-workspace")
             .compact()
-            .h(px(28.))
+            .h(px(30.))
             .px(px(8.))
-            .rounded(px(6.))
+            .rounded(px(7.))
             .label(label)
             .tooltip("Choose the workspace this agent can access")
             .on_click(move |_, window, cx| {
@@ -184,9 +184,18 @@ impl PromptComposer {
         option_button("prompt-model", trigger_label, selected_provider)
             .accessibility_id("prompt-model-and-effort-selector")
             .dropdown_menu(move |menu, window, cx| {
+                let mut last_provider = None;
                 let menu = models.clone().into_iter().fold(
-                    menu.min_w(px(230.)).label("Models"),
+                    menu.min_w(px(250.)).label("Models"),
                     |menu, model| {
+                        let mut menu = menu;
+                        if last_provider.as_ref() != Some(&model.provider) {
+                            if last_provider.is_some() {
+                                menu = menu.separator();
+                            }
+                            menu = menu.label(provider_menu_label(&model.provider));
+                            last_provider = Some(model.provider.clone());
+                        }
                         let select_view = view.clone();
                         let model_for_click = model.clone();
                         menu.item(
@@ -214,7 +223,7 @@ impl PromptComposer {
                     let selected_effort = selected_effort.clone();
                     move |menu, window, _| {
                         efforts.clone().into_iter().fold(
-                            menu.min_w(px(150.)).label("Effort level"),
+                            menu.min_w(px(160.)).label("Effort level"),
                             |menu, effort| {
                                 let select_view = effort_view.clone();
                                 let effort_for_click = effort.clone();
@@ -314,7 +323,7 @@ impl PromptComposer {
                 h_flex()
                     .min_w_0()
                     .items_center()
-                    .gap(px(4.))
+                    .gap(px(6.))
                     .when(can_add_attachment, |this| {
                         this.child(Self::attachment_button(cx))
                     })
@@ -384,20 +393,19 @@ impl Render for PromptComposer {
             .w_full()
             .max_w(px(672.))
             .mx_auto()
-            .min_h(px(104.))
-            .p(px(14.))
-            .gap(px(8.))
+            .min_h(px(108.))
+            .p(px(16.))
+            .gap(px(10.))
             .justify_between()
-            .rounded(px(18.))
+            .rounded(px(16.))
             .border_1()
             .border_color(if focused {
                 cx.theme().ring
             } else {
-                cx.theme().border.opacity(0.82)
+                cx.theme().border.opacity(0.72)
             })
             .bg(cx.theme().popover)
-            .when(focused, gpui::Styled::shadow_md)
-            .when(!focused, gpui::Styled::shadow_sm)
+            .when(focused, gpui::Styled::shadow_sm)
             .child(
                 v_flex()
                     .flex_1()
@@ -426,6 +434,19 @@ impl Render for PromptComposer {
     }
 }
 
+fn provider_menu_label(provider: &ProviderId) -> String {
+    let id = provider.0.to_ascii_lowercase();
+    if id.starts_with("openai") {
+        "OpenAI".to_owned()
+    } else if id.starts_with("anthropic") || id.starts_with("claude") {
+        "Anthropic".to_owned()
+    } else if id.starts_with("google") || id.starts_with("gemini") {
+        "Gemini".to_owned()
+    } else {
+        provider.0.clone()
+    }
+}
+
 fn option_button(
     id: &'static str,
     label: impl Into<SharedString>,
@@ -434,9 +455,10 @@ fn option_button(
     Button::new(id)
         .compact()
         .dropdown_caret(true)
-        .h(px(28.))
+        .h(px(30.))
         .px(px(8.))
-        .rounded(px(6.))
+        .rounded(px(7.))
+        .text_size(px(12.))
         .icon(icon)
         .label(label)
 }

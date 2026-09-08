@@ -40,9 +40,11 @@ use self::model::title_matches;
 
 const EXPANDED_WIDTH: gpui::Pixels = px(272.);
 const ROW_HEIGHT: gpui::Pixels = px(34.);
+const ROW_RADIUS: gpui::Pixels = px(7.);
+const SECTION_LABEL_HEIGHT: gpui::Pixels = px(28.);
 const INITIAL_RECENCY_LIMIT: usize = 6;
 const RECENCY_PAGE_SIZE: usize = 6;
-const ACCOUNT_MENU_WIDTH: gpui::Pixels = px(240.);
+const ACCOUNT_MENU_WIDTH: gpui::Pixels = px(248.);
 const ACCOUNT_MENU_GAP: gpui::Pixels = px(6.);
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]

@@ -43,7 +43,7 @@ impl SidebarView {
             .w_full()
             .h(ROW_HEIGHT)
             .items_center()
-            .rounded(px(9.))
+            .rounded(ROW_RADIUS)
             .when(selected, |this| {
                 this.bg(selected_background)
                     .text_color(cx.theme().foreground)
@@ -96,7 +96,7 @@ impl SidebarView {
             .min_w_0()
             .h_full()
             .px(px(8.))
-            .rounded(px(9.))
+            .rounded(ROW_RADIUS)
             .text_color(if selected {
                 cx.theme().sidebar_accent_foreground
             } else {
@@ -265,14 +265,13 @@ impl SidebarView {
         disclosure.map_or_else(
             || {
                 div()
-                    .h(px(32.))
+                    .h(SECTION_LABEL_HEIGHT)
                     .flex()
-                    .items_end()
+                    .items_center()
                     .px(px(8.))
-                    .pb(px(6.))
-                    .text_size(px(11.))
+                    .text_size(px(10.))
                     .font_medium()
-                    .text_color(cx.theme().muted_foreground.opacity(0.9))
+                    .text_color(cx.theme().muted_foreground.opacity(0.78))
                     .child(title)
                     .into_any_element()
             },
@@ -281,7 +280,7 @@ impl SidebarView {
                 Button::new("pinned-disclosure")
                     .ghost()
                     .w_full()
-                    .h(px(32.))
+                    .h(SECTION_LABEL_HEIGHT)
                     .px(px(7.))
                     .rounded(px(6.))
                     .text_color(cx.theme().muted_foreground)
@@ -298,7 +297,7 @@ impl SidebarView {
                                 })
                                 .xsmall(),
                             )
-                            .child(div().text_size(px(11.)).font_medium().child(title)),
+                            .child(div().text_size(px(10.)).font_medium().child(title)),
                     )
                     .on_click(move |_, _, cx| {
                         label_view.update(cx, Self::toggle_pinned_expanded);
@@ -358,15 +357,15 @@ impl SidebarView {
             .tab_stop(true)
             .cursor_pointer()
             .w_full()
-            .h(px(34.))
+            .h(px(32.))
             .px(px(10.))
             .gap(px(7.))
-            .rounded(px(9.))
+            .rounded(px(8.))
             .border_1()
-            .border_color(cx.theme().input.opacity(0.72))
-            .bg(cx.theme().sidebar_accent.opacity(0.32))
+            .border_color(cx.theme().input.opacity(0.54))
+            .bg(cx.theme().sidebar_accent.opacity(0.22))
             .text_color(cx.theme().muted_foreground)
-            .hover(|this| this.bg(cx.theme().sidebar_accent.opacity(0.72)))
+            .hover(|this| this.bg(cx.theme().sidebar_accent.opacity(0.58)))
             .child(Icon::new(IconName::Search).xsmall())
             .child(
                 div()
@@ -402,10 +401,10 @@ impl SidebarView {
     pub(super) fn render_content(&self, view: Entity<Self>, cx: &App) -> AnyElement {
         let controls = v_flex()
             .w_full()
-            .gap(px(6.))
+            .gap(px(7.))
             .child(self.new_chat_button(view.clone(), cx))
             .child(self.search_button(cx));
-        let mut content = v_flex().w_full().gap(px(4.)).child(controls);
+        let mut content = v_flex().w_full().gap(px(6.)).child(controls);
 
         content = content.child(self.render_projects(&view, cx));
 

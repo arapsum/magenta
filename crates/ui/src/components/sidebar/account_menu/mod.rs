@@ -22,11 +22,11 @@ impl SidebarView {
             .accessibility_id("sidebar-account-menu")
             .tooltip(tooltip)
             .w_full()
-            .h(px(52.))
+            .h(px(54.))
             .items_center()
             .gap(px(8.))
             .p(px(8.))
-            .rounded(px(8.))
+            .rounded(px(9.))
             .child(
                 div()
                     .flex()
@@ -106,8 +106,8 @@ impl SidebarView {
         let mut surface = v_flex()
             .w(ACCOUNT_MENU_WIDTH)
             .popover_style(cx)
-            .rounded(px(13.))
-            .p(px(4.))
+            .rounded(px(12.))
+            .p(px(5.))
             .child(Self::account_menu_identity(details, cx))
             .child(Self::account_menu_separator(cx))
             .child(Self::account_menu_actions(view, popover, is_dark, cx));
@@ -129,7 +129,7 @@ impl SidebarView {
 
         h_flex()
             .w_full()
-            .h(px(58.))
+            .h(px(56.))
             .items_center()
             .gap(px(10.))
             .px(px(8.))
@@ -348,7 +348,7 @@ impl SidebarView {
     }
 
     fn account_menu_separator(cx: &App) -> impl IntoElement {
-        div().w_full().h(px(1.)).bg(cx.theme().border.opacity(0.75))
+        div().w_full().h(px(1.)).bg(cx.theme().border.opacity(0.58))
     }
 
     fn account_menu_button(
@@ -364,9 +364,9 @@ impl SidebarView {
             .ghost()
             .accessibility_id(id)
             .w_full()
-            .h(px(32.))
+            .h(px(34.))
             .px(px(8.))
-            .rounded(px(7.))
+            .rounded(px(8.))
             .disabled(disabled)
             .child(
                 h_flex()

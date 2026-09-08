@@ -14,6 +14,7 @@ use magenta_core::Project;
 use crate::app::MainView;
 use crate::components::{
     prompt_input::PromptComposer,
+    provider_icon,
     sidebar::{ConversationSummary, SidebarEvent, SidebarView},
 };
 
@@ -28,20 +29,25 @@ fn render_recent_row(
     Button::new(("workspace-recent", id.0))
         .ghost()
         .w_full()
-        .h(px(54.))
-        .px(px(10.))
-        .rounded(px(10.))
+        .h(px(52.))
+        .px(px(12.))
+        .rounded(px(8.))
         .child(
             h_flex()
                 .w_full()
                 .items_start()
-                .gap(px(14.))
+                .gap(px(10.))
+                .child(
+                    provider_icon(Some(&conversation.provider))
+                        .xsmall()
+                        .text_color(cx.theme().muted_foreground),
+                )
                 .child(
                     v_flex()
                         .flex_1()
                         .min_w_0()
                         .items_start()
-                        .gap(px(2.))
+                        .gap(px(3.))
                         .child(
                             div()
                                 .w_full()
@@ -133,7 +139,7 @@ fn render_landing_content(
         .w_full()
         .max_w(px(672.))
         .items_start()
-        .gap(px(8.))
+        .gap(px(9.))
         .child(
             h_flex()
                 .items_center()
@@ -143,8 +149,8 @@ fn render_landing_content(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .size(px(32.))
-                        .rounded(px(10.))
+                        .size(px(30.))
+                        .rounded(px(9.))
                         .bg(cx.theme().sidebar_accent.opacity(0.72))
                         .text_color(cx.theme().foreground)
                         .child(
@@ -158,8 +164,8 @@ fn render_landing_content(
                 )
                 .child(
                     div()
-                        .text_size(px(30.))
-                        .line_height(px(36.))
+                        .text_size(px(31.))
+                        .line_height(px(37.))
                         .font_semibold()
                         .child(heading),
                 ),
@@ -183,13 +189,13 @@ fn render_landing_content(
                 .child(project.root.display().to_string()),
         );
     }
-    content = content.child(div().w_full().mt(px(18.)).child(composer));
+    content = content.child(div().w_full().mt(px(20.)).child(composer));
     if (project.is_some() && has_recent) || (project.is_none() && show_recent) {
         content = content
             .child(
                 div()
-                    .mt(px(22.))
-                    .text_size(px(11.))
+                    .mt(px(24.))
+                    .text_size(px(10.))
                     .font_medium()
                     .text_color(cx.theme().muted_foreground)
                     .child(section_label),
@@ -218,7 +224,7 @@ fn render_landing_shell(content: AnyElement, cx: &Context<'_, MainView>) -> AnyE
                 .items_center()
                 .justify_center()
                 .px(px(32.))
-                .py(px(40.))
+                .py(px(36.))
                 .child(content),
         )
         .into_any_element()

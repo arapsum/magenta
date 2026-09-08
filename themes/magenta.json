@@ -7,8 +7,8 @@
       "name": "Magenta Light",
       "mode": "light",
       "font.size": 15,
-      "radius": 10,
-      "radius.lg": 14,
+      "radius": 8,
+      "radius.lg": 12,
       "shadow": true,
       "colors": {
         "background": "#FCFCFD",
@@ -61,8 +61,8 @@
       "name": "Magenta Dark",
       "mode": "dark",
       "font.size": 15,
-      "radius": 10,
-      "radius.lg": 14,
+      "radius": 8,
+      "radius.lg": 12,
       "shadow": true,
       "colors": {
         "background": "#161618",

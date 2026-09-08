@@ -3,17 +3,17 @@ use super::*;
 impl SidebarView {
     pub(super) fn render_projects(&self, view: &Entity<Self>, cx: &App) -> AnyElement {
         let add_view = view.clone();
-        let mut section = v_flex().w_full().gap(px(2.)).child(
+        let mut section = v_flex().w_full().gap(px(2.)).pt(px(7.)).child(
             h_flex()
-                .h(px(32.))
+                .h(SECTION_LABEL_HEIGHT)
                 .items_center()
                 .px(px(8.))
                 .child(
                     div()
                         .flex_1()
-                        .text_size(px(11.))
+                        .text_size(px(10.))
                         .font_medium()
-                        .text_color(cx.theme().muted_foreground.opacity(0.9))
+                        .text_color(cx.theme().muted_foreground.opacity(0.78))
                         .child("Projects"),
                 )
                 .child(
@@ -46,7 +46,7 @@ impl SidebarView {
             section = section.child(self.project_row(project, view, cx));
             if self.expanded_projects.contains(&project.root) {
                 for conversation in self.project_conversations(&project.root) {
-                    section = section.child(div().pl(px(20.)).child(self.conversation_row(
+                    section = section.child(div().pl(px(24.)).child(self.conversation_row(
                         conversation,
                         view.clone(),
                         cx,
@@ -75,7 +75,7 @@ impl SidebarView {
         };
         let disclosure = Self::project_disclosure(project, expanded, has_conversations, view);
         let project_button =
-            Self::project_button(project, expanded, has_conversations, active, view);
+            Self::project_button(project, expanded, has_conversations, active, view, cx);
         let actions = Self::project_actions(project, active, group_name.clone(), view);
 
         h_flex()
@@ -84,7 +84,7 @@ impl SidebarView {
             .w_full()
             .h(ROW_HEIGHT)
             .items_center()
-            .rounded(px(9.))
+            .rounded(ROW_RADIUS)
             .when(active, |this| this.bg(active_background))
             .hover(move |this| this.bg(hover_background))
             .when(active, |this| {
@@ -120,9 +120,9 @@ impl SidebarView {
         Button::new(format!("project-disclosure-{}", project.root.display()))
             .ghost()
             .xsmall()
-            .size(px(24.))
+            .size(px(22.))
             .p_0()
-            .rounded(px(7.))
+            .rounded(px(6.))
             .icon(if expanded {
                 IconName::ChevronDown
             } else {
@@ -147,6 +147,7 @@ impl SidebarView {
         has_conversations: bool,
         active: bool,
         view: &Entity<Self>,
+        cx: &App,
     ) -> Button {
         let project_for_click = project.clone();
         let view = view.clone();
@@ -156,7 +157,12 @@ impl SidebarView {
             .min_w_0()
             .h_full()
             .px(px(3.))
-            .rounded(px(9.))
+            .rounded(ROW_RADIUS)
+            .text_color(if active {
+                cx.theme().sidebar_accent_foreground
+            } else {
+                cx.theme().sidebar_foreground
+            })
             .child(
                 h_flex()
                     .w_full()
@@ -197,7 +203,7 @@ impl SidebarView {
         let view = view.clone();
         div()
             .flex_none()
-            .size(px(30.))
+            .size(px(28.))
             .when(!active, |this| {
                 this.invisible()
                     .group_hover(group_name, gpui::Styled::visible)
@@ -206,7 +212,7 @@ impl SidebarView {
                 Button::new(format!("project-more-{}", project.root.display()))
                     .ghost()
                     .xsmall()
-                    .size(px(30.))
+                    .size(px(28.))
                     .p_0()
                     .icon(IconName::Ellipsis)
                     .tooltip("Project actions")
