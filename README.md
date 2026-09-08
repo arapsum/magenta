@@ -10,7 +10,8 @@ browser tab in a desktop wrapper. Magenta is intended to be fast at idle,
 careful with memory, and pleasant to use for long-lived conversations.
 
 > **Status:** Magenta supports ChatGPT sign-in, OpenAI streaming, local SQLite
-> conversation history, and an editable TOML-backed settings window.
+> conversation history, an editable TOML-backed settings window, and a
+> constrained workspace agent with approval-gated file and command tools.
 > Conversations survive restarts, including their model, effort, pinned state,
 > and completed, stopped, or failed responses. The application remains
 > experimental; Linux is the platform exercised here.
@@ -22,8 +23,8 @@ original designer.
 
 ## Product direction
 
-Magenta is a general AI chat client, not an image studio or an agent/terminal
-workstation. Its eventual core experience is:
+Magenta is a general AI chat client with an intentionally constrained local
+workspace agent, not an unrestricted terminal workstation. Its core experience is:
 
 ```text
 Native GPUI interface
@@ -75,6 +76,12 @@ The product is guided by a few constraints:
   image validation and previews, fenced-code previews, and a circular
   send/stop control. OpenAI requests stream text and up to four local images
   per user message.
+- Chat and Agent modes. Agent mode can inspect and edit a selected workspace,
+  presents proposed file changes for approval, and shows project files in a
+  split code workbench.
+- Approval-gated, non-interactive workspace commands isolated with Bubblewrap.
+  Commands receive no network, stdin, host home directory, credentials, or Git
+  metadata; output, runtime, arguments, and captured bytes are bounded.
 - ChatGPT browser sign-in, OS-keyring credentials, account restoration,
   model discovery, and real OpenAI response streaming.
 - A separate settings window with System/Light/Dark appearance modes, UI and
@@ -106,7 +113,7 @@ The product is guided by a few constraints:
 - Additional provider integrations.
 - Automatic context-budget management.
 - Non-image attachments, remote image URLs, and clipboard image capture.
-- Rich provider events such as reasoning, tool calls, and citations.
+- Rich provider events such as reasoning and citations.
 
 ## Architecture
 
@@ -119,7 +126,8 @@ crates/
 ├── desktop     # executable, diagnostics, platform/window composition
 ├── providers   # OpenAI adapter and deterministic test provider
 ├── storage     # SQLite adapter, migrations, and record conversion
-└── ui          # GPUI app shell, components, themes, and active conversation
+├── ui          # GPUI app shell, components, themes, and active conversation
+└── workspace   # constrained file access and Bubblewrap command execution
 ```
 
 The current dependency direction is intentionally small:
@@ -228,12 +236,38 @@ parse. **Restore defaults** copies the current file to a timestamped
 start from defaults. Provider credentials are never written to this file; they
 remain in the operating system keyring.
 
+## Constrained workspace agent
+
+Agent mode is scoped to a project selected in the composer. File operations
+resolve beneath that canonical workspace root. Protected files such as `.env`,
+private keys, and `.git` are hidden from command execution; protected file
+reads use the existing explicit approval flow. File mutations remain
+preview-first and require approval before they are committed.
+
+On Linux, Magenta enables the `run_command` tool only when `bwrap` is installed
+and a startup isolation probe succeeds. Every command is shown with its exact
+executable, arguments, working directory, timeout, and network policy before it
+can run. Approved commands execute without shell interpolation, network access,
+stdin, host credentials, or access outside the selected workspace. The command
+card streams bounded stdout and stderr and reports completion, non-zero exit,
+timeout, cancellation, or sandbox failure. If Bubblewrap is unavailable, Agent
+mode continues to provide file tools and labels itself as files-only.
+
+User-installed Rust and Node.js toolchains, including pnpm, are exposed through
+read-only mounts when Magenta can discover them. pnpm runs with the installed
+version and can reuse locally cached package content through a disposable,
+writable store index. Dependency versions that are not already cached still
+require an explicit future network-enabled command policy; the current sandbox
+never silently reaches the network.
+
 ## Requirements
 
 - Rust 1.97.1 or newer; the locked GPUI revision currently requires it.
 - Git and network access for the first dependency fetch.
 - A Linux Wayland or X11 desktop with the native development libraries needed
   by GPUI. Linux is the platform currently exercised by this repository.
+- Bubblewrap (`bwrap`) with working unprivileged namespaces to enable sandboxed
+  Agent commands. Without it, Agent file operations remain available.
 
 The dependency graph is committed in `Cargo.lock`. Use `--locked` for
 reproducible development and verification.
