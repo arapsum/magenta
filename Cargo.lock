@@ -3957,6 +3957,7 @@ dependencies = [
  "ratex-parser",
  "ratex-svg",
  "ratex-types",
+ "serde_json",
  "thiserror 2.0.20",
  "tracing",
 ]
@@ -3965,6 +3966,10 @@ dependencies = [
 name = "magenta-workspace"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
+ "async-process",
+ "async-stream",
+ "futures-util",
  "globset",
  "ignore",
  "magenta-core",

@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+async-channel.workspace = true
+async-process.workspace = true
+async-stream.workspace = true
+futures-util.workspace = true
 globset.workspace = true
 ignore.workspace = true
 magenta-core.workspace = true

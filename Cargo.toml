@@ -17,6 +17,7 @@ edition = "2024"
 
 [workspace.dependencies]
 anyhow = "1"
+async-process = "2"
 async-lock = "3"
 async-net = "2"
 async-stream = "0.3"

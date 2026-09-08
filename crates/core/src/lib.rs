@@ -3,6 +3,7 @@
 
 mod agent;
 mod auth;
+mod command;
 mod context;
 mod conversation;
 mod error;
@@ -17,13 +18,17 @@ mod workspace;
 
 pub use agent::{
     AgentActivity, AgentActivityKind, AgentActivityRecord, AgentApprovalDecision,
-    AgentApprovalRequest, AgentContinuation, AgentProvider, AgentProviderEvent,
-    AgentProviderStream, AgentRequest, AgentResumeRequest, AgentRunEvent, AgentRunStream,
-    AgentToolCall, AgentToolDefinition, AgentToolOutput, AgentWorkspaceChange, ConversationMode,
-    WorkspaceChangeKind, WorkspaceChangeState,
+    AgentApprovalRequest, AgentApprovalSubject, AgentContinuation, AgentProvider,
+    AgentProviderEvent, AgentProviderStream, AgentRequest, AgentResumeRequest, AgentRunEvent,
+    AgentRunStream, AgentToolCall, AgentToolDefinition, AgentToolOutput, AgentWorkspaceChange,
+    ConversationMode, WorkspaceChangeKind, WorkspaceChangeState,
 };
 pub use auth::{
     AuthenticationFuture, AuthorizationSession, ProviderAccount, ProviderAuthenticator,
+};
+pub use command::{
+    WorkspaceCommand, WorkspaceCommandError, WorkspaceCommandEvent, WorkspaceCommandOutputStream,
+    WorkspaceCommandResult, WorkspaceCommandRunner, WorkspaceCommandStatus, WorkspaceCommandStream,
 };
 pub use context::{
     ContextBudgetReport, ContextTooLarge, estimate_agent_overhead, estimate_text_tokens,
