@@ -53,7 +53,7 @@ fn finder_message_match_loads_the_page_around_that_message(cx: &mut TestAppConte
         title: "Architecture notes".into(),
         title_highlights: Vec::new(),
         snippet: "The indexing needle is here".into(),
-        snippet_highlights: vec![13..19],
+        snippet_highlights: std::iter::once(13..19).collect(),
         updated_at: Timestamp(0),
     }]);
     ports
