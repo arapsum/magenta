@@ -39,7 +39,24 @@ impl AssetSource for MagentaAssets {
                 Some(include_bytes!("../assets/icons/generation-stop.svg").as_slice())
             }
             "icons/code.svg" => Some(include_bytes!("../assets/icons/code.svg").as_slice()),
+            "icons/claude.svg" => {
+                Some(include_bytes!("../../../assets/icons/claude.svg").as_slice())
+            }
+            "icons/anthropic.svg" => {
+                Some(include_bytes!("../../../assets/icons/anthropic.svg").as_slice())
+            }
+            "icons/antigravity.svg" => {
+                Some(include_bytes!("../../../assets/icons/antigravity.svg").as_slice())
+            }
+            "icons/deepseek.svg" => {
+                Some(include_bytes!("../../../assets/icons/deepseek.svg").as_slice())
+            }
+            "icons/kimi.svg" => Some(include_bytes!("../../../assets/icons/kimi.svg").as_slice()),
             "icons/openai.svg" => Some(include_bytes!("../assets/icons/openai.svg").as_slice()),
+            "icons/opencode.svg" => {
+                Some(include_bytes!("../../../assets/icons/opencode.svg").as_slice())
+            }
+            "icons/qwen.svg" => Some(include_bytes!("../../../assets/icons/qwen.svg").as_slice()),
             _ => None,
         };
 
@@ -58,7 +75,14 @@ impl AssetSource for MagentaAssets {
                 "icons/conversation-delete.svg".into(),
                 "icons/generation-stop.svg".into(),
                 "icons/code.svg".into(),
+                "icons/claude.svg".into(),
+                "icons/anthropic.svg".into(),
+                "icons/antigravity.svg".into(),
+                "icons/deepseek.svg".into(),
+                "icons/kimi.svg".into(),
                 "icons/openai.svg".into(),
+                "icons/opencode.svg".into(),
+                "icons/qwen.svg".into(),
             ]);
         }
         Ok(assets)

@@ -103,14 +103,27 @@ impl SidebarView {
                 cx.theme().sidebar_foreground
             })
             .child(
-                div()
+                h_flex()
                     .w_full()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .text_size(px(13.))
-                    .when(selected, gpui_component::StyledExt::font_medium)
-                    .child(conversation.title.clone()),
+                    .min_w_0()
+                    .items_center()
+                    .gap(px(7.))
+                    .child(
+                        provider_icon(Some(&conversation.provider))
+                            .xsmall()
+                            .text_color(cx.theme().muted_foreground),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_size(px(13.))
+                            .when(selected, gpui_component::StyledExt::font_medium)
+                            .child(conversation.title.clone()),
+                    ),
             )
             .on_click(move |_, _, cx| {
                 view.update(cx, |_, cx| Self::select_conversation(id, cx));

@@ -32,7 +32,7 @@ use gpui_component::{
 };
 use magenta_core::ProviderAccount;
 
-use crate::app::OpenConversationFinder;
+use crate::{app::OpenConversationFinder, components::provider_icon};
 
 pub use model::{ConversationId, ConversationPeriod, ConversationSummary, SidebarEvent};
 
