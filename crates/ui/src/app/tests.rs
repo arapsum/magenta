@@ -498,6 +498,51 @@ fn switching_conversations_immediately_closes_and_clears_the_workbench(cx: &mut 
 }
 
 #[gpui::test]
+fn collapsed_sidebar_workbench_fills_a_wide_window(cx: &mut TestAppContext) {
+    let ports = Arc::new(TestPorts::default());
+    let (window, view) = setup_with_projects_at(cx, ports, size(px(2000.), px(800.)));
+    cx.run_until_parked();
+
+    window
+        .update(cx, |_, window, cx| {
+            view.update(cx, |main, cx| {
+                main.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.toggle_collapsed(cx);
+                    sidebar.set_active_project(Some(std::path::PathBuf::from("/workspace")), cx);
+                });
+                main.workbench.clone().unwrap().update(cx, |workbench, cx| {
+                    workbench.show_change(
+                        AgentWorkspaceChange {
+                            call_id: "call-1".to_owned(),
+                            path: "src/lib.rs".to_owned(),
+                            kind: WorkspaceChangeKind::Modify,
+                            content: "fn main() {}".to_owned(),
+                            diff: String::new(),
+                            state: WorkspaceChangeState::Committed,
+                            error: None,
+                        },
+                        window,
+                        cx,
+                    );
+                });
+                main.workbench_open = true;
+            });
+        })
+        .unwrap();
+
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    let workbench = visual
+        .debug_bounds("agent-workbench")
+        .expect("the code workbench should be rendered");
+    let right_gutter = px(2000.) - (workbench.origin.x + workbench.size.width);
+    assert!(
+        right_gutter <= px(16.),
+        "unexpected right gutter: {right_gutter:?}"
+    );
+}
+
+#[gpui::test]
 fn failed_finalization_retains_response_until_retry_before_navigation(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     ports.fail_save.store(true, Ordering::SeqCst);

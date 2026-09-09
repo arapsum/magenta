@@ -83,13 +83,13 @@ impl MainView {
             .child(
                 resizable_panel()
                     .size(px(620.))
-                    .size_range(px(360.)..px(900.))
+                    .size_range(px(360.)..gpui::Pixels::MAX)
                     .child(conversation),
             )
             .child(
                 resizable_panel()
                     .size(px(760.))
-                    .size_range(px(280.)..px(900.))
+                    .size_range(px(280.)..gpui::Pixels::MAX)
                     .child(workbench.clone()),
             )
             .into_any_element()
