@@ -224,6 +224,13 @@ impl SidebarView {
             .cloned()
     }
 
+    pub(crate) fn project_for_root(&self, root: &Path) -> Option<magenta_core::Project> {
+        self.projects
+            .iter()
+            .find(|project| project.root == root)
+            .cloned()
+    }
+
     pub(crate) fn project_conversations_for(&self, root: &Path) -> Vec<ConversationSummary> {
         self.project_conversations(root)
             .into_iter()

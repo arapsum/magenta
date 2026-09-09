@@ -81,6 +81,7 @@ impl MainView {
             return;
         }
         self.cancel_generation(cx);
+        self.clear_workbench_session(cx);
         self.active_conversation = None;
         self.conversation.update(cx, super::ConversationView::clear);
         self.composer.update(cx, |composer, cx| {
@@ -90,7 +91,6 @@ impl MainView {
             sidebar.set_active(None, cx);
             sidebar.set_active_project(Some(project.root.clone()), cx);
         });
-        self.workbench_open = false;
         if let Some(workbench) = &self.workbench {
             workbench.update(cx, |workbench, cx| {
                 workbench.set_project(Some(project.clone()), window, cx);

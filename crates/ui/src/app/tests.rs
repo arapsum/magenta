@@ -13,7 +13,7 @@ use gpui::{AppContext as _, Entity, TestAppContext, WindowHandle, px, size};
 use gpui_component::Root;
 
 mod finder;
-use magenta_application::{ConversationHistory, RegenerateMessage, SendMessage};
+use magenta_application::{ConversationHistory, ProjectCatalog, RegenerateMessage, SendMessage};
 use magenta_core::*;
 
 use super::{
@@ -179,6 +179,46 @@ impl SettingsStore for TestPorts {
     }
 }
 
+impl ProjectStore for TestPorts {
+    fn projects(&self) -> StorageFuture<Vec<Project>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn upsert_project(&self, _: Project) -> StorageFuture<()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn remove_project(&self, _: std::path::PathBuf) -> StorageFuture<()> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+impl WorkspaceBrowser for TestPorts {
+    fn canonicalize_root(&self, root: std::path::PathBuf) -> WorkspaceFuture<std::path::PathBuf> {
+        Box::pin(async move { Ok(root) })
+    }
+
+    fn list_directory(
+        &self,
+        _: std::path::PathBuf,
+        _: String,
+    ) -> WorkspaceFuture<Vec<WorkspaceEntry>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn read_document(
+        &self,
+        _: std::path::PathBuf,
+        _: String,
+    ) -> WorkspaceFuture<WorkspaceDocument> {
+        Box::pin(async {
+            Err(WorkspaceError::new(std::io::Error::other(
+                "test document unavailable",
+            )))
+        })
+    }
+}
+
 fn page(id: u64) -> ConversationPage {
     ConversationPage {
         conversation: Conversation {
@@ -220,6 +260,46 @@ type TestWindow = (WindowHandle<Root>, Entity<MainView>);
 
 fn setup(cx: &mut TestAppContext, ports: Arc<TestPorts>) -> TestWindow {
     setup_at(cx, ports, size(px(1000.), px(700.)))
+}
+
+fn setup_with_projects(cx: &mut TestAppContext, ports: Arc<TestPorts>) -> TestWindow {
+    setup_with_projects_at(cx, ports, size(px(1000.), px(700.)))
+}
+
+fn setup_with_projects_at(
+    cx: &mut TestAppContext,
+    ports: Arc<TestPorts>,
+    window_size: gpui::Size<gpui::Pixels>,
+) -> TestWindow {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        crate::settings::init(cx);
+    });
+    let slot = Rc::new(RefCell::new(None));
+    let view_slot = Rc::clone(&slot);
+    let window = cx.open_window(window_size, move |window, cx| {
+        let project_catalog = ProjectCatalog::new(ports.clone(), ports.clone());
+        let view = cx.new(|cx| {
+            MainView::new(
+                SendMessage::new(ports.clone(), ports.clone()),
+                RegenerateMessage::new(ports.clone(), ports.clone()),
+                ConversationHistory::new(ports.clone()),
+                MainServices {
+                    authenticator: ports.clone(),
+                    model_catalog: ports.clone(),
+                    settings_store: ports.clone(),
+                    agent: None,
+                    projects: Some(project_catalog),
+                },
+                window,
+                cx,
+            )
+        });
+        view_slot.replace(Some(view.clone()));
+        Root::new(view, window, cx)
+    });
+    let view = slot.borrow().clone().unwrap();
+    (window, view)
 }
 
 fn setup_at(
@@ -378,6 +458,43 @@ fn stale_and_failed_loads_keep_the_correct_selection(cx: &mut TestAppContext) {
         assert_eq!(main.active_conversation, Some(ConversationId(2)));
         assert!(main.loading_conversation.is_none());
     });
+}
+
+#[gpui::test]
+fn switching_conversations_immediately_closes_and_clears_the_workbench(cx: &mut TestAppContext) {
+    let ports = Arc::new(TestPorts::default());
+    let (window, view) = setup_with_projects(cx, ports);
+    cx.run_until_parked();
+
+    window
+        .update(cx, |_, window, cx| {
+            view.update(cx, |main, cx| {
+                let workbench = main.workbench.clone().unwrap();
+                workbench.update(cx, |workbench, cx| {
+                    workbench.show_change(
+                        AgentWorkspaceChange {
+                            call_id: "call-1".to_owned(),
+                            path: "src/lib.rs".to_owned(),
+                            kind: WorkspaceChangeKind::Modify,
+                            content: "fn main() {}".to_owned(),
+                            diff: String::new(),
+                            state: WorkspaceChangeState::Committed,
+                            error: None,
+                        },
+                        window,
+                        cx,
+                    );
+                });
+                main.active_conversation = Some(ConversationId(1));
+                main.workbench_open = true;
+
+                main.navigate(Some(ConversationId(2)), window, cx);
+
+                assert!(!main.workbench_open);
+                assert_eq!(workbench.read(cx).tab_count(), 0);
+            });
+        })
+        .unwrap();
 }
 
 #[gpui::test]

@@ -48,8 +48,14 @@ impl MainView {
                             } else {
                                 "Show code"
                             })
-                            .on_click(cx.listener(|main, _, _, cx| {
-                                main.workbench_open = !main.workbench_open;
+                            .on_click(cx.listener(|main, _, window, cx| {
+                                let opening = !main.workbench_open;
+                                main.workbench_open = opening;
+                                if opening && let Some(workbench) = &main.workbench {
+                                    workbench.update(cx, |workbench, cx| {
+                                        workbench.prepare_to_show(window, cx);
+                                    });
+                                }
                                 cx.notify();
                             })),
                     )

@@ -448,17 +448,17 @@ impl MainView {
                     if let Some(workbench) = &main.workbench {
                         main.workbench_open = true;
                         workbench.update(cx, |workbench, cx| {
+                            workbench.prepare_to_show(window, cx);
                             workbench.show_change(change.clone(), window, cx);
                         });
                         cx.notify();
                     }
                 }
                 ConversationViewEvent::WorkspaceInvalidated => {
-                    if main.workbench_open
-                        && let Some(workbench) = &main.workbench
-                    {
+                    if let Some(workbench) = &main.workbench {
+                        let visible = main.workbench_open;
                         workbench.update(cx, |workbench, cx| {
-                            workbench.refresh(window, cx);
+                            workbench.mark_workspace_invalidated(visible, window, cx);
                         });
                     }
                 }

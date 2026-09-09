@@ -492,10 +492,13 @@ impl MainView {
                             .update(cx, |sidebar, cx| sidebar.delete_succeeded(id, cx));
                         if was_active {
                             main.active_conversation = None;
+                            main.clear_workbench_session(cx);
                             main.conversation
                                 .update(cx, super::super::ConversationView::clear);
-                            main.sidebar
-                                .update(cx, |sidebar, cx| sidebar.set_active(None, cx));
+                            main.sidebar.update(cx, |sidebar, cx| {
+                                sidebar.set_active(None, cx);
+                                sidebar.set_active_project(None, cx);
+                            });
                         }
                         main.refresh_summaries(window, cx);
                     }

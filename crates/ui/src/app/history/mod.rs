@@ -96,6 +96,11 @@ impl MainView {
         if !self.storage_ready.is_ready() {
             return;
         }
+        let changes_context = id != self.active_conversation
+            || (id.is_none() && self.sidebar.read(cx).active_project().is_some());
+        if changes_context {
+            self.clear_workbench_session(cx);
+        }
         self.deferred_navigation = Some(id.map_or(Navigation::New, Navigation::Conversation));
         // Invalidate pending reads immediately, including when a save must finish first.
         self.load_generation = self.load_generation.wrapping_add(1);
@@ -118,6 +123,9 @@ impl MainView {
         if !self.storage_ready.is_ready() {
             return;
         }
+        if self.active_conversation != Some(result.conversation_id) {
+            self.clear_workbench_session(cx);
+        }
         self.deferred_navigation = Some(Navigation::SearchResult(result));
         self.load_generation = self.load_generation.wrapping_add(1);
         self.load_task.take();
@@ -128,6 +136,13 @@ impl MainView {
             return;
         }
         self.continue_navigation(window, cx);
+    }
+
+    pub(super) fn clear_workbench_session(&mut self, cx: &mut Context<'_, Self>) {
+        self.workbench_open = false;
+        if let Some(workbench) = &self.workbench {
+            workbench.update(cx, |workbench, cx| workbench.clear_session(cx));
+        }
     }
 
     fn continue_navigation(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
@@ -183,6 +198,10 @@ impl MainView {
                 main.loading_conversation = None;
                 match result {
                     Ok(loaded) => {
+                        let workspace_root = loaded.conversation.workspace_root.clone();
+                        let project = workspace_root
+                            .as_deref()
+                            .and_then(|root| main.sidebar.read(cx).project_for_root(root));
                         main.composer.update(cx, |composer, cx| {
                             composer.set_configuration(&loaded.conversation.generation, cx);
                             composer.set_conversation_context(
@@ -199,8 +218,18 @@ impl MainView {
                             });
                         }
                         main.active_conversation = Some(id);
-                        main.sidebar
-                            .update(cx, |sidebar, cx| sidebar.set_active(Some(id), cx));
+                        main.sidebar.update(cx, |sidebar, cx| {
+                            sidebar.set_active(Some(id), cx);
+                            sidebar.set_active_project(
+                                project.as_ref().map(|project| project.root.clone()),
+                                cx,
+                            );
+                        });
+                        if let Some(workbench) = &main.workbench {
+                            workbench.update(cx, |workbench, cx| {
+                                workbench.set_project(project, window, cx);
+                            });
+                        }
                     }
                     Err(source) => Self::present_storage_error(
                         &MagentaError::StorageLoad { source },
