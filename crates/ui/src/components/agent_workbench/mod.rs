@@ -101,7 +101,7 @@ pub struct AgentWorkbench {
 impl EventEmitter<AgentWorkbenchEvent> for AgentWorkbench {}
 
 impl AgentWorkbench {
-    pub fn new(catalog: ProjectCatalog, window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
+    pub fn new(catalog: ProjectCatalog, window: &Window, cx: &mut Context<'_, Self>) -> Self {
         cx.bind_keys([
             gpui::KeyBinding::new("ctrl-tab", SelectNextWorkbenchTab, Some("AgentWorkbench")),
             gpui::KeyBinding::new(
@@ -201,7 +201,7 @@ impl AgentWorkbench {
         self.activate_tab(path, cx);
     }
 
-    pub fn refresh(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub fn refresh(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
         if self.project.is_none() {
             return;
         }
@@ -225,7 +225,7 @@ impl AgentWorkbench {
     pub fn mark_workspace_invalidated(
         &mut self,
         visible: bool,
-        window: &mut Window,
+        window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
         if visible {
@@ -235,7 +235,7 @@ impl AgentWorkbench {
         }
     }
 
-    pub fn prepare_to_show(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub fn prepare_to_show(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
         if self.refresh_pending {
             self.refresh(window, cx);
         }
@@ -369,7 +369,7 @@ impl AgentWorkbench {
         self.reload_tab(path, window, cx);
     }
 
-    fn reload_tab(&mut self, path: String, window: &mut Window, cx: &mut Context<'_, Self>) {
+    fn reload_tab(&mut self, path: String, window: &Window, cx: &Context<'_, Self>) {
         let Some(project) = self.project.clone() else {
             return;
         };
@@ -410,7 +410,7 @@ impl AgentWorkbench {
         .detach();
     }
 
-    fn retry_active_tab(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    fn retry_active_tab(&mut self, window: &Window, cx: &Context<'_, Self>) {
         if let Some(path) = self.active_path.clone() {
             self.reload_tab(path, window, cx);
         }
@@ -511,7 +511,7 @@ impl AgentWorkbench {
                         .small()
                         .label("Retry")
                         .on_click(move |_, _, cx| {
-                            retry_view.update(cx, |workbench, cx| workbench.retry_tree(cx));
+                            retry_view.update(cx, Self::retry_tree);
                         }),
                 )
                 .into_any_element();
@@ -571,7 +571,7 @@ impl AgentWorkbench {
         .into_any_element()
     }
 
-    fn render_tab_bar(&self, view: Entity<Self>, cx: &App) -> AnyElement {
+    fn render_tab_bar(&self, view: &Entity<Self>, cx: &App) -> AnyElement {
         let active_index = self
             .active_path
             .as_deref()
@@ -596,7 +596,7 @@ impl AgentWorkbench {
             .with_size(gpui_component::Size::Small)
             .max_width(px(190.))
             .menu(true)
-            .when_some(active_index, |bar, index| bar.selected_index(index))
+            .when_some(active_index, TabBar::selected_index)
             .on_click(move |index: &usize, _, cx| {
                 if let Some(path) = paths.get(*index) {
                     tab_view.update(cx, |workbench, cx| {
@@ -774,7 +774,7 @@ impl AgentWorkbench {
         v_flex()
             .size_full()
             .min_w_0()
-            .child(self.render_tab_bar(view.clone(), cx))
+            .child(self.render_tab_bar(&view, cx))
             .child(self.render_context_bar(cx))
             .child(
                 div()
@@ -802,7 +802,7 @@ impl Render for AgentWorkbench {
         let narrow = window.viewport_size().width < px(696.);
         let show_explorer = self.explorer_open;
         let tree = self.render_tree(view.clone(), cx);
-        let editor = self.render_editor_pane(view.clone(), cx);
+        let editor = self.render_editor_pane(view, cx);
         v_flex()
             .id("agent-workbench")
             .debug_selector(|| "agent-workbench".into())

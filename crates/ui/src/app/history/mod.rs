@@ -8,7 +8,11 @@ use magenta_core::{
 };
 
 use super::{AccountState, CloseState, MainView, StorageState};
-use crate::{MagentaError, components::prompt_input::PromptRequest, notification_for_error};
+use crate::{
+    MagentaError,
+    components::{agent_workbench::AgentWorkbench, prompt_input::PromptRequest},
+    notification_for_error,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Operation {
@@ -141,7 +145,7 @@ impl MainView {
     pub(super) fn clear_workbench_session(&mut self, cx: &mut Context<'_, Self>) {
         self.workbench_open = false;
         if let Some(workbench) = &self.workbench {
-            workbench.update(cx, |workbench, cx| workbench.clear_session(cx));
+            workbench.update(cx, AgentWorkbench::clear_session);
         }
     }
 
