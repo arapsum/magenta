@@ -186,6 +186,9 @@ impl ConversationView {
             agent_controller: None,
             pending_agent_approval: None,
             live_commands: HashMap::new(),
+            collapsed_command_sections: HashSet::new(),
+            collapsed_tool_call_sections: HashSet::new(),
+            expanded_agent_activity_calls: HashSet::new(),
             older_cursor: None,
             has_older: false,
             page_load: PageLoadState::Idle,
@@ -201,6 +204,9 @@ impl ConversationView {
     pub(crate) fn load(&mut self, thread: ConversationThread, cx: &mut Context<'_, Self>) {
         self.cancel_generation(cx);
         self.live_commands.clear();
+        self.collapsed_command_sections.clear();
+        self.collapsed_tool_call_sections.clear();
+        self.expanded_agent_activity_calls.clear();
         self.older_cursor = None;
         self.has_older = false;
         self.page_load = PageLoadState::Idle;
@@ -456,6 +462,22 @@ impl ConversationView {
             self.messages
                 .iter()
                 .any(|message| message.message.id == *id)
+        });
+        self.expanded_agent_activity_calls
+            .retain(|(message_id, _)| {
+                self.messages
+                    .iter()
+                    .any(|message| message.message.id == *message_id)
+            });
+        self.collapsed_command_sections.retain(|message_id| {
+            self.messages
+                .iter()
+                .any(|message| message.message.id == *message_id)
+        });
+        self.collapsed_tool_call_sections.retain(|message_id| {
+            self.messages
+                .iter()
+                .any(|message| message.message.id == *message_id)
         });
         self.reset_math(cx);
     }

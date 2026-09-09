@@ -1,10 +1,316 @@
+use std::collections::HashSet;
+
+use gpui_component::accordion::Accordion;
+
 use super::super::*;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ActivityStatus {
+    Working,
+    AwaitingApproval,
+    Completed,
+    Rejected,
+    Failed,
+}
+
+impl ActivityStatus {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Working => "Working",
+            Self::AwaitingApproval => "Needs approval",
+            Self::Completed => "Done",
+            Self::Rejected => "Rejected",
+            Self::Failed => "Failed",
+        }
+    }
+
+    fn color(self, cx: &App) -> gpui::Hsla {
+        match self {
+            Self::Working | Self::AwaitingApproval => cx.theme().warning,
+            Self::Completed => cx.theme().success,
+            Self::Rejected => cx.theme().muted_foreground,
+            Self::Failed => cx.theme().danger,
+        }
+    }
+
+    fn icon(self, cx: &App) -> Icon {
+        let color = self.color(cx);
+        match self {
+            Self::Working => Icon::new(IconName::LoaderCircle).xsmall().text_color(color),
+            Self::AwaitingApproval => Icon::empty()
+                .path("icons/agent-shield-check.svg")
+                .xsmall()
+                .text_color(color),
+            Self::Completed => Icon::new(IconName::CircleCheck).xsmall().text_color(color),
+            Self::Rejected | Self::Failed => {
+                Icon::new(IconName::CircleX).xsmall().text_color(color)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ActivityRow {
+    call_id: String,
+    tool_name: String,
+    title: String,
+    arguments: String,
+    output: Option<String>,
+    status: ActivityStatus,
+}
+
+fn build_activity_row(message: &Message, activity: &AgentActivity) -> ActivityRow {
+    let call = message
+        .agent_activities
+        .iter()
+        .find(|candidate| {
+            candidate.call_id == activity.call_id && candidate.kind == AgentActivityKind::ToolCall
+        })
+        .unwrap_or(activity);
+    let approval = message.agent_activities.iter().rev().find(|candidate| {
+        candidate.call_id == activity.call_id
+            && candidate.kind == AgentActivityKind::ApprovalRequested
+    });
+    let result = message.agent_activities.iter().rev().find(|candidate| {
+        candidate.call_id == activity.call_id && candidate.kind == AgentActivityKind::ToolResult
+    });
+    let status = activity_status(approval, result);
+    let arguments = format_activity_detail(&call.detail);
+    let output = result
+        .filter(|result| !result.detail.trim().is_empty())
+        .map(|result| format_activity_detail(&result.detail));
+
+    ActivityRow {
+        call_id: call.call_id.clone(),
+        tool_name: call.tool_name.clone(),
+        title: activity_title(&call.tool_name, &call.detail, status),
+        arguments,
+        output,
+        status,
+    }
+}
+
+fn build_activity_rows(message: &Message) -> Vec<ActivityRow> {
+    let mut rows = Vec::new();
+    let mut seen = HashSet::new();
+    for activity in message
+        .agent_activities
+        .iter()
+        .filter(|activity| activity.tool_name != "run_command")
+    {
+        if seen.insert(activity.call_id.clone()) {
+            rows.push(build_activity_row(message, activity));
+        }
+    }
+    rows
+}
+
+fn activity_status(
+    approval: Option<&AgentActivity>,
+    result: Option<&AgentActivity>,
+) -> ActivityStatus {
+    result.map_or_else(
+        || {
+            if approval.is_some() {
+                ActivityStatus::AwaitingApproval
+            } else {
+                ActivityStatus::Working
+            }
+        },
+        |result| {
+            if result.status == "failed" {
+                if result.detail.contains("rejected") {
+                    ActivityStatus::Rejected
+                } else {
+                    ActivityStatus::Failed
+                }
+            } else {
+                ActivityStatus::Completed
+            }
+        },
+    )
+}
+
+fn activity_title(tool_name: &str, detail: &str, status: ActivityStatus) -> String {
+    let arguments = serde_json::from_str::<serde_json::Value>(detail).ok();
+    let path = arguments
+        .as_ref()
+        .and_then(|value| value.get("path"))
+        .and_then(serde_json::Value::as_str)
+        .map(display_path);
+
+    match tool_name {
+        "list_files" => format!(
+            "Explored {}",
+            path.unwrap_or_else(|| "workspace".to_owned())
+        ),
+        "search_text" => {
+            let query = arguments
+                .as_ref()
+                .and_then(|value| value.get("query"))
+                .and_then(serde_json::Value::as_str)
+                .map_or_else(|| "workspace".to_owned(), compact_text);
+            format!("Searched for {query}")
+        }
+        "read_file" => format!("Read {}", path.unwrap_or_else(|| "file".to_owned())),
+        "create_file" => format!(
+            "{} {}",
+            if status == ActivityStatus::Completed {
+                "Created"
+            } else {
+                "Create"
+            },
+            path.unwrap_or_else(|| "file".to_owned())
+        ),
+        "apply_patch" => format!(
+            "{} {}",
+            if status == ActivityStatus::Completed {
+                "Updated"
+            } else {
+                "Update"
+            },
+            path.unwrap_or_else(|| "file".to_owned())
+        ),
+        _ => compact_text(&tool_name.replace('_', " ")),
+    }
+}
+
+fn display_path(path: &str) -> String {
+    if path.trim().is_empty() || path == "." {
+        "workspace".to_owned()
+    } else {
+        compact_text(path)
+    }
+}
+
+fn compact_text(value: &str) -> String {
+    const MAX_CHARS: usize = 72;
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = compact.chars();
+    let value = chars.by_ref().take(MAX_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{value}…")
+    } else {
+        value
+    }
+}
+
+fn format_activity_detail(value: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(value)
+        .ok()
+        .and_then(|value| serde_json::to_string_pretty(&value).ok())
+        .unwrap_or_else(|| value.to_owned())
+}
+
+fn agent_tool_icon(tool_name: &str, cx: &App) -> Icon {
+    let path = match tool_name {
+        "list_files" => "icons/agent-list-check.svg",
+        "search_text" | "read_file" => "icons/agent-file-search.svg",
+        "create_file" => "icons/agent-file-plus.svg",
+        "apply_patch" => "icons/agent-file-diff.svg",
+        "run_command" => "icons/agent-terminal.svg",
+        _ => "icons/agent-wrench.svg",
+    };
+    Icon::empty()
+        .path(path)
+        .small()
+        .text_color(cx.theme().muted_foreground)
+}
+
+fn render_activity_detail(row: &ActivityRow, cx: &App) -> AnyElement {
+    let mut detail = v_flex().w_full().gap(px(8.));
+    if !row.arguments.is_empty() {
+        detail = detail.child(activity_detail_block("Arguments", &row.arguments, cx));
+    }
+    if let Some(output) = row.output.as_deref() {
+        detail = detail.child(activity_detail_block("Result", output, cx));
+    }
+    detail.into_any_element()
+}
+
+fn activity_detail_block(label: &'static str, value: &str, cx: &App) -> AnyElement {
+    v_flex()
+        .w_full()
+        .gap(px(4.))
+        .child(
+            div()
+                .text_size(px(10.))
+                .text_color(cx.theme().muted_foreground)
+                .child(label),
+        )
+        .child(
+            div()
+                .w_full()
+                .max_h(px(180.))
+                .overflow_y_scrollbar()
+                .p(px(8.))
+                .rounded(cx.theme().radius)
+                .bg(cx.theme().background.opacity(0.65))
+                .font_family(cx.theme().mono_font_family.clone())
+                .text_size(px(11.))
+                .text_color(cx.theme().foreground)
+                .child(value.to_owned()),
+        )
+        .into_any_element()
+}
+
+fn section_title(label: &'static str, count: usize, count_label: &str, cx: &App) -> AnyElement {
+    h_flex()
+        .w_full()
+        .min_w_0()
+        .items_center()
+        .gap(px(8.))
+        .child(
+            div()
+                .min_w_0()
+                .flex_1()
+                .font_medium()
+                .text_size(px(12.))
+                .child(label),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_size(px(11.))
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("{count} {count_label}")),
+        )
+        .into_any_element()
+}
+
+fn activity_title_element(title: &str, status: ActivityStatus, cx: &App) -> AnyElement {
+    h_flex()
+        .w_full()
+        .min_w_0()
+        .items_center()
+        .gap(px(8.))
+        .child(
+            div()
+                .min_w_0()
+                .flex_1()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_size(px(12.))
+                .child(title.to_owned()),
+        )
+        .child(status.icon(cx))
+        .child(
+            div()
+                .flex_none()
+                .text_size(px(11.))
+                .text_color(status.color(cx))
+                .child(status.label()),
+        )
+        .into_any_element()
+}
 
 impl ConversationView {
     pub(super) fn render_agent_activities(
         &self,
         message: &Message,
         cx: &App,
+        view: &Entity<Self>,
     ) -> Option<AnyElement> {
         if message.agent_activities.is_empty() {
             return None;
@@ -16,41 +322,164 @@ impl ConversationView {
             .filter(|activity| {
                 activity.kind == AgentActivityKind::ToolCall && activity.tool_name == "run_command"
             })
-            .filter_map(|activity| self.render_command_activity(message, activity, cx));
-        let activities = message
-            .agent_activities
+            .filter_map(|activity| self.render_command_activity(message, activity, cx))
+            .collect::<Vec<_>>();
+        let rows = build_activity_rows(message);
+        let mut content = v_flex().w_full().gap(px(8.));
+        if let Some(command_section) = self.render_command_section(message.id, commands, cx, view) {
+            content = content.child(command_section);
+        }
+        if let Some(tool_call_section) = self.render_tool_call_section(message.id, rows, cx, view) {
+            content = content.child(tool_call_section);
+        }
+
+        Some(content.into_any_element())
+    }
+
+    fn render_command_section(
+        &self,
+        message_id: MessageId,
+        commands: Vec<AnyElement>,
+        cx: &App,
+        view: &Entity<Self>,
+    ) -> Option<AnyElement> {
+        if commands.is_empty() {
+            return None;
+        }
+
+        let command_count = commands.len();
+        let command_view = view.clone();
+        let command_open = !self.collapsed_command_sections.contains(&message_id);
+        let command_label = if command_count == 1 {
+            "command"
+        } else {
+            "commands"
+        };
+        let mut accordion = Accordion::new(("agent-commands", message_id.0))
+            .multiple(false)
+            .bordered(false)
+            .small()
+            .on_toggle_click(move |open_indices, _, cx| {
+                command_view.update(cx, |view, cx| {
+                    if open_indices.contains(&0) {
+                        view.collapsed_command_sections.remove(&message_id);
+                    } else {
+                        view.collapsed_command_sections.insert(message_id);
+                    }
+                    cx.notify();
+                });
+            });
+        accordion = accordion.item(|item| {
+            item.open(command_open)
+                .icon(
+                    Icon::empty()
+                        .path("icons/agent-terminal.svg")
+                        .small()
+                        .text_color(cx.theme().muted_foreground),
+                )
+                .title(section_title("Commands", command_count, command_label, cx))
+                .hover(|this| this.bg(cx.theme().accent.opacity(0.45)))
+                .child(v_flex().w_full().gap(px(8.)).children(commands))
+        });
+        Some(accordion.into_any_element())
+    }
+
+    fn render_tool_call_section(
+        &self,
+        message_id: MessageId,
+        rows: Vec<ActivityRow>,
+        cx: &App,
+        view: &Entity<Self>,
+    ) -> Option<AnyElement> {
+        if rows.is_empty() {
+            return None;
+        }
+
+        let tool_call_count = rows.len();
+        let activity_accordion = self.render_activity_accordion(message_id, rows, cx, view);
+        let tool_view = view.clone();
+        let tool_open = !self.collapsed_tool_call_sections.contains(&message_id);
+        let tool_label = if tool_call_count == 1 {
+            "tool call"
+        } else {
+            "tool calls"
+        };
+        let mut accordion = Accordion::new(("agent-tool-calls", message_id.0))
+            .multiple(false)
+            .bordered(false)
+            .small()
+            .on_toggle_click(move |open_indices, _, cx| {
+                tool_view.update(cx, |view, cx| {
+                    if open_indices.contains(&0) {
+                        view.collapsed_tool_call_sections.remove(&message_id);
+                    } else {
+                        view.collapsed_tool_call_sections.insert(message_id);
+                    }
+                    cx.notify();
+                });
+            });
+        accordion = accordion.item(|item| {
+            item.open(tool_open)
+                .icon(
+                    Icon::empty()
+                        .path("icons/agent-wrench.svg")
+                        .small()
+                        .text_color(cx.theme().muted_foreground),
+                )
+                .title(section_title("Tool calls", tool_call_count, tool_label, cx))
+                .hover(|this| this.bg(cx.theme().accent.opacity(0.45)))
+                .child(activity_accordion)
+        });
+        Some(accordion.into_any_element())
+    }
+
+    fn render_activity_accordion(
+        &self,
+        message_id: MessageId,
+        rows: Vec<ActivityRow>,
+        cx: &App,
+        view: &Entity<Self>,
+    ) -> Accordion {
+        let call_ids = rows
             .iter()
-            .filter(|activity| activity.tool_name != "run_command")
-            .map(|activity| {
-                let (label, color) = match activity.kind {
-                    AgentActivityKind::ToolCall => ("Tool", cx.theme().muted_foreground),
-                    AgentActivityKind::ApprovalRequested => ("Permission", cx.theme().warning),
-                    AgentActivityKind::ToolResult => ("Result", cx.theme().muted_foreground),
-                };
-                h_flex()
-                    .w_full()
-                    .items_start()
-                    .gap(px(8.))
-                    .text_size(px(11.))
-                    .text_color(cx.theme().muted_foreground)
-                    .child(div().flex_none().text_color(color).child(label))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .child(format!("{} · {}", activity.summary, activity.status)),
-                    )
-                    .into_any_element()
+            .map(|row| row.call_id.clone())
+            .collect::<Vec<_>>();
+        let activity_view = view.clone();
+        let mut accordion = Accordion::new(("agent-activity", message_id.0))
+            .multiple(true)
+            .bordered(false)
+            .small()
+            .on_toggle_click(move |open_indices, _, cx| {
+                activity_view.update(cx, |view, cx| {
+                    for (index, call_id) in call_ids.iter().enumerate() {
+                        let key = (message_id, call_id.clone());
+                        if open_indices.contains(&index) {
+                            view.expanded_agent_activity_calls.insert(key);
+                        } else {
+                            view.expanded_agent_activity_calls.remove(&key);
+                        }
+                    }
+                    cx.notify();
+                });
             });
 
-        Some(
-            v_flex()
-                .w_full()
-                .gap(px(8.))
-                .children(commands)
-                .children(activities)
-                .into_any_element(),
-        )
+        for row in rows {
+            let open = self
+                .expanded_agent_activity_calls
+                .contains(&(message_id, row.call_id.clone()));
+            let status = row.status;
+            let tool_name = row.tool_name.clone();
+            let title = row.title.clone();
+            let detail = render_activity_detail(&row, cx);
+            accordion = accordion.item(|item| {
+                item.open(open)
+                    .icon(agent_tool_icon(&tool_name, cx))
+                    .title(activity_title_element(&title, status, cx))
+                    .hover(|this| this.bg(cx.theme().accent.opacity(0.45)))
+                    .child(detail)
+            });
+        }
+        accordion
     }
 
     fn render_command_activity(
@@ -145,6 +574,7 @@ impl ConversationView {
             &command,
             status,
             status_color,
+            command_status_icon(status, cx),
             output,
             cx,
         ))
@@ -181,15 +611,26 @@ impl ConversationView {
                 .w_full()
                 .gap(px(8.))
                 .p(px(12.))
-                .rounded(px(10.))
+                .rounded(cx.theme().radius_lg)
                 .border_1()
                 .border_color(cx.theme().warning.opacity(0.65))
-                .bg(cx.theme().warning.opacity(0.08))
+                .bg(cx.theme().warning.opacity(0.06))
                 .child(
-                    div()
-                        .font_medium()
-                        .text_size(px(12.))
-                        .child("Agent permission required"),
+                    h_flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(
+                            Icon::empty()
+                                .path("icons/agent-shield-check.svg")
+                                .small()
+                                .text_color(cx.theme().warning),
+                        )
+                        .child(
+                            div()
+                                .font_medium()
+                                .text_size(px(12.))
+                                .child("Agent permission required"),
+                        ),
                 )
                 .child(
                     div()
@@ -204,7 +645,7 @@ impl ConversationView {
                             .max_h(px(180.))
                             .overflow_y_scrollbar()
                             .p(px(8.))
-                            .rounded(px(6.))
+                            .rounded(cx.theme().radius)
                             .bg(cx.theme().background.opacity(0.55))
                             .font_family(cx.theme().mono_font_family.clone())
                             .text_size(px(11.))
@@ -253,6 +694,7 @@ fn render_command_card(
     command: &WorkspaceCommand,
     status: &'static str,
     status_color: gpui::Hsla,
+    status_icon: Icon,
     output: String,
     cx: &App,
 ) -> AnyElement {
@@ -260,33 +702,45 @@ fn render_command_card(
         .w_full()
         .gap(px(8.))
         .p(px(10.))
-        .rounded(px(8.))
+        .rounded(cx.theme().radius_lg)
         .border_1()
-        .border_color(cx.theme().border.opacity(0.7))
-        .bg(cx.theme().secondary.opacity(0.35))
+        .border_color(status_color.opacity(0.38))
+        .bg(cx.theme().secondary.opacity(0.28))
         .child(
             h_flex()
                 .items_center()
-                .gap(px(6.))
-                .child(Icon::empty().path("icons/code.svg").xsmall())
-                .child(div().font_medium().text_size(px(12.)).child("Command"))
+                .gap(px(8.))
+                .child(
+                    Icon::empty()
+                        .path("icons/agent-terminal.svg")
+                        .small()
+                        .text_color(cx.theme().muted_foreground),
+                )
+                .child(
+                    v_flex()
+                        .min_w_0()
+                        .flex_1()
+                        .gap(px(2.))
+                        .child(div().font_medium().text_size(px(12.)).child("Command"))
+                        .child(
+                            div()
+                                .w_full()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .font_family(cx.theme().mono_font_family.clone())
+                                .text_size(cx.theme().mono_font_size)
+                                .text_color(cx.theme().foreground)
+                                .child(command.display()),
+                        ),
+                )
+                .child(status_icon)
                 .child(
                     div()
-                        .ml_auto()
                         .text_size(px(11.))
                         .text_color(status_color)
                         .child(status),
                 ),
-        )
-        .child(
-            div()
-                .w_full()
-                .p(px(8.))
-                .rounded(px(6.))
-                .bg(cx.theme().background.opacity(0.65))
-                .font_family(cx.theme().mono_font_family.clone())
-                .text_size(cx.theme().mono_font_size)
-                .child(command.display()),
         )
         .child(
             h_flex()
@@ -299,17 +753,49 @@ fn render_command_card(
         )
         .when(!output.is_empty(), |this| {
             this.child(
-                div()
+                v_flex()
                     .w_full()
-                    .max_h(px(220.))
-                    .overflow_y_scrollbar()
-                    .p(px(8.))
-                    .rounded(px(6.))
-                    .bg(cx.theme().background.opacity(0.65))
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_size(cx.theme().mono_font_size)
-                    .child(output),
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .text_size(px(10.))
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Output"),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .max_h(px(220.))
+                            .overflow_y_scrollbar()
+                            .p(px(8.))
+                            .rounded(cx.theme().radius)
+                            .bg(cx.theme().background.opacity(0.65))
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_size(cx.theme().mono_font_size)
+                            .child(output),
+                    ),
             )
         })
         .into_any_element()
+}
+
+fn command_status_icon(status: &str, cx: &App) -> Icon {
+    match status {
+        "Completed" => Icon::new(IconName::CircleCheck)
+            .xsmall()
+            .text_color(cx.theme().success),
+        "Running" => Icon::new(IconName::LoaderCircle)
+            .xsmall()
+            .text_color(cx.theme().warning),
+        "Awaiting approval" => Icon::empty()
+            .path("icons/agent-shield-check.svg")
+            .xsmall()
+            .text_color(cx.theme().warning),
+        "Rejected" | "Cancelled" => Icon::new(IconName::CircleX)
+            .xsmall()
+            .text_color(cx.theme().muted_foreground),
+        _ => Icon::new(IconName::CircleX)
+            .xsmall()
+            .text_color(cx.theme().danger),
+    }
 }

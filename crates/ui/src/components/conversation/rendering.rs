@@ -391,7 +391,7 @@ impl ConversationView {
                 )
             })
             .when_some(
-                self.render_agent_activities(message, cx),
+                self.render_agent_activities(message, cx, view),
                 gpui::ParentElement::child,
             )
             .when_some(

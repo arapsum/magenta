@@ -6,7 +6,7 @@ mod state;
 mod tests;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -191,6 +191,9 @@ pub struct ConversationView {
     agent_controller: Option<AgentApprovalController>,
     pending_agent_approval: Option<(MessageId, AgentApprovalRequest)>,
     live_commands: HashMap<(MessageId, String), LiveCommand>,
+    collapsed_command_sections: HashSet<MessageId>,
+    collapsed_tool_call_sections: HashSet<MessageId>,
+    expanded_agent_activity_calls: HashSet<(MessageId, String)>,
     older_cursor: Option<magenta_core::MessageSequence>,
     has_older: bool,
     page_load: PageLoadState,

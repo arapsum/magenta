@@ -39,6 +39,27 @@ impl AssetSource for MagentaAssets {
                 Some(include_bytes!("../assets/icons/generation-stop.svg").as_slice())
             }
             "icons/code.svg" => Some(include_bytes!("../assets/icons/code.svg").as_slice()),
+            "icons/agent-terminal.svg" => {
+                Some(include_bytes!("../assets/icons/agent-terminal.svg").as_slice())
+            }
+            "icons/agent-list-check.svg" => {
+                Some(include_bytes!("../assets/icons/agent-list-check.svg").as_slice())
+            }
+            "icons/agent-file-search.svg" => {
+                Some(include_bytes!("../assets/icons/agent-file-search.svg").as_slice())
+            }
+            "icons/agent-file-plus.svg" => {
+                Some(include_bytes!("../assets/icons/agent-file-plus.svg").as_slice())
+            }
+            "icons/agent-file-diff.svg" => {
+                Some(include_bytes!("../assets/icons/agent-file-diff.svg").as_slice())
+            }
+            "icons/agent-shield-check.svg" => {
+                Some(include_bytes!("../assets/icons/agent-shield-check.svg").as_slice())
+            }
+            "icons/agent-wrench.svg" => {
+                Some(include_bytes!("../assets/icons/agent-wrench.svg").as_slice())
+            }
             "icons/claude.svg" => {
                 Some(include_bytes!("../../../assets/icons/claude.svg").as_slice())
             }
@@ -75,6 +96,13 @@ impl AssetSource for MagentaAssets {
                 "icons/conversation-delete.svg".into(),
                 "icons/generation-stop.svg".into(),
                 "icons/code.svg".into(),
+                "icons/agent-terminal.svg".into(),
+                "icons/agent-list-check.svg".into(),
+                "icons/agent-file-search.svg".into(),
+                "icons/agent-file-plus.svg".into(),
+                "icons/agent-file-diff.svg".into(),
+                "icons/agent-shield-check.svg".into(),
+                "icons/agent-wrench.svg".into(),
                 "icons/claude.svg".into(),
                 "icons/anthropic.svg".into(),
                 "icons/antigravity.svg".into(),
