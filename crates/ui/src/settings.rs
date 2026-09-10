@@ -52,28 +52,59 @@ fn apply_appearance(settings: &AppSettings, cx: &mut App) {
         tracing::warn!(?error, "could not apply configured appearance");
     }
 
+    let ui_font = resolve_font(&settings.typography.ui_font, cx);
+    let monospace_font = resolve_font(&settings.typography.monospace_font, cx);
     let active = Theme::global_mut(cx);
-    active.font_family = resolve_font(&settings.typography.ui_font);
+    active.font_family = ui_font;
     active.font_size = px(f32::from(settings.typography.ui_size));
-    active.mono_font_family = resolve_font(&settings.typography.monospace_font);
+    active.mono_font_family = monospace_font;
     active.mono_font_size = px(f32::from(settings.typography.monospace_size));
     Theme::sync_base(cx);
 }
 
-fn resolve_font(choice: &FontChoice) -> SharedString {
+fn resolve_font(choice: &FontChoice, cx: &App) -> SharedString {
     match choice {
-        FontChoice::SystemUi => ".SystemUIFont".into(),
-        FontChoice::SystemMonospace => {
-            if cfg!(target_os = "macos") {
-                "Menlo".into()
-            } else if cfg!(target_os = "windows") {
-                "Consolas".into()
-            } else {
-                "DejaVu Sans Mono".into()
-            }
-        }
+        FontChoice::SystemUi => preferred_installed_font(
+            cx,
+            &[
+                "Manrope",
+                "Avenir Next",
+                "Segoe UI Variable",
+                "Segoe UI",
+                "Adwaita Sans",
+                "Noto Sans",
+            ],
+            ".SystemUIFont",
+        ),
+        FontChoice::SystemMonospace => preferred_installed_font(
+            cx,
+            &[
+                "Google Sans Code",
+                "JetBrains Mono",
+                "SF Mono",
+                "Cascadia Mono",
+                "IBM Plex Mono",
+                "Menlo",
+                "Consolas",
+                "Noto Sans Mono",
+                "DejaVu Sans Mono",
+            ],
+            ".SystemUIFont",
+        ),
         FontChoice::Family(name) => name.clone().into(),
     }
+}
+
+fn preferred_installed_font(cx: &App, candidates: &[&str], fallback: &str) -> SharedString {
+    let installed = cx.text_system().all_font_names();
+    candidates
+        .iter()
+        .find(|candidate| {
+            installed
+                .iter()
+                .any(|font| font.eq_ignore_ascii_case(candidate))
+        })
+        .map_or_else(|| fallback.into(), |font| (*font).into())
 }
 
 impl From<gpui_kit::WindowAppearance> for BuiltInTheme {
