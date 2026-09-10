@@ -59,7 +59,7 @@ pub fn agent_stream(
             };
             loop_guard
                 .accept_batch(&calls)
-                .map_err(|message| agent_error(&provider_id, &message))?;
+                .map_err(|error| loop_guard_error(&provider_id, error))?;
             for call in calls.iter().cloned() {
                 yield AgentRunEvent::ToolCall(call);
             }
@@ -99,13 +99,14 @@ struct AgentLoopGuard {
 }
 
 impl AgentLoopGuard {
-    fn accept_batch(&mut self, calls: &[AgentToolCall]) -> Result<(), String> {
+    fn accept_batch(&mut self, calls: &[AgentToolCall]) -> Result<(), AgentLoopFailure> {
         let observed_rounds = self.rounds.saturating_add(1);
         let observed_tool_calls = self.tool_calls.saturating_add(calls.len());
         if observed_rounds > MAX_AGENT_ROUNDS || observed_tool_calls > MAX_AGENT_TOOL_CALLS {
-            return Err(format!(
-                "agent loop limit exceeded: observed {observed_rounds} rounds and {observed_tool_calls} tool calls; permitted {MAX_AGENT_ROUNDS} rounds and {MAX_AGENT_TOOL_CALLS} tool calls"
-            ));
+            return Err(AgentLoopFailure::Limit {
+                observed_rounds,
+                observed_tool_calls,
+            });
         }
 
         let fingerprint = tool_batch_fingerprint(calls);
@@ -119,12 +120,50 @@ impl AgentLoopGuard {
             self.consecutive_identical_batches = 1;
         }
         if self.consecutive_identical_batches >= 3 {
-            return Err("repeated tool calls without progress".to_owned());
+            return Err(AgentLoopFailure::Repeated);
         }
 
         self.rounds = observed_rounds;
         self.tool_calls = observed_tool_calls;
         Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AgentLoopFailure {
+    Limit {
+        observed_rounds: usize,
+        observed_tool_calls: usize,
+    },
+    Repeated,
+}
+
+fn loop_guard_error(
+    provider: &magenta_core::ProviderId,
+    error: AgentLoopFailure,
+) -> magenta_core::ProviderError {
+    match error {
+        AgentLoopFailure::Limit {
+            observed_rounds,
+            observed_tool_calls,
+        } => magenta_core::ProviderError::with_kind_and_diagnostic(
+            provider.clone(),
+            magenta_core::ProviderErrorKind::AgentLimitReached,
+            magenta_core::ProviderErrorDiagnostic::AgentLimits {
+                observed_rounds,
+                permitted_rounds: MAX_AGENT_ROUNDS,
+                observed_tool_calls,
+                permitted_tool_calls: MAX_AGENT_TOOL_CALLS,
+            },
+            std::io::Error::other(format!(
+                "agent loop limit exceeded: observed {observed_rounds} rounds and {observed_tool_calls} tool calls; permitted {MAX_AGENT_ROUNDS} rounds and {MAX_AGENT_TOOL_CALLS} tool calls"
+            )),
+        ),
+        AgentLoopFailure::Repeated => magenta_core::ProviderError::with_kind(
+            provider.clone(),
+            magenta_core::ProviderErrorKind::RepeatedToolCalls,
+            std::io::Error::other("repeated tool calls without progress"),
+        ),
     }
 }
 
@@ -221,10 +260,7 @@ mod tests {
         let batch = [call("one", "read_file", r#"{"path":"same"}"#)];
         assert!(guard.accept_batch(&batch).is_ok());
         assert!(guard.accept_batch(&batch).is_ok());
-        assert_eq!(
-            guard.accept_batch(&batch),
-            Err("repeated tool calls without progress".to_owned())
-        );
+        assert_eq!(guard.accept_batch(&batch), Err(AgentLoopFailure::Repeated));
     }
 
     #[test]
@@ -249,7 +285,37 @@ mod tests {
         let error = guard
             .accept_batch(&overflow)
             .expect_err("the next batch should exceed both limits");
-        assert!(error.contains("observed 65 rounds and 257 tool calls"));
-        assert!(error.contains("permitted 64 rounds and 256 tool calls"));
+        assert_eq!(
+            error,
+            AgentLoopFailure::Limit {
+                observed_rounds: 65,
+                observed_tool_calls: 257,
+            }
+        );
+    }
+
+    #[test]
+    fn limit_failures_keep_the_out_of_limits_diagnostic_typed() {
+        let error = loop_guard_error(
+            &magenta_core::ProviderId::new("demo"),
+            AgentLoopFailure::Limit {
+                observed_rounds: 65,
+                observed_tool_calls: 257,
+            },
+        );
+
+        assert_eq!(
+            error.kind,
+            magenta_core::ProviderErrorKind::AgentLimitReached
+        );
+        assert_eq!(
+            error.diagnostic,
+            Some(magenta_core::ProviderErrorDiagnostic::AgentLimits {
+                observed_rounds: 65,
+                permitted_rounds: MAX_AGENT_ROUNDS,
+                observed_tool_calls: 257,
+                permitted_tool_calls: MAX_AGENT_TOOL_CALLS,
+            })
+        );
     }
 }
