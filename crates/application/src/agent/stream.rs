@@ -11,7 +11,7 @@ use super::{
     AgentStreamContext, ApprovalResponse, MAX_AGENT_ROUNDS, MAX_AGENT_TOOL_CALLS, agent_error,
     tools,
 };
-use tools::{AgentRunPermissions, AgentRunPermissionsHandle};
+use tools::AgentRunPermissions;
 
 pub fn agent_stream(
     context: AgentStreamContext,
