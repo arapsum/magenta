@@ -310,9 +310,9 @@ fn activity_title_element(title: &str, status: ActivityStatus, cx: &App) -> AnyE
 }
 
 impl ConversationView {
-    fn activity_section_is_active(message: &Message, section: ActivitySection) -> bool {
+    fn activity_section_is_active(&self, message: &Message, section: ActivitySection) -> bool {
         match section {
-            ActivitySection::Commands => command_section_is_active(message),
+            ActivitySection::Commands => command_section_is_active(message, &self.live_commands),
             ActivitySection::ToolCalls => tool_call_section_is_active(message),
         }
     }
@@ -321,7 +321,7 @@ impl ConversationView {
         self.activity_section_overrides
             .get(&(message.id, section))
             .map_or_else(
-                || Self::activity_section_is_active(message, section),
+                || self.activity_section_is_active(message, section),
                 |override_state| *override_state == ActivitySectionOverride::Open,
             )
     }
@@ -763,7 +763,10 @@ fn render_approval_actions(
         .into_any_element()
 }
 
-fn command_section_is_active(message: &Message) -> bool {
+fn command_section_is_active(
+    message: &Message,
+    live_commands: &std::collections::HashMap<(MessageId, String), LiveCommand>,
+) -> bool {
     message
         .agent_activities
         .iter()
@@ -771,10 +774,14 @@ fn command_section_is_active(message: &Message) -> bool {
             activity.kind == AgentActivityKind::ToolCall && activity.tool_name == "run_command"
         })
         .any(|activity| {
-            !message.agent_activities.iter().any(|candidate| {
+            let has_result = message.agent_activities.iter().any(|candidate| {
                 candidate.call_id == activity.call_id
                     && candidate.kind == AgentActivityKind::ToolResult
-            })
+            });
+            !has_result
+                && live_commands
+                    .get(&(message.id, activity.call_id.clone()))
+                    .is_none_or(|command| command.result.is_none())
         })
 }
 
@@ -896,7 +903,11 @@ fn command_status_icon(status: &str, cx: &App) -> Icon {
 
 #[cfg(test)]
 mod tests {
-    use magenta_core::ConversationId;
+    use std::collections::HashMap;
+
+    use magenta_core::{
+        ConversationId, WorkspaceCommand, WorkspaceCommandResult, WorkspaceCommandStatus,
+    };
 
     use super::*;
 
@@ -941,6 +952,7 @@ mod tests {
 
     #[test]
     fn settled_sections_default_to_closed_and_new_activity_reopens_them() {
+        let live_commands = HashMap::new();
         let mut message = message(vec![
             activity(
                 AgentActivityKind::ToolCall,
@@ -968,7 +980,7 @@ mod tests {
             ),
         ]);
         assert!(!tool_call_section_is_active(&message));
-        assert!(!command_section_is_active(&message));
+        assert!(!command_section_is_active(&message, &live_commands));
 
         message.agent_activities.push(activity(
             AgentActivityKind::ToolCall,
@@ -977,11 +989,12 @@ mod tests {
             "requested",
         ));
         assert!(tool_call_section_is_active(&message));
-        assert!(!command_section_is_active(&message));
+        assert!(!command_section_is_active(&message, &live_commands));
     }
 
     #[test]
     fn commands_and_tool_calls_settle_independently() {
+        let live_commands = HashMap::new();
         let message = message(vec![
             activity(
                 AgentActivityKind::ToolCall,
@@ -1003,6 +1016,39 @@ mod tests {
             ),
         ]);
         assert!(!tool_call_section_is_active(&message));
-        assert!(command_section_is_active(&message));
+        assert!(command_section_is_active(&message, &live_commands));
+    }
+
+    #[test]
+    fn cancelled_live_commands_are_settled() {
+        let message = message(vec![activity(
+            AgentActivityKind::ToolCall,
+            "command-1",
+            "run_command",
+            "requested",
+        )]);
+        let mut live_commands = HashMap::new();
+        live_commands.insert(
+            (message.id, "command-1".to_owned()),
+            LiveCommand {
+                command: WorkspaceCommand {
+                    program: "cargo".to_owned(),
+                    args: Vec::new(),
+                    cwd: ".".to_owned(),
+                    timeout_seconds: 30,
+                },
+                stdout: String::new(),
+                stderr: String::new(),
+                result: Some(WorkspaceCommandResult {
+                    status: WorkspaceCommandStatus::Cancelled,
+                    exit_code: None,
+                    duration_ms: 0,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    truncated: false,
+                }),
+            },
+        );
+        assert!(!command_section_is_active(&message, &live_commands));
     }
 }
