@@ -55,7 +55,8 @@ impl ConversationStore for TestPorts {
         Box::pin(async move { Ok(summaries) })
     }
     fn search(&self, query: String, limit: usize) -> StorageFuture<Vec<ConversationSearchResult>> {
-        if let Some(results) = self.search_results.lock().clone() {
+        let cached_results = self.search_results.lock().clone();
+        if let Some(results) = cached_results {
             return Box::pin(async move { Ok(results) });
         }
         let query = query.to_lowercase();
@@ -608,7 +609,7 @@ fn delete_confirmation_removes_the_thread_and_clears_the_active_view(cx: &mut Te
                 main.conversation
                     .update(cx, |conversation, cx| conversation.load_page(page(1), cx));
                 main.sidebar.update(cx, |sidebar, cx| {
-                    sidebar.set_active(Some(ConversationId(1)), cx)
+                    sidebar.set_active(Some(ConversationId(1)), cx);
                 });
                 main.confirm_delete_conversation(ConversationId(1), window, cx);
             });

@@ -1307,7 +1307,7 @@ impl AgentWorkbench {
     }
 
     #[cfg(test)]
-    pub(crate) fn tab_count(&self) -> usize {
+    pub(crate) const fn tab_count(&self) -> usize {
         self.tabs.len()
     }
 }
@@ -1837,7 +1837,7 @@ mod tests {
                 language: "rust".to_owned(),
             })
         }));
-        let window = setup(cx, projects.clone());
+        let window = setup(cx, projects);
         window
             .update(cx, |workbench, window, cx| {
                 workbench.set_project(Some(project()), window, cx);
