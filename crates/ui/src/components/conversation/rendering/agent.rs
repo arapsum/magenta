@@ -47,6 +47,10 @@ impl ActivityStatus {
             }
         }
     }
+
+    const fn is_active(self) -> bool {
+        matches!(self, Self::Working | Self::AwaitingApproval)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -306,6 +310,40 @@ fn activity_title_element(title: &str, status: ActivityStatus, cx: &App) -> AnyE
 }
 
 impl ConversationView {
+    fn activity_section_is_active(message: &Message, section: ActivitySection) -> bool {
+        match section {
+            ActivitySection::Commands => command_section_is_active(message),
+            ActivitySection::ToolCalls => tool_call_section_is_active(message),
+        }
+    }
+
+    fn activity_section_is_open(&self, message: &Message, section: ActivitySection) -> bool {
+        self.activity_section_overrides
+            .get(&(message.id, section))
+            .map_or_else(
+                || Self::activity_section_is_active(message, section),
+                |override_state| *override_state == ActivitySectionOverride::Open,
+            )
+    }
+
+    fn set_activity_section_override(
+        &mut self,
+        message_id: MessageId,
+        section: ActivitySection,
+        open: bool,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.activity_section_overrides.insert(
+            (message_id, section),
+            if open {
+                ActivitySectionOverride::Open
+            } else {
+                ActivitySectionOverride::Closed
+            },
+        );
+        cx.notify();
+    }
+
     pub(super) fn render_agent_activities(
         &self,
         message: &Message,
@@ -326,10 +364,10 @@ impl ConversationView {
             .collect::<Vec<_>>();
         let rows = build_activity_rows(message);
         let mut content = v_flex().w_full().gap(px(8.));
-        if let Some(command_section) = self.render_command_section(message.id, commands, cx, view) {
+        if let Some(command_section) = self.render_command_section(message, commands, cx, view) {
             content = content.child(command_section);
         }
-        if let Some(tool_call_section) = self.render_tool_call_section(message.id, rows, cx, view) {
+        if let Some(tool_call_section) = self.render_tool_call_section(message, rows, cx, view) {
             content = content.child(tool_call_section);
         }
 
@@ -338,7 +376,7 @@ impl ConversationView {
 
     fn render_command_section(
         &self,
-        message_id: MessageId,
+        message: &Message,
         commands: Vec<AnyElement>,
         cx: &App,
         view: &Entity<Self>,
@@ -347,9 +385,10 @@ impl ConversationView {
             return None;
         }
 
+        let message_id = message.id;
         let command_count = commands.len();
         let command_view = view.clone();
-        let command_open = !self.collapsed_command_sections.contains(&message_id);
+        let command_open = self.activity_section_is_open(message, ActivitySection::Commands);
         let command_label = if command_count == 1 {
             "command"
         } else {
@@ -361,12 +400,12 @@ impl ConversationView {
             .small()
             .on_toggle_click(move |open_indices, _, cx| {
                 command_view.update(cx, |view, cx| {
-                    if open_indices.contains(&0) {
-                        view.collapsed_command_sections.remove(&message_id);
-                    } else {
-                        view.collapsed_command_sections.insert(message_id);
-                    }
-                    cx.notify();
+                    view.set_activity_section_override(
+                        message_id,
+                        ActivitySection::Commands,
+                        open_indices.contains(&0),
+                        cx,
+                    );
                 });
             });
         accordion = accordion.item(|item| {
@@ -386,7 +425,7 @@ impl ConversationView {
 
     fn render_tool_call_section(
         &self,
-        message_id: MessageId,
+        message: &Message,
         rows: Vec<ActivityRow>,
         cx: &App,
         view: &Entity<Self>,
@@ -395,10 +434,11 @@ impl ConversationView {
             return None;
         }
 
+        let message_id = message.id;
         let tool_call_count = rows.len();
         let activity_accordion = self.render_activity_accordion(message_id, rows, cx, view);
         let tool_view = view.clone();
-        let tool_open = !self.collapsed_tool_call_sections.contains(&message_id);
+        let tool_open = self.activity_section_is_open(message, ActivitySection::ToolCalls);
         let tool_label = if tool_call_count == 1 {
             "tool call"
         } else {
@@ -410,12 +450,12 @@ impl ConversationView {
             .small()
             .on_toggle_click(move |open_indices, _, cx| {
                 tool_view.update(cx, |view, cx| {
-                    if open_indices.contains(&0) {
-                        view.collapsed_tool_call_sections.remove(&message_id);
-                    } else {
-                        view.collapsed_tool_call_sections.insert(message_id);
-                    }
-                    cx.notify();
+                    view.set_activity_section_override(
+                        message_id,
+                        ActivitySection::ToolCalls,
+                        open_indices.contains(&0),
+                        cx,
+                    );
                 });
             });
         accordion = accordion.item(|item| {
@@ -723,6 +763,27 @@ fn render_approval_actions(
         .into_any_element()
 }
 
+fn command_section_is_active(message: &Message) -> bool {
+    message
+        .agent_activities
+        .iter()
+        .filter(|activity| {
+            activity.kind == AgentActivityKind::ToolCall && activity.tool_name == "run_command"
+        })
+        .any(|activity| {
+            !message.agent_activities.iter().any(|candidate| {
+                candidate.call_id == activity.call_id
+                    && candidate.kind == AgentActivityKind::ToolResult
+            })
+        })
+}
+
+fn tool_call_section_is_active(message: &Message) -> bool {
+    build_activity_rows(message)
+        .iter()
+        .any(|row| row.status.is_active())
+}
+
 fn render_command_card(
     command: &WorkspaceCommand,
     status: &'static str,
@@ -830,5 +891,118 @@ fn command_status_icon(status: &str, cx: &App) -> Icon {
         _ => Icon::new(IconName::CircleX)
             .xsmall()
             .text_color(cx.theme().danger),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use magenta_core::ConversationId;
+
+    use super::*;
+
+    fn activity(
+        kind: AgentActivityKind,
+        call_id: &str,
+        tool_name: &str,
+        status: &str,
+    ) -> AgentActivity {
+        let detail = if kind == AgentActivityKind::ToolCall {
+            match tool_name {
+                "run_command" => {
+                    r#"{"program":"cargo","args":[],"cwd":".","timeout_seconds":30}"#.to_owned()
+                }
+                _ => r#"{"path":"src/lib.rs"}"#.to_owned(),
+            }
+        } else {
+            String::new()
+        };
+        AgentActivity {
+            kind,
+            call_id: call_id.to_owned(),
+            tool_name: tool_name.to_owned(),
+            status: status.to_owned(),
+            summary: String::new(),
+            detail,
+        }
+    }
+
+    fn message(activities: Vec<AgentActivity>) -> Message {
+        Message {
+            id: MessageId::new(1),
+            conversation_id: ConversationId::new(1),
+            role: MessageRole::Assistant,
+            content: String::new(),
+            status: MessageStatus::Complete,
+            attachments: Vec::new(),
+            generation_outcome: None,
+            agent_activities: activities,
+        }
+    }
+
+    #[test]
+    fn settled_sections_default_to_closed_and_new_activity_reopens_them() {
+        let mut message = message(vec![
+            activity(
+                AgentActivityKind::ToolCall,
+                "tool-1",
+                "read_file",
+                "requested",
+            ),
+            activity(
+                AgentActivityKind::ToolResult,
+                "tool-1",
+                "read_file",
+                "completed",
+            ),
+            activity(
+                AgentActivityKind::ToolCall,
+                "command-1",
+                "run_command",
+                "requested",
+            ),
+            activity(
+                AgentActivityKind::ToolResult,
+                "command-1",
+                "run_command",
+                "completed",
+            ),
+        ]);
+        assert!(!tool_call_section_is_active(&message));
+        assert!(!command_section_is_active(&message));
+
+        message.agent_activities.push(activity(
+            AgentActivityKind::ToolCall,
+            "tool-2",
+            "list_files",
+            "requested",
+        ));
+        assert!(tool_call_section_is_active(&message));
+        assert!(!command_section_is_active(&message));
+    }
+
+    #[test]
+    fn commands_and_tool_calls_settle_independently() {
+        let message = message(vec![
+            activity(
+                AgentActivityKind::ToolCall,
+                "tool-1",
+                "read_file",
+                "requested",
+            ),
+            activity(
+                AgentActivityKind::ToolResult,
+                "tool-1",
+                "read_file",
+                "failed",
+            ),
+            activity(
+                AgentActivityKind::ToolCall,
+                "command-1",
+                "run_command",
+                "requested",
+            ),
+        ]);
+        assert!(!tool_call_section_is_active(&message));
+        assert!(command_section_is_active(&message));
     }
 }

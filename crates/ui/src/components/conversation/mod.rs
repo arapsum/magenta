@@ -155,6 +155,18 @@ struct LiveCommand {
     result: Option<WorkspaceCommandResult>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum ActivitySection {
+    Commands,
+    ToolCalls,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ActivitySectionOverride {
+    Open,
+    Closed,
+}
+
 struct RenderedMessage {
     message: Message,
     markdown: Option<Entity<TextViewState>>,
@@ -191,8 +203,7 @@ pub struct ConversationView {
     agent_controller: Option<AgentApprovalController>,
     pending_agent_approval: Option<(MessageId, AgentApprovalRequest)>,
     live_commands: HashMap<(MessageId, String), LiveCommand>,
-    collapsed_command_sections: HashSet<MessageId>,
-    collapsed_tool_call_sections: HashSet<MessageId>,
+    activity_section_overrides: HashMap<(MessageId, ActivitySection), ActivitySectionOverride>,
     expanded_agent_activity_calls: HashSet<(MessageId, String)>,
     older_cursor: Option<magenta_core::MessageSequence>,
     has_older: bool,

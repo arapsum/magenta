@@ -26,7 +26,7 @@ impl ConversationView {
         self.has_newer = loaded.page.has_newer;
         self.newer_cursor = loaded.page.newer_cursor;
         self.page_load = PageLoadState::Idle;
-        self.reset_math(cx);
+        self.release_unloaded_resources(cx);
         self.list_state
             .reset_with_uniform_height(self.messages.len(), px(96.));
         self.list_state.set_follow_mode(FollowMode::Normal);
@@ -186,8 +186,7 @@ impl ConversationView {
             agent_controller: None,
             pending_agent_approval: None,
             live_commands: HashMap::new(),
-            collapsed_command_sections: HashSet::new(),
-            collapsed_tool_call_sections: HashSet::new(),
+            activity_section_overrides: HashMap::new(),
             expanded_agent_activity_calls: HashSet::new(),
             older_cursor: None,
             has_older: false,
@@ -204,8 +203,7 @@ impl ConversationView {
     pub(crate) fn load(&mut self, thread: ConversationThread, cx: &mut Context<'_, Self>) {
         self.cancel_generation(cx);
         self.live_commands.clear();
-        self.collapsed_command_sections.clear();
-        self.collapsed_tool_call_sections.clear();
+        self.activity_section_overrides.clear();
         self.expanded_agent_activity_calls.clear();
         self.older_cursor = None;
         self.has_older = false;
@@ -230,6 +228,8 @@ impl ConversationView {
     pub(crate) fn clear(&mut self, cx: &mut Context<'_, Self>) {
         self.cancel_generation(cx);
         self.live_commands.clear();
+        self.activity_section_overrides.clear();
+        self.expanded_agent_activity_calls.clear();
         self.conversation = None;
         self.messages.clear();
         self.origins.clear();
@@ -469,16 +469,12 @@ impl ConversationView {
                     .iter()
                     .any(|message| message.message.id == *message_id)
             });
-        self.collapsed_command_sections.retain(|message_id| {
-            self.messages
-                .iter()
-                .any(|message| message.message.id == *message_id)
-        });
-        self.collapsed_tool_call_sections.retain(|message_id| {
-            self.messages
-                .iter()
-                .any(|message| message.message.id == *message_id)
-        });
+        self.activity_section_overrides
+            .retain(|(message_id, _), _| {
+                self.messages
+                    .iter()
+                    .any(|message| message.message.id == *message_id)
+            });
         self.reset_math(cx);
     }
 
