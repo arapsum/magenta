@@ -14,7 +14,8 @@ use http_client::{HttpClient, Method, StatusCode};
 use magenta_core::{
     AuthenticationFuture, AuthorizationSession, ChatProvider, GenerationEvent, GenerationOutcome,
     GenerationRequest, GenerationStream, ModelCatalog, ModelCatalogFuture, ModelDescriptor,
-    ProviderAccount, ProviderAuthenticator, ProviderError, ProviderErrorKind,
+    ProviderAccount, ProviderAuthenticator, ProviderError, ProviderErrorDiagnostic,
+    ProviderErrorKind,
 };
 use reqwest_client::ReqwestClient;
 use serde_json::Value;
@@ -384,7 +385,7 @@ impl OpenAiProvider {
 
             if !completed {
                 Err::<(), _>(provider_error(
-                    ProviderErrorKind::Protocol,
+                    ProviderErrorKind::IncompleteResponse,
                     OpenAiProviderError::IncompleteStream,
                 ))?;
             }
@@ -497,7 +498,17 @@ const fn classify_status(status: u16) -> ProviderErrorKind {
 }
 
 fn provider_error(kind: ProviderErrorKind, error: OpenAiProviderError) -> ProviderError {
-    ProviderError::with_kind(openai_provider(), kind, error)
+    let diagnostic = match &error {
+        OpenAiProviderError::Http { status, .. } => {
+            Some(ProviderErrorDiagnostic::HttpStatus(*status))
+        }
+        _ => None,
+    };
+    if let Some(diagnostic) = diagnostic {
+        ProviderError::with_kind_and_diagnostic(openai_provider(), kind, diagnostic, error)
+    } else {
+        ProviderError::with_kind(openai_provider(), kind, error)
+    }
 }
 
 #[cfg(test)]

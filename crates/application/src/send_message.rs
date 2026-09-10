@@ -116,6 +116,7 @@ impl SendMessage {
             status: MessageStatus::Complete,
             attachments: Vec::new(),
             generation_outcome: None,
+            failure: None,
             agent_activities: Vec::new(),
         };
         let mut stream = self.provider.stream(GenerationRequest {

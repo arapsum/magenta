@@ -11,7 +11,26 @@ pub enum ProviderErrorKind {
     Transport,
     Protocol,
     ServiceUnavailable,
+    AgentLimitReached,
+    RepeatedToolCalls,
+    IncompleteResponse,
     Other,
+}
+
+/// Structured, allowlisted context that may be shown or persisted with a
+/// provider failure.
+///
+/// The provider's source error is intentionally not part of this value because
+/// it may contain response bodies, prompts, or credentials.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProviderErrorDiagnostic {
+    HttpStatus(u16),
+    AgentLimits {
+        observed_rounds: usize,
+        permitted_rounds: usize,
+        observed_tool_calls: usize,
+        permitted_tool_calls: usize,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -19,6 +38,7 @@ pub enum ProviderErrorKind {
 pub struct ProviderError {
     pub provider: ProviderId,
     pub kind: ProviderErrorKind,
+    pub diagnostic: Option<ProviderErrorDiagnostic>,
     #[source]
     pub source: Box<dyn Error + Send + Sync>,
 }
@@ -29,6 +49,7 @@ impl ProviderError {
         Self {
             provider,
             kind: ProviderErrorKind::Other,
+            diagnostic: None,
             source: Box::new(source),
         }
     }
@@ -42,6 +63,22 @@ impl ProviderError {
         Self {
             provider,
             kind,
+            diagnostic: None,
+            source: Box::new(source),
+        }
+    }
+
+    #[must_use]
+    pub fn with_kind_and_diagnostic(
+        provider: ProviderId,
+        kind: ProviderErrorKind,
+        diagnostic: ProviderErrorDiagnostic,
+        source: impl Error + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            provider,
+            kind,
+            diagnostic: Some(diagnostic),
             source: Box::new(source),
         }
     }

@@ -264,19 +264,26 @@ impl ConversationStore for SqliteConversationStore {
                 .map(serde_json::to_string)
                 .transpose()
                 .map_err(invalid)?;
+            let failure_json = message
+                .failure
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(invalid)?;
             let changed = transaction
                 .execute(
                     r"
                         UPDATE messages
-                        SET content = ?1, status = ?2, outcome = ?3
-                        WHERE id = ?4
-                          AND conversation_id = ?5
+                        SET content = ?1, status = ?2, outcome = ?3, failure = ?4
+                        WHERE id = ?5
+                          AND conversation_id = ?6
                           AND status = 'streaming'
                     ",
                     params![
                         message.content,
                         records::status(message.status),
                         outcome,
+                        failure_json,
                         message.id.0,
                         message.conversation_id.0
                     ],

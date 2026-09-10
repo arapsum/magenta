@@ -43,8 +43,8 @@ pub fn page(
     let mut statement = connection
         .prepare(
             r"
-                SELECT id, sequence, role, content, status, generation, outcome, created_at,
-                       omitted_context_messages
+                SELECT id, sequence, role, content, status, generation, outcome, failure,
+                       created_at, omitted_context_messages
                 FROM messages
                 WHERE conversation_id = ?1
                   AND (?2 IS NULL OR sequence < ?2)
@@ -87,8 +87,8 @@ pub fn page_after(
     let mut statement = connection
         .prepare(
             r"
-                SELECT id, sequence, role, content, status, generation, outcome, created_at,
-                       omitted_context_messages
+                SELECT id, sequence, role, content, status, generation, outcome, failure,
+                       created_at, omitted_context_messages
                 FROM messages
                 WHERE conversation_id = ?1 AND sequence > ?2
                 ORDER BY sequence
@@ -127,8 +127,8 @@ pub fn page_around(
     let mut statement = connection
         .prepare(
             r"
-                SELECT id, sequence, role, content, status, generation, outcome, created_at,
-                       omitted_context_messages
+                SELECT id, sequence, role, content, status, generation, outcome, failure,
+                       created_at, omitted_context_messages
                 FROM messages
                 WHERE conversation_id = ?1
                   AND sequence BETWEEN ?2 AND ?3
@@ -174,8 +174,8 @@ pub fn context(connection: &Connection, id: ConversationId, before: i64) -> Resu
     let mut statement = connection
         .prepare(
             r"
-                SELECT id, sequence, role, content, status, generation, outcome, created_at,
-                       omitted_context_messages
+                SELECT id, sequence, role, content, status, generation, outcome, failure,
+                       created_at, omitted_context_messages
                 FROM messages
                 WHERE conversation_id = ?1
                   AND sequence < ?2
@@ -204,6 +204,7 @@ fn read_message(
     let state: String = row.get(4).map_err(database_error)?;
     let generation: String = row.get(5).map_err(database_error)?;
     let outcome: Option<String> = row.get(6).map_err(database_error)?;
+    let failure_json: Option<String> = row.get(7).map_err(database_error)?;
 
     let role = match role.as_str() {
         "user" => MessageRole::User,
@@ -235,11 +236,16 @@ fn read_message(
         .map(serde_json::from_str)
         .transpose()
         .map_err(invalid)?;
+    let failure = failure_json
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(invalid)?;
     let sequence = MessageSequence(row.get(1).map_err(database_error)?);
-    let created_at = Timestamp(row.get(7).map_err(database_error)?);
+    let created_at = Timestamp(row.get(8).map_err(database_error)?);
     let generation = serde_json::from_str(&generation).map_err(invalid)?;
     let omitted_context_messages =
-        usize::try_from(row.get::<_, i64>(8).map_err(database_error)?).map_err(invalid)?;
+        usize::try_from(row.get::<_, i64>(9).map_err(database_error)?).map_err(invalid)?;
 
     Ok(StoredMessage {
         message: Message {
@@ -250,6 +256,7 @@ fn read_message(
             status,
             attachments,
             generation_outcome,
+            failure,
             agent_activities: agent_activities.clone(),
         },
         sequence,

@@ -286,6 +286,7 @@ fn message(id: u64, role: MessageRole, status: MessageStatus) -> Message {
         status,
         attachments: Vec::new(),
         generation_outcome: None,
+        failure: None,
         agent_activities: Vec::new(),
     }
 }
@@ -349,6 +350,7 @@ fn user_messages_keep_prose_literal_and_isolate_fenced_code(cx: &mut TestAppCont
                 status: MessageStatus::Complete,
                 attachments: Vec::new(),
                 generation_outcome: None,
+                failure: None,
                 agent_activities: Vec::new(),
             };
             let rendered = ConversationView::rendered_message(message, cx);

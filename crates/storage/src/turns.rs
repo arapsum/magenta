@@ -258,6 +258,7 @@ fn insert_user_message(
         status: MessageStatus::Complete,
         attachments,
         generation_outcome: None,
+        failure: None,
         agent_activities: Vec::new(),
     })
 }
@@ -300,6 +301,7 @@ fn insert_assistant_message(
         status: MessageStatus::Streaming,
         attachments: Vec::new(),
         generation_outcome: None,
+        failure: None,
         agent_activities: Vec::new(),
     })
 }
@@ -381,6 +383,7 @@ pub fn regenerate(
         status: MessageStatus::Streaming,
         attachments: Vec::new(),
         generation_outcome: None,
+        failure: None,
         agent_activities: Vec::new(),
     };
 

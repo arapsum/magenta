@@ -254,6 +254,7 @@ fn version_four_migration_backfills_full_text_indexes() {
                     DROP TABLE conversation_fts;
                     DROP TABLE message_fts;
                     ALTER TABLE messages DROP COLUMN omitted_context_messages;
+                    ALTER TABLE messages DROP COLUMN failure;
                     PRAGMA user_version = 4;
                 ",
             )

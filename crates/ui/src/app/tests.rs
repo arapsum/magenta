@@ -557,6 +557,7 @@ fn failed_finalization_retains_response_until_retry_before_navigation(cx: &mut T
         status: MessageStatus::Complete,
         attachments: Vec::new(),
         generation_outcome: None,
+        failure: None,
         agent_activities: Vec::new(),
     };
     window

@@ -35,13 +35,16 @@ pub use context::{
     select_context,
 };
 pub use conversation::Conversation;
-pub use error::{ProviderError, ProviderErrorKind};
+pub use error::{ProviderError, ProviderErrorDiagnostic, ProviderErrorKind};
 pub use generation::{
     ChatProvider, EffortLevel, FinishReason, GenerationConfig, GenerationEvent, GenerationLimits,
     GenerationOutcome, GenerationRequest, GenerationStream, TokenUsage,
 };
 pub use identifiers::{AgentRunId, ConversationId, MessageId, ModelId, ProviderId};
-pub use message::{Attachment, AttachmentDraft, Message, MessageRole, MessageStatus};
+pub use message::{
+    Attachment, AttachmentDraft, Message, MessageFailure, MessageFailureCategory,
+    MessageFailureDetail, MessageRole, MessageStatus,
+};
 pub use models::{ModelCatalog, ModelCatalogFuture, ModelDescriptor};
 pub use project::{
     Project, ProjectStore, WorkspaceBrowser, WorkspaceDocument, WorkspaceEntry, WorkspaceEntryKind,
