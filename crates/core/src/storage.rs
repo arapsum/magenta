@@ -141,6 +141,13 @@ pub trait ConversationStore: Send + Sync {
         target: MessageId,
         request_overhead_tokens: u64,
     ) -> StorageFuture<PreparedTurn>;
+    fn begin_retry(
+        &self,
+        id: ConversationId,
+        target: MessageId,
+        generation: GenerationConfig,
+        request_overhead_tokens: u64,
+    ) -> StorageFuture<PreparedTurn>;
     fn finalize(&self, message: Message) -> StorageFuture<()>;
     fn delete(&self, id: ConversationId) -> StorageFuture<()>;
     fn rename(&self, id: ConversationId, title: String) -> StorageFuture<()>;

@@ -17,6 +17,16 @@ pub enum RegenerateMessageError {
 }
 
 #[derive(Debug, thiserror::Error)]
+pub enum RetryMessageError {
+    #[error("could not prepare a new response attempt")]
+    Storage(#[from] StorageError),
+    #[error("failed agent responses require a continuation")]
+    AgentContinuation,
+    #[error("the agent workspace is unavailable")]
+    WorkspaceUnavailable,
+}
+
+#[derive(Debug, thiserror::Error)]
 pub enum TitleConversationError {
     #[error("the title generation request failed")]
     Provider(#[from] ProviderError),

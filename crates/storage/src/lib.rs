@@ -244,6 +244,18 @@ impl ConversationStore for SqliteConversationStore {
         })
     }
 
+    fn begin_retry(
+        &self,
+        id: ConversationId,
+        target: MessageId,
+        generation: magenta_core::GenerationConfig,
+        request_overhead_tokens: u64,
+    ) -> StorageFuture<PreparedTurn> {
+        self.run(move |connection| {
+            turns::retry(connection, id, target, generation, request_overhead_tokens)
+        })
+    }
+
     fn finalize(&self, message: Message) -> StorageFuture<()> {
         self.run(move |connection| {
             if message.role != magenta_core::MessageRole::Assistant

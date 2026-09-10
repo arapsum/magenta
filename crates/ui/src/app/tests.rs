@@ -110,6 +110,15 @@ impl ConversationStore for TestPorts {
     ) -> StorageFuture<PreparedTurn> {
         failure()
     }
+    fn begin_retry(
+        &self,
+        _: ConversationId,
+        _: MessageId,
+        _: GenerationConfig,
+        _: u64,
+    ) -> StorageFuture<PreparedTurn> {
+        failure()
+    }
     fn finalize(&self, message: Message) -> StorageFuture<()> {
         self.saves.lock().push(message);
         if self.fail_save.load(Ordering::SeqCst) {

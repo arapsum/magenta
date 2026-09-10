@@ -13,7 +13,7 @@ use magenta_core::{
     WorkspaceAccess, WorkspaceCommandRunner, estimate_agent_overhead,
 };
 
-use crate::SendMessageError;
+use crate::{RetryMessageError, SendMessageError};
 
 const MAX_AGENT_ROUNDS: usize = 64;
 const MAX_AGENT_TOOL_CALLS: usize = 256;
@@ -30,6 +30,13 @@ pub struct RunWorkspaceAgentInput {
     pub prompt: String,
     pub generation: GenerationConfig,
     pub workspace_root: std::path::PathBuf,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RetryWorkspaceAgentInput {
+    pub conversation_id: ConversationId,
+    pub target_message_id: magenta_core::MessageId,
+    pub generation: GenerationConfig,
 }
 
 pub struct PendingAgentGeneration {
@@ -164,6 +171,76 @@ impl RunWorkspaceAgent {
             receiver,
         );
 
+        Ok(PendingAgentGeneration {
+            conversation: prepared.conversation,
+            user_message: prepared.user_message,
+            assistant_message: prepared.assistant_message,
+            stream,
+            controller,
+            user_sequence: prepared.user_sequence,
+            assistant_sequence: prepared.assistant_sequence,
+            context_report: prepared.context_report,
+        })
+    }
+
+    /// Starts a new agent attempt while retaining the failed response. The
+    /// storage port excludes that failed assistant from the provider context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the target conversation, workspace, or persisted
+    /// retry turn is unavailable.
+    pub async fn retry(
+        &self,
+        input: RetryWorkspaceAgentInput,
+    ) -> Result<PendingAgentGeneration, RetryMessageError> {
+        let loaded = self.store.load(input.conversation_id).await?;
+        if loaded.conversation.mode != ConversationMode::Agent {
+            return Err(RetryMessageError::AgentContinuation);
+        }
+        let workspace_root = loaded
+            .conversation
+            .workspace_root
+            .clone()
+            .ok_or(RetryMessageError::WorkspaceUnavailable)?;
+        if !workspace_root.is_dir() {
+            return Err(RetryMessageError::WorkspaceUnavailable);
+        }
+
+        let instructions = agent_instructions(&workspace_root);
+        let tools = tools::tool_definitions(self.command_runner.is_some());
+        let request_overhead_tokens = estimate_agent_overhead(&instructions, &tools);
+        let prepared = self
+            .store
+            .begin_retry(
+                input.conversation_id,
+                input.target_message_id,
+                input.generation,
+                request_overhead_tokens,
+            )
+            .await?;
+        let (sender, receiver) = async_channel::unbounded();
+        let controller = AgentApprovalController { sender };
+        let request = AgentRequest {
+            generation: prepared.conversation.generation.clone(),
+            messages: prepared.context,
+            instructions,
+            tools,
+        };
+        let stream = stream::agent_stream(
+            AgentStreamContext {
+                provider: self.provider.clone(),
+                store: self.store.clone(),
+                workspace: self.workspace.clone(),
+                command_runner: self.command_runner.clone(),
+                root: workspace_root,
+                conversation: prepared.conversation.clone(),
+                assistant_message: prepared.assistant_message.clone(),
+                run_id: prepared.agent_run_id,
+            },
+            request,
+            receiver,
+        );
         Ok(PendingAgentGeneration {
             conversation: prepared.conversation,
             user_message: prepared.user_message,

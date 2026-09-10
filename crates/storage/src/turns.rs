@@ -401,6 +401,136 @@ pub fn regenerate(
     })
 }
 
+/// Starts a new assistant attempt while retaining the failed message as a
+/// durable transcript entry. Context is selected strictly before the failed
+/// assistant, so its partial output is never replayed to the provider.
+pub fn retry(
+    connection: &mut Connection,
+    id: ConversationId,
+    target: MessageId,
+    generation_config: GenerationConfig,
+    request_overhead_tokens: u64,
+) -> Result<PreparedTurn> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(database_error)?;
+    let mut conversation = records::conversation(&transaction, id)?;
+    ensure_idle(&transaction, id)?;
+
+    let (target_sequence, role, status): (i64, String, String) = transaction
+        .query_row(
+            "SELECT sequence, role, status FROM messages WHERE conversation_id = ?1 AND id = ?2",
+            params![id.0, target.0],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(database_error)?;
+    if role != "assistant" || status != "failed" {
+        return Err(failure(
+            StorageErrorKind::InvalidData,
+            "retry target is not a failed assistant",
+        ));
+    }
+
+    let previous_context = records::context(&transaction, id, target_sequence)?;
+    let user_message = previous_context
+        .iter()
+        .rev()
+        .find(|message| message.role == MessageRole::User)
+        .cloned()
+        .ok_or_else(|| failure(StorageErrorKind::InvalidData, "missing user context"))?;
+    let user_sequence: i64 = transaction
+        .query_row(
+            "SELECT sequence FROM messages WHERE id = ?1",
+            [user_message.id.0],
+            |row| row.get(0),
+        )
+        .map_err(database_error)?;
+    let (context, context_report) = select_context(
+        &previous_context,
+        generation_config.limits,
+        request_overhead_tokens,
+    )
+    .map_err(|error| magenta_core::StorageError::new(StorageErrorKind::ContextTooLarge, error))?;
+    trace_context_budget(&context_report);
+
+    let generation = serde_json::to_string(&generation_config).map_err(invalid)?;
+    transaction
+        .execute(
+            "UPDATE conversations SET generation = ?1, updated_at = ?2 WHERE id = ?3",
+            params![generation, now()?, id.0],
+        )
+        .map_err(database_error)?;
+    conversation.generation = generation_config;
+
+    let sequence: i64 = transaction
+        .query_row(
+            "SELECT COALESCE(MAX(sequence) + 1, 0) FROM messages WHERE conversation_id = ?1",
+            [id.0],
+            |row| row.get(0),
+        )
+        .map_err(database_error)?;
+    let assistant_message = insert_retry_assistant_message(
+        &transaction,
+        id,
+        sequence,
+        &generation,
+        now()?,
+        context_report.omitted_messages,
+    )?;
+    let agent_run_id = insert_agent_run(&transaction, &conversation, &assistant_message, now()?)?;
+
+    transaction.commit().map_err(database_error)?;
+    Ok(PreparedTurn {
+        conversation,
+        user_message,
+        assistant_message,
+        context,
+        agent_run_id,
+        user_sequence: MessageSequence(user_sequence),
+        assistant_sequence: MessageSequence(sequence),
+        context_report,
+    })
+}
+
+fn insert_retry_assistant_message(
+    transaction: &Transaction<'_>,
+    conversation_id: ConversationId,
+    sequence: i64,
+    generation: &str,
+    timestamp: i64,
+    omitted_context_messages: usize,
+) -> Result<Message> {
+    transaction
+        .execute(
+            r"
+                INSERT INTO messages(
+                    conversation_id, sequence, role, content, status, generation,
+                    omitted_context_messages, created_at
+                )
+                VALUES (?1, ?2, 'assistant', '', 'streaming', ?3, ?4, ?5)
+            ",
+            params![
+                conversation_id.0,
+                sequence,
+                generation,
+                i64::try_from(omitted_context_messages).map_err(invalid)?,
+                timestamp
+            ],
+        )
+        .map_err(database_error)?;
+    Ok(Message {
+        id: MessageId(u64::try_from(transaction.last_insert_rowid()).map_err(invalid)?),
+        conversation_id,
+        role: MessageRole::Assistant,
+        content: String::new(),
+        status: MessageStatus::Streaming,
+        attachments: Vec::new(),
+        generation_outcome: None,
+        failure: None,
+        agent_activities: Vec::new(),
+    })
+}
+
 const fn mode_name(mode: &ConversationMode) -> &'static str {
     match mode {
         ConversationMode::Chat => "chat",

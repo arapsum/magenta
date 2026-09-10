@@ -8,11 +8,15 @@ mod regenerate_message;
 mod send_message;
 
 pub use agent::{
-    AgentApprovalController, AgentSendTarget, PendingAgentGeneration, RunWorkspaceAgent,
-    RunWorkspaceAgentInput,
+    AgentApprovalController, AgentSendTarget, PendingAgentGeneration, RetryWorkspaceAgentInput,
+    RunWorkspaceAgent, RunWorkspaceAgentInput,
 };
-pub use error::{RegenerateMessageError, SendMessageError, TitleConversationError};
+pub use error::{
+    RegenerateMessageError, RetryMessageError, SendMessageError, TitleConversationError,
+};
 pub use history::ConversationHistory;
 pub use projects::{ProjectCatalog, ProjectCatalogError};
-pub use regenerate_message::{PendingRegeneration, RegenerateMessage, RegenerateMessageInput};
+pub use regenerate_message::{
+    PendingRegeneration, PendingRetry, RegenerateMessage, RegenerateMessageInput, RetryMessageInput,
+};
 pub use send_message::{PendingGeneration, SendMessage, SendMessageInput, SendTarget};

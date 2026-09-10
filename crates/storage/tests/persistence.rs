@@ -1,7 +1,8 @@
 use magenta_core::{
     AttachmentDraft, BeginTurn, ConversationId, ConversationMode, ConversationStore, EffortLevel,
-    FinishReason, GenerationConfig, GenerationOutcome, MessageSequence, MessageStatus, ModelId,
-    Project, ProjectStore, ProviderId, StorageErrorKind, Timestamp, TokenUsage,
+    FinishReason, GenerationConfig, GenerationOutcome, MessageFailure, MessageFailureCategory,
+    MessageFailureDetail, MessageSequence, MessageStatus, ModelId, Project, ProjectStore,
+    ProviderId, StorageErrorKind, Timestamp, TokenUsage,
 };
 use magenta_storage::SqliteConversationStore;
 use std::{
@@ -434,6 +435,52 @@ fn interrupted_stream_recovers_once_and_regeneration_keeps_identity() {
             store.finalize(assistant).await.unwrap_err().kind,
             StorageErrorKind::Conflict
         );
+    });
+}
+
+#[test]
+fn failed_response_persists_only_safe_failure_diagnostics() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite3");
+        let store = SqliteConversationStore::new(path.clone());
+        store.initialize().await.unwrap();
+        let pending = store.begin_turn(input(None)).await.unwrap();
+        let mut assistant = pending.assistant_message;
+        assistant.status = MessageStatus::Failed;
+        assistant.content = "partial output".into();
+        assistant.failure = Some(MessageFailure {
+            category: MessageFailureCategory::RateLimit,
+            reference_code: "MAG-GEN-RATE-LIMIT".into(),
+            provider: ProviderId::new("openai"),
+            detail: Some(MessageFailureDetail::HttpStatus { status: 429 }),
+        });
+        store.finalize(assistant.clone()).await.unwrap();
+
+        let reopened = SqliteConversationStore::new(path);
+        reopened.initialize().await.unwrap();
+        let loaded = reopened.load(pending.conversation.id).await.unwrap();
+        assert_eq!(loaded.page.messages[1].message, assistant);
+        assert_eq!(loaded.page.messages[1].message.failure, assistant.failure);
+        let json = serde_json::to_string(&assistant.failure).unwrap();
+        assert!(!json.contains("partial output"));
+        assert!(!json.contains("/"));
+
+        let retry = reopened
+            .begin_retry(
+                pending.conversation.id,
+                assistant.id,
+                pending.conversation.generation.clone(),
+                0,
+            )
+            .await
+            .unwrap();
+        assert_ne!(retry.assistant_message.id, assistant.id);
+        assert_eq!(retry.context, vec![pending.user_message]);
+        let page = reopened.load(pending.conversation.id).await.unwrap().page;
+        assert_eq!(page.messages.len(), 3);
+        assert_eq!(page.messages[1].message, assistant);
+        assert_eq!(page.messages[2].message, retry.assistant_message);
     });
 }
 
