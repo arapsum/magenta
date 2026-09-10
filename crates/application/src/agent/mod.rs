@@ -15,8 +15,8 @@ use magenta_core::{
 
 use crate::SendMessageError;
 
-const MAX_AGENT_ROUNDS: usize = 8;
-const MAX_AGENT_TOOL_CALLS: usize = 24;
+const MAX_AGENT_ROUNDS: usize = 64;
+const MAX_AGENT_TOOL_CALLS: usize = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentSendTarget {
@@ -187,7 +187,7 @@ pub fn agent_error(provider: &ProviderId, message: &str) -> magenta_core::Provid
 
 fn agent_instructions(root: &std::path::Path) -> String {
     format!(
-        "You are Magenta's constrained workspace execution agent operating in {}. You have actual access to this workspace through the supplied tools. You MUST use those tools to inspect, create, or edit files when the user asks for a workspace change. Use run_command after edits when a relevant non-interactive build, test, formatter, linter, or locally cached package installation is available. Every command requires user approval, has no network or stdin, and must use structured arguments rather than shell syntax. Do not answer with commands or instructions for the user to run, and never claim that you lack filesystem or command access when the corresponding tool is available. Paths and command working directories should be relative to the workspace root. Keep the requested outcome in focus, reuse prior results, and do not repeat an identical read or command unless a mutation changed its inputs. Inspect existing files before editing them, but create explicitly requested new files directly. Do not request Git operations, deletion, renaming, background processes, or network access.",
+        "You are Magenta's constrained workspace execution agent operating in {}. You have actual access to this workspace through the supplied tools. You MUST use those tools to inspect, create, or edit files when the user asks for a workspace change. Use run_command after edits when a relevant non-interactive build, test, formatter, linter, or locally cached package installation is available. Every command requires user approval, has no network or stdin, and must use structured arguments rather than shell syntax. Do not answer with commands or instructions for the user to run, and never claim that you lack filesystem or command access when the corresponding tool is available. Paths and command working directories should be relative to the workspace root. Keep the requested outcome in focus, reuse prior results, and do not repeat an identical read or command unless a mutation changed its inputs. Inspect existing files before editing them, but create explicitly requested new files directly. Each run has a guarded safety ceiling of 64 continuation rounds and 256 requested tool calls. Never repeat an identical non-empty tool-call batch without making progress. Do not request Git operations, deletion, renaming, background processes, or network access.",
         root.display()
     )
 }
