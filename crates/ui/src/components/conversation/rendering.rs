@@ -101,12 +101,16 @@ impl ConversationView {
                         .max_w(USER_MESSAGE_MAX_WIDTH)
                         .px(px(14.))
                         .py(px(10.))
-                        .rounded(px(12.))
+                        .rounded(px(14.))
                         .border_1()
-                        .border_color(cx.theme().input.opacity(0.72))
-                        .bg(cx.theme().secondary)
-                        .text_size(px(13.))
-                        .line_height(px(20.))
+                        .border_color(cx.theme().primary.opacity(0.26))
+                        .bg(linear_gradient(
+                            135.,
+                            linear_color_stop(cx.theme().secondary, 0.),
+                            linear_color_stop(cx.theme().accent.opacity(0.82), 1.),
+                        ))
+                        .text_size(px(14.5))
+                        .line_height(px(22.))
                         .text_color(cx.theme().foreground)
                         .child(v_flex().w_full().gap(px(8.)).children(segments)),
                 )
@@ -340,15 +344,23 @@ impl ConversationView {
             .items_center()
             .gap(px(8.))
             .child(
-                provider_icon(generation.map(|generation| &generation.provider))
-                    .xsmall()
-                    .text_color(cx.theme().muted_foreground),
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .size(px(22.))
+                    .rounded(px(7.))
+                    .bg(cx.theme().accent.opacity(0.72))
+                    .text_color(cx.theme().primary)
+                    .child(
+                        provider_icon(generation.map(|generation| &generation.provider)).xsmall(),
+                    ),
             )
             .child(
                 div()
-                    .text_size(px(11.))
+                    .text_size(px(12.))
                     .font_medium()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(cx.theme().foreground.opacity(0.72))
                     .child(label),
             )
             .into_any_element()
@@ -441,8 +453,8 @@ impl ConversationView {
                         .plugin(MarkdownInlineCodePlugin)
                         .style(style)
                         .w_full()
-                        .text_size(px(13.))
-                        .line_height(px(21.))
+                        .text_size(px(15.))
+                        .line_height(px(23.))
                         .code_block_actions(move |code_block, _window, _cx| {
                             let code_id = code_block
                                 .span

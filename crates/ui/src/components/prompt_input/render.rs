@@ -11,7 +11,7 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, App, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
     ObjectFit, ParentElement as _, Render, SharedString, Styled as _, StyledImage as _, Window,
-    div, img, prelude::FluentBuilder as _, px, rems,
+    div, img, linear_color_stop, linear_gradient, prelude::FluentBuilder as _, px, rems,
 };
 use magenta_core::{ConversationMode, ProviderId};
 
@@ -20,6 +20,74 @@ use crate::components::provider_icon;
 use super::{MAX_ATTACHMENTS, PromptComposer};
 
 impl PromptComposer {
+    fn render_input_content(&self, cx: &Context<'_, Self>) -> AnyElement {
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .gap(px(7.))
+            .when_some(self.inline_error(), |this, error| {
+                this.child(
+                    h_flex()
+                        .items_start()
+                        .gap(px(6.))
+                        .text_size(px(12.))
+                        .text_color(cx.theme().danger)
+                        .child(Icon::new(IconName::CircleX).xsmall())
+                        .child(
+                            v_flex()
+                                .gap(px(2.))
+                                .child(div().font_medium().child(error.title))
+                                .child(div().child(error.message)),
+                        ),
+                )
+            })
+            .when_some(self.blocking_error(), |this, error| {
+                this.child(
+                    h_flex()
+                        .items_start()
+                        .gap(px(6.))
+                        .text_size(px(12.))
+                        .text_color(cx.theme().warning)
+                        .child(Icon::new(IconName::CircleX).xsmall())
+                        .child(
+                            v_flex()
+                                .gap(px(2.))
+                                .child(div().font_medium().child(error.title))
+                                .child(div().child(error.message)),
+                        ),
+                )
+            })
+            .when(self.is_model_retry(), |this| {
+                this.child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child(
+                            "Choose a model above, then press Retry to try this response again.",
+                        ),
+                )
+            })
+            .when(!self.attachments.is_empty(), |this| {
+                this.child(self.attachment_strip(cx))
+            })
+            .when(!self.preview_source.is_empty(), |this| {
+                this.child(self.code_preview(cx))
+            })
+            .child(
+                Textarea::new(&self.input)
+                    .appearance(false)
+                    .bordered(false)
+                    .aria_label("Chat message composer")
+                    .w_full()
+                    .flex_1()
+                    .min_h(px(30.))
+                    .p_0()
+                    .text_size(px(15.))
+                    .line_height(px(22.)),
+            )
+            .into_any_element()
+    }
+
     fn mode_selector(&self, view: Entity<Self>) -> AnyElement {
         let mode = self.mode.clone();
         let agent_available = self.agent_capability.available();
@@ -158,8 +226,9 @@ impl PromptComposer {
             .p_0()
             .rounded_full()
             .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().background)
+            .border_color(cx.theme().primary.opacity(0.35))
+            .bg(cx.theme().accent.opacity(0.48))
+            .text_color(cx.theme().primary)
             .icon(IconName::Plus)
             .on_click(move |_, window, cx| {
                 view.update(cx, |composer, cx| {
@@ -395,90 +464,56 @@ impl Render for PromptComposer {
         let submit_view = cx.entity();
         let generating = self.generating;
         let can_add_attachment = self.attachments.len() < MAX_ATTACHMENTS;
+        let surface = linear_gradient(
+            145.,
+            linear_color_stop(cx.theme().popover, 0.),
+            linear_color_stop(
+                cx.theme().accent.opacity(if focused { 0.72 } else { 0.36 }),
+                1.,
+            ),
+        );
+        let highlight = linear_gradient(
+            90.,
+            linear_color_stop(cx.theme().primary.opacity(0.), 0.),
+            linear_color_stop(
+                cx.theme()
+                    .primary
+                    .opacity(if focused { 0.92 } else { 0.48 }),
+                1.,
+            ),
+        );
 
         v_flex()
             .id("prompt-composer-surface")
             .debug_selector(|| "prompt-composer-surface".into())
+            .relative()
             .w_full()
-            .max_w(px(672.))
+            .max_w(px(720.))
             .mx_auto()
-            .min_h(px(108.))
-            .p(px(16.))
-            .gap(px(10.))
+            .min_h(px(120.))
+            .p(px(17.))
+            .gap(px(12.))
             .justify_between()
-            .rounded(px(16.))
+            .rounded(px(18.))
             .border_1()
             .border_color(if focused {
-                cx.theme().ring
+                cx.theme().ring.opacity(0.9)
             } else {
-                cx.theme().border.opacity(0.72)
+                cx.theme().primary.opacity(0.17)
             })
-            .bg(cx.theme().popover)
-            .when(focused, gpui_kit::Styled::shadow_sm)
+            .bg(surface)
+            .shadow_sm()
+            .when(focused, gpui_kit::Styled::shadow_lg)
             .child(
-                v_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .gap(px(7.))
-                    .when_some(self.inline_error(), |this, error| {
-                        this.child(
-                            h_flex()
-                                .items_start()
-                                .gap(px(6.))
-                                .text_size(px(12.))
-                                .text_color(cx.theme().danger)
-                                .child(Icon::new(IconName::CircleX).xsmall())
-                                .child(
-                                    v_flex()
-                                        .gap(px(2.))
-                                        .child(div().font_medium().child(error.title))
-                                        .child(div().child(error.message)),
-                                ),
-                        )
-                    })
-                    .when_some(self.blocking_error(), |this, error| {
-                        this.child(
-                            h_flex()
-                                .items_start()
-                                .gap(px(6.))
-                                .text_size(px(12.))
-                                .text_color(cx.theme().warning)
-                                .child(Icon::new(IconName::CircleX).xsmall())
-                                .child(
-                                    v_flex()
-                                        .gap(px(2.))
-                                        .child(div().font_medium().child(error.title))
-                                        .child(div().child(error.message)),
-                                ),
-                        )
-                    })
-                    .when(self.is_model_retry(), |this| {
-                        this.child(
-                            div()
-                                .text_size(px(12.))
-                                .text_color(cx.theme().muted_foreground)
-                                .child("Choose a model above, then press Retry to try this response again."),
-                        )
-                    })
-                    .when(!self.attachments.is_empty(), |this| {
-                        this.child(self.attachment_strip(cx))
-                    })
-                    .when(!self.preview_source.is_empty(), |this| {
-                        this.child(self.code_preview(cx))
-                    })
-                    .child(
-                        Textarea::new(&self.input)
-                            .appearance(false)
-                            .bordered(false)
-                            .aria_label("Chat message composer")
-                            .w_full()
-                            .flex_1()
-                            .min_h(px(30.))
-                            .p_0()
-                            .text_size(px(14.))
-                            .line_height(px(21.)),
-                    ),
+                div()
+                    .absolute()
+                    .top(px(0.))
+                    .left(px(24.))
+                    .right(px(24.))
+                    .h(px(1.))
+                    .bg(highlight),
             )
+            .child(self.render_input_content(cx))
             .child(self.footer(submit_view, generating, ready, can_add_attachment, cx))
     }
 }
@@ -507,6 +542,7 @@ fn option_button(
         .h(px(30.))
         .px(px(8.))
         .rounded(px(7.))
+        .border_1()
         .text_size(px(12.))
         .icon(icon)
         .label(label)

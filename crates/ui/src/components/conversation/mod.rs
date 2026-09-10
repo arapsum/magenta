@@ -26,8 +26,8 @@ use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FollowMode,
     InteractiveElement as _, IntoElement, ListAlignment, ListSizingBehavior, ListState,
     MouseButton, ObjectFit, ParentElement as _, Render, Role, StatefulInteractiveElement as _,
-    Styled as _, StyledImage as _, Task, Window, div, img, list, prelude::FluentBuilder as _, px,
-    rems,
+    Styled as _, StyledImage as _, Task, Window, div, img, linear_color_stop, linear_gradient,
+    list, prelude::FluentBuilder as _, px, rems,
 };
 use magenta_application::AgentApprovalController;
 use magenta_core::{
@@ -52,7 +52,7 @@ pub struct ConversationThread {
     pub messages: Vec<Message>,
 }
 
-const MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(760.);
+const MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(800.);
 const USER_MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(560.);
 const LIST_OVERDRAW: gpui_kit::Pixels = px(640.);
 const GENERATION_CLOCK_INTERVAL: Duration = Duration::from_secs(1);
@@ -264,10 +264,75 @@ fn trace_generation_terminal(progress: &GenerationProgress, status: &'static str
     );
 }
 
+impl ConversationView {
+    fn render_thread_footer(&self, cx: &Context<'_, Self>) -> AnyElement {
+        if self.has_newer {
+            h_flex()
+                .flex_none()
+                .w_full()
+                .justify_center()
+                .gap(px(8.))
+                .px(px(24.))
+                .pt(px(10.))
+                .pb(px(18.))
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Viewing older messages"),
+                )
+                .child(
+                    Button::new("load-newer-messages")
+                        .ghost()
+                        .small()
+                        .label(if self.page_load == PageLoadState::Newer {
+                            "Loading newer messages…"
+                        } else {
+                            "Load newer"
+                        })
+                        .disabled(self.page_load == PageLoadState::Newer)
+                        .on_click(cx.listener(|_, _, _, cx| {
+                            cx.emit(ConversationViewEvent::LoadNewer);
+                        })),
+                )
+                .child(
+                    Button::new("return-to-latest")
+                        .outline()
+                        .small()
+                        .label("Return to latest")
+                        .on_click(cx.listener(|_, _, _, cx| {
+                            cx.emit(ConversationViewEvent::ReturnToLatest);
+                        })),
+                )
+                .into_any_element()
+        } else {
+            div()
+                .flex_none()
+                .w_full()
+                .px(px(24.))
+                .pt(px(12.))
+                .pb(px(22.))
+                .child(
+                    div()
+                        .w_full()
+                        .max_w(MESSAGE_MAX_WIDTH)
+                        .mx_auto()
+                        .child(self.composer.clone()),
+                )
+                .into_any_element()
+        }
+    }
+}
+
 impl Render for ConversationView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let view = cx.entity();
         let list_state = self.list_state.clone();
+        let ambient = linear_gradient(
+            150.,
+            linear_color_stop(cx.theme().primary.opacity(0.08), 0.),
+            linear_color_stop(cx.theme().background.opacity(0.), 0.68),
+        );
 
         v_flex()
             .relative()
@@ -275,6 +340,15 @@ impl Render for ConversationView {
             .min_w_0()
             .bg(cx.theme().tokens.background.background)
             .text_color(cx.theme().foreground)
+            .child(
+                div()
+                    .absolute()
+                    .top(px(0.))
+                    .left(px(0.))
+                    .right(px(0.))
+                    .h(px(300.))
+                    .bg(ambient),
+            )
             .when(self.has_older, |this| {
                 this.child(
                     Button::new("load-earlier-messages")
@@ -296,66 +370,13 @@ impl Render for ConversationView {
                 list(list_state, move |index, window, cx| {
                     view.read(cx).render_message(index, window, cx, &view)
                 })
+                .relative()
                 .with_sizing_behavior(ListSizingBehavior::Auto)
                 .flex_grow_1()
                 .min_h_0()
                 .w_full(),
             )
-            .child(if self.has_newer {
-                h_flex()
-                    .flex_none()
-                    .w_full()
-                    .justify_center()
-                    .gap(px(8.))
-                    .px(px(24.))
-                    .pt(px(10.))
-                    .pb(px(18.))
-                    .child(
-                        div()
-                            .text_size(px(12.))
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Viewing older messages"),
-                    )
-                    .child(
-                        Button::new("load-newer-messages")
-                            .ghost()
-                            .small()
-                            .label(if self.page_load == PageLoadState::Newer {
-                                "Loading newer messages…"
-                            } else {
-                                "Load newer"
-                            })
-                            .disabled(self.page_load == PageLoadState::Newer)
-                            .on_click(cx.listener(|_, _, _, cx| {
-                                cx.emit(ConversationViewEvent::LoadNewer);
-                            })),
-                    )
-                    .child(
-                        Button::new("return-to-latest")
-                            .outline()
-                            .small()
-                            .label("Return to latest")
-                            .on_click(cx.listener(|_, _, _, cx| {
-                                cx.emit(ConversationViewEvent::ReturnToLatest);
-                            })),
-                    )
-                    .into_any_element()
-            } else {
-                div()
-                    .flex_none()
-                    .w_full()
-                    .px(px(24.))
-                    .pt(px(10.))
-                    .pb(px(18.))
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(MESSAGE_MAX_WIDTH)
-                            .mx_auto()
-                            .child(self.composer.clone()),
-                    )
-                    .into_any_element()
-            })
+            .child(self.render_thread_footer(cx))
             .when_some(self.attachment_preview_overlay(cx), |this, overlay| {
                 this.child(overlay)
             })

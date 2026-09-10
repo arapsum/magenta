@@ -906,7 +906,7 @@ impl AgentWorkbench {
             .and_then(|path| self.tab_index(path));
         if self.tabs.is_empty() {
             return div()
-                .h(px(32.))
+                .h(px(36.))
                 .flex_none()
                 .border_b_1()
                 .border_color(cx.theme().border)
@@ -1124,14 +1124,14 @@ impl AgentWorkbench {
         let has_diff = tab.diff.as_ref().is_some_and(WorkbenchDiff::has_content);
         let mode = tab.mode;
         let mut bar = h_flex()
-            .h(px(28.))
+            .h(px(30.))
             .flex_none()
             .min_w_0()
             .gap(px(5.))
             .px(px(10.))
             .border_b_1()
             .border_color(cx.theme().border.opacity(0.72))
-            .bg(cx.theme().tokens.background.background)
+            .bg(cx.theme().popover.opacity(0.62))
             .child(
                 div().flex_1().min_w_0().overflow_hidden().child(
                     Breadcrumb::new()
@@ -1164,17 +1164,22 @@ impl AgentWorkbench {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .gap(px(8.))
+                .gap(px(10.))
                 .child(
-                    Icon::empty()
-                        .path("icons/code.svg")
-                        .size(px(22.))
-                        .text_color(cx.theme().muted_foreground.opacity(0.72)),
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(42.))
+                        .rounded(px(13.))
+                        .bg(cx.theme().accent.opacity(0.68))
+                        .text_color(cx.theme().primary)
+                        .child(Icon::empty().path("icons/code.svg").size(px(20.))),
                 )
                 .child(
                     div()
-                        .text_size(px(13.))
-                        .font_medium()
+                        .text_size(px(16.))
+                        .font_semibold()
                         .child("No files open"),
                 )
                 .child(
@@ -1309,12 +1314,13 @@ impl AgentWorkbench {
     ) -> AnyElement {
         h_flex()
             .flex_none()
-            .h(px(36.))
+            .h(px(40.))
             .items_center()
             .gap(px(7.))
-            .px(px(8.))
+            .px(px(9.))
             .border_b_1()
-            .border_color(cx.theme().border)
+            .border_color(cx.theme().primary.opacity(0.18))
+            .bg(cx.theme().tokens.tab_bar)
             .child(
                 Button::new("toggle-workbench-explorer")
                     .ghost()
@@ -1333,7 +1339,17 @@ impl AgentWorkbench {
                         workbench.toggle_explorer(cx);
                     })),
             )
-            .child(Icon::empty().path("icons/code.svg").xsmall())
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .size(px(24.))
+                    .rounded(px(7.))
+                    .bg(cx.theme().accent.opacity(0.72))
+                    .text_color(cx.theme().primary)
+                    .child(Icon::empty().path("icons/code.svg").xsmall()),
+            )
             .child(
                 div()
                     .flex_1()
@@ -1361,11 +1377,13 @@ impl AgentWorkbench {
         editor: AnyElement,
         narrow: bool,
         show_explorer: bool,
+        cx: &App,
     ) -> AnyElement {
         if narrow && show_explorer {
             v_flex()
                 .size_full()
                 .p(px(4.))
+                .bg(cx.theme().sidebar.opacity(0.72))
                 .child(tree)
                 .into_any_element()
         } else if show_explorer {
@@ -1374,7 +1392,15 @@ impl AgentWorkbench {
                     resizable_panel()
                         .size(px(220.))
                         .size_range(px(160.)..px(360.))
-                        .child(v_flex().size_full().p(px(4.)).child(tree)),
+                        .child(
+                            v_flex()
+                                .size_full()
+                                .p(px(4.))
+                                .border_r_1()
+                                .border_color(cx.theme().border.opacity(0.72))
+                                .bg(cx.theme().sidebar.opacity(0.72))
+                                .child(tree),
+                        ),
                 )
                 .child(resizable_panel().child(editor))
                 .into_any_element()
@@ -1401,7 +1427,7 @@ impl Render for AgentWorkbench {
         let tree = self.render_tree(view.clone(), cx);
         let editor = self.render_editor_pane(view, window, cx);
         let header = Self::render_header(project_name, show_explorer, cx);
-        let content = Self::render_content_layout(tree, editor, narrow, show_explorer);
+        let content = Self::render_content_layout(tree, editor, narrow, show_explorer, cx);
         v_flex()
             .id("agent-workbench")
             .debug_selector(|| "agent-workbench".into())
