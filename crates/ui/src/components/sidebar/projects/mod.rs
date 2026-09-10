@@ -11,7 +11,7 @@ impl SidebarView {
                 .child(
                     div()
                         .flex_1()
-                        .text_size(px(10.))
+                        .text_size(px(11.))
                         .font_medium()
                         .text_color(cx.theme().muted_foreground.opacity(0.78))
                         .child("Projects"),
@@ -85,6 +85,12 @@ impl SidebarView {
             .h(ROW_HEIGHT)
             .items_center()
             .rounded(ROW_RADIUS)
+            .border_1()
+            .border_color(if active {
+                cx.theme().primary.opacity(0.3)
+            } else {
+                cx.theme().transparent
+            })
             .when(active, |this| this.bg(active_background))
             .hover(move |this| this.bg(hover_background))
             .when(active, |this| {
@@ -96,7 +102,7 @@ impl SidebarView {
                         .bottom(px(8.))
                         .w(px(2.))
                         .rounded_full()
-                        .bg(cx.theme().foreground.opacity(0.7)),
+                        .bg(cx.theme().primary),
                 )
             })
             .child(disclosure)
@@ -173,7 +179,12 @@ impl SidebarView {
                         } else {
                             IconName::Folder
                         })
-                        .xsmall(),
+                        .xsmall()
+                        .text_color(if active {
+                            cx.theme().primary
+                        } else {
+                            cx.theme().sidebar_foreground
+                        }),
                     )
                     .child(
                         div()

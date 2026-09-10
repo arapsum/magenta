@@ -7,7 +7,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    Styled as _, div, px,
+    Styled as _, div, linear_color_stop, linear_gradient, px,
 };
 use magenta_core::Project;
 
@@ -29,9 +29,12 @@ fn render_recent_row(
     Button::new(("workspace-recent", id.0))
         .ghost()
         .w_full()
-        .h(px(52.))
-        .px(px(12.))
-        .rounded(px(8.))
+        .h(px(56.))
+        .px(px(13.))
+        .rounded(px(11.))
+        .border_1()
+        .border_color(cx.theme().border.opacity(0.56))
+        .bg(cx.theme().popover.opacity(0.52))
         .child(
             h_flex()
                 .w_full()
@@ -98,17 +101,8 @@ fn render_recent_rows(
     rows.into_any_element()
 }
 
-fn render_landing_content(
-    project: Option<&Project>,
-    recent: Vec<ConversationSummary>,
-    show_recent: bool,
-    composer: Entity<PromptComposer>,
-    sidebar: &Entity<SidebarView>,
-    cx: &Context<'_, MainView>,
-) -> AnyElement {
-    let has_recent = !recent.is_empty();
-    let recent_rows = render_recent_rows(recent, sidebar, cx);
-    let (heading, description, section_label) = project.as_ref().map_or_else(
+fn landing_copy(project: Option<&Project>, has_recent: bool) -> (String, String, &'static str) {
+    project.map_or_else(
         || {
             if has_recent {
                 (
@@ -131,28 +125,63 @@ fn render_landing_content(
                 "Project threads",
             )
         },
+    )
+}
+
+fn render_landing_content(
+    project: Option<&Project>,
+    recent: Vec<ConversationSummary>,
+    show_recent: bool,
+    composer: Entity<PromptComposer>,
+    sidebar: &Entity<SidebarView>,
+    cx: &Context<'_, MainView>,
+) -> AnyElement {
+    let has_recent = !recent.is_empty();
+    let recent_rows = render_recent_rows(recent, sidebar, cx);
+    let (heading, description, section_label) = landing_copy(project, has_recent);
+
+    let eyebrow = if project.is_some() {
+        "Active workspace"
+    } else {
+        "A quieter place to think"
+    };
+    let icon_background = linear_gradient(
+        135.,
+        linear_color_stop(cx.theme().primary, 0.),
+        linear_color_stop(cx.theme().yellow, 1.),
     );
 
     let mut content = v_flex()
         .id("new-chat-start-content")
         .debug_selector(|| "new-chat-start-content".into())
         .w_full()
-        .max_w(px(672.))
+        .max_w(px(720.))
         .items_start()
-        .gap(px(9.))
+        .gap(px(10.))
         .child(
             h_flex()
                 .items_center()
-                .gap(px(9.))
+                .gap(px(7.))
+                .text_size(px(12.))
+                .font_medium()
+                .text_color(cx.theme().primary)
+                .child(div().size(px(6.)).rounded_full().bg(cx.theme().primary))
+                .child(eyebrow),
+        )
+        .child(
+            h_flex()
+                .items_center()
+                .gap(px(12.))
                 .child(
                     div()
                         .flex()
                         .items_center()
                         .justify_center()
-                        .size(px(30.))
-                        .rounded(px(9.))
-                        .bg(cx.theme().sidebar_accent.opacity(0.72))
-                        .text_color(cx.theme().foreground)
+                        .size(px(42.))
+                        .rounded(px(13.))
+                        .bg(icon_background)
+                        .text_color(cx.theme().primary_foreground)
+                        .shadow_sm()
                         .child(
                             Icon::new(if project.is_some() {
                                 IconName::FolderOpen
@@ -164,16 +193,16 @@ fn render_landing_content(
                 )
                 .child(
                     div()
-                        .text_size(px(31.))
-                        .line_height(px(37.))
+                        .text_size(px(36.))
+                        .line_height(px(41.))
                         .font_semibold()
                         .child(heading),
                 ),
         )
         .child(
             div()
-                .text_size(px(14.))
-                .line_height(px(21.))
+                .text_size(px(15.))
+                .line_height(px(22.))
                 .text_color(cx.theme().muted_foreground)
                 .child(description),
         );
@@ -189,13 +218,13 @@ fn render_landing_content(
                 .child(project.root.display().to_string()),
         );
     }
-    content = content.child(div().w_full().mt(px(20.)).child(composer));
+    content = content.child(div().w_full().mt(px(24.)).child(composer));
     if (project.is_some() && has_recent) || (project.is_none() && show_recent) {
         content = content
             .child(
                 div()
                     .mt(px(24.))
-                    .text_size(px(10.))
+                    .text_size(px(11.))
                     .font_medium()
                     .text_color(cx.theme().muted_foreground)
                     .child(section_label),
@@ -206,6 +235,12 @@ fn render_landing_content(
 }
 
 fn render_landing_shell(content: AnyElement, cx: &Context<'_, MainView>) -> AnyElement {
+    let ambient = linear_gradient(
+        145.,
+        linear_color_stop(cx.theme().primary.opacity(0.15), 0.),
+        linear_color_stop(cx.theme().background.opacity(0.), 0.78),
+    );
+
     div()
         .relative()
         .flex()
@@ -218,13 +253,24 @@ fn render_landing_shell(content: AnyElement, cx: &Context<'_, MainView>) -> AnyE
         .text_color(cx.theme().foreground)
         .child(
             div()
+                .absolute()
+                .top(px(0.))
+                .left(px(0.))
+                .right(px(0.))
+                .h(px(360.))
+                .bg(ambient),
+        )
+        .child(
+            div()
+                .relative()
                 .flex()
                 .flex_1()
                 .min_h_0()
                 .items_center()
                 .justify_center()
                 .px(px(32.))
-                .py(px(36.))
+                .pt(px(56.))
+                .pb(px(72.))
                 .child(content),
         )
         .into_any_element()

@@ -111,7 +111,7 @@ impl MainView {
                     .min_h_0()
                     .min_w_0()
                     .when(narrow, gpui_kit::Styled::p_0)
-                    .when(!narrow, |this| this.p(px(12.)))
+                    .when(!narrow, |this| this.px(px(12.)).pb(px(12.)).pt(px(10.)))
                     .child(
                         div()
                             .flex()
@@ -119,10 +119,11 @@ impl MainView {
                             .min_h_0()
                             .min_w_0()
                             .overflow_hidden()
-                            .rounded(px(16.))
+                            .rounded(px(18.))
                             .border_1()
-                            .border_color(cx.theme().border)
+                            .border_color(cx.theme().border.opacity(0.72))
                             .bg(cx.theme().tokens.background.background)
+                            .shadow_sm()
                             .when(narrow, |this| {
                                 this.rounded(px(0.))
                                     .border_0()

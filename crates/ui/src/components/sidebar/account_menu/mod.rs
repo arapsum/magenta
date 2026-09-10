@@ -1,6 +1,7 @@
 use super::account_dropdown::AccountDropdown;
 use super::*;
 use crate::components::provider_icon;
+use gpui_kit::{linear_color_stop, linear_gradient};
 use magenta_core::ProviderId;
 
 impl SidebarView {
@@ -35,10 +36,14 @@ impl SidebarView {
                     .size(px(28.))
                     .flex_none()
                     .rounded(px(8.))
-                    .bg(cx.theme().sidebar_accent)
-                    .text_color(cx.theme().sidebar_accent_foreground)
+                    .bg(linear_gradient(
+                        135.,
+                        linear_color_stop(cx.theme().primary, 0.),
+                        linear_color_stop(cx.theme().yellow, 1.),
+                    ))
+                    .text_color(cx.theme().primary_foreground)
                     .border_1()
-                    .border_color(cx.theme().sidebar_border)
+                    .border_color(cx.theme().primary.opacity(0.36))
                     .text_size(px(12.))
                     .font_medium()
                     .child(initial),
@@ -142,9 +147,9 @@ impl SidebarView {
                     .size(px(32.))
                     .flex_none()
                     .rounded(px(9.))
-                    .bg(cx.theme().sidebar_accent)
+                    .bg(cx.theme().accent)
                     .border_1()
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().primary.opacity(0.28))
                     .text_size(px(13.))
                     .font_medium()
                     .child(details.initial.clone()),
