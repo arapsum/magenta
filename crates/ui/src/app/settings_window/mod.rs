@@ -3,17 +3,17 @@ mod configuration;
 
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
-use gpui::{
-    App, AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, Styled as _, Task, Window, WindowHandle, WindowOptions, div,
-    prelude::FluentBuilder as _, px, size,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
     button::Button,
     h_flex,
     setting::{SettingGroup, SettingItem, SettingPage, Settings},
     v_flex,
+};
+use gpui_kit::{
+    App, AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, Styled as _, Task, Window, WindowHandle, WindowOptions, div,
+    prelude::FluentBuilder as _, px, size,
 };
 use magenta_core::{AppSettings, ProviderAccount, ProviderId, SettingsStore};
 
@@ -54,7 +54,7 @@ impl SettingsWindow {
         store: Arc<dyn SettingsStore>,
         account: AccountSettingsState,
         cx: &mut App,
-    ) -> anyhow::Result<(WindowHandle<gpui_component::Root>, Entity<Self>)> {
+    ) -> anyhow::Result<(WindowHandle<gpui_kit::component::Root>, Entity<Self>)> {
         let slot = Rc::new(RefCell::new(None));
         let view_slot = Rc::clone(&slot);
         let handle = cx.open_window(settings_window_options(cx), move |window, cx| {
@@ -65,7 +65,7 @@ impl SettingsWindow {
                 feedback: None,
             });
             view_slot.replace(Some(view.clone()));
-            cx.new(|cx| gpui_component::Root::new(view, window, cx))
+            cx.new(|cx| gpui_kit::component::Root::new(view, window, cx))
         })?;
         let view = slot
             .borrow_mut()
@@ -307,8 +307,8 @@ impl Render for SettingsWindow {
     }
 }
 
-fn settings_page_header_style() -> gpui::StyleRefinement {
-    gpui::StyleRefinement::default().pt(px(48.))
+fn settings_page_header_style() -> gpui_kit::StyleRefinement {
+    gpui_kit::StyleRefinement::default().pt(px(48.))
 }
 
 fn settings_titlebar_content() -> impl IntoElement {
@@ -323,9 +323,9 @@ fn settings_titlebar_content() -> impl IntoElement {
 }
 
 fn settings_window_options(cx: &App) -> WindowOptions {
-    let bounds = gpui::Bounds::centered(None, size(px(900.), px(650.)), cx);
-    let mut options = gpui_component::TitleBar::window_options();
-    options.window_bounds = Some(gpui::WindowBounds::Windowed(bounds));
+    let bounds = gpui_kit::Bounds::centered(None, size(px(900.), px(650.)), cx);
+    let mut options = gpui_kit::component::TitleBar::window_options();
+    options.window_bounds = Some(gpui_kit::WindowBounds::Windowed(bounds));
     options.window_min_size = Some(size(px(640.), px(480.)));
     if let Some(titlebar) = options.titlebar.as_mut() {
         titlebar.title = Some("Magenta Settings".into());

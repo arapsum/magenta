@@ -1,9 +1,4 @@
-use gpui::{
-    AnyElement, App, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
-    ObjectFit, ParentElement as _, Render, SharedString, Styled as _, StyledImage as _, Window,
-    div, img, prelude::FluentBuilder as _, px, rems,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _,
     button::{Button, ButtonVariants},
     clipboard::Clipboard,
@@ -12,6 +7,11 @@ use gpui_component::{
     menu::{DropdownMenu as _, PopupMenuItem},
     text::{TextView, TextViewStyle},
     v_flex,
+};
+use gpui_kit::{
+    AnyElement, App, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
+    ObjectFit, ParentElement as _, Render, SharedString, Styled as _, StyledImage as _, Window,
+    div, img, prelude::FluentBuilder as _, px, rems,
 };
 use magenta_core::{ConversationMode, ProviderId};
 
@@ -414,7 +414,7 @@ impl Render for PromptComposer {
                 cx.theme().border.opacity(0.72)
             })
             .bg(cx.theme().popover)
-            .when(focused, gpui::Styled::shadow_sm)
+            .when(focused, gpui_kit::Styled::shadow_sm)
             .child(
                 v_flex()
                     .flex_1()

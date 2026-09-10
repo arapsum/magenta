@@ -1,6 +1,6 @@
 use super::*;
 
-#[gpui::test]
+#[gpui_kit::test]
 fn finder_filters_persisted_history_and_opens_selected_conversation(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     ports.summaries.lock().extend([
@@ -15,7 +15,7 @@ fn finder_filters_persisted_history_and_opens_selected_conversation(cx: &mut Tes
     let (window, view) = setup(cx, ports);
     cx.run_until_parked();
 
-    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
     visual.dispatch_action(OpenConversationFinder);
     visual.run_until_parked();
     assert!(view.read_with(cx, |main, _| main.finder_open.is_open()));
@@ -25,7 +25,7 @@ fn finder_filters_persisted_history_and_opens_selected_conversation(cx: &mut Tes
     let result_bounds = visual
         .debug_bounds("finder-conversation-2")
         .expect("the filtered conversation should be rendered");
-    visual.simulate_click(result_bounds.center(), gpui::Modifiers::default());
+    visual.simulate_click(result_bounds.center(), gpui_kit::Modifiers::default());
     visual.run_until_parked();
 
     view.read_with(cx, |main, _| {
@@ -39,7 +39,7 @@ fn finder_filters_persisted_history_and_opens_selected_conversation(cx: &mut Tes
     );
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn finder_message_match_loads_the_page_around_that_message(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     ports
@@ -63,14 +63,14 @@ fn finder_message_match_loads_the_page_around_that_message(cx: &mut TestAppConte
 
     let (window, view) = setup(cx, ports.clone());
     cx.run_until_parked();
-    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
     visual.dispatch_action(OpenConversationFinder);
     visual.simulate_input("needle");
     visual.run_until_parked();
     let result = visual
         .debug_bounds("finder-conversation-7")
         .expect("the message body match should be rendered");
-    visual.simulate_click(result.center(), gpui::Modifiers::default());
+    visual.simulate_click(result.center(), gpui_kit::Modifiers::default());
     visual.run_until_parked();
 
     assert_eq!(
@@ -83,7 +83,7 @@ fn finder_message_match_loads_the_page_around_that_message(cx: &mut TestAppConte
     );
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn closing_finder_clears_query_without_changing_selection(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     ports.summaries.lock().push(summary(1, "Design notes"));
@@ -91,7 +91,7 @@ fn closing_finder_clears_query_without_changing_selection(cx: &mut TestAppContex
     let (window, view) = setup(cx, ports);
     cx.run_until_parked();
 
-    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
     visual.dispatch_action(OpenConversationFinder);
     visual.run_until_parked();
     assert!(view.read_with(cx, |main, _| main.finder_open.is_open()));
@@ -107,7 +107,7 @@ fn closing_finder_clears_query_without_changing_selection(cx: &mut TestAppContex
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn finder_arrow_navigation_opens_highlighted_conversation(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     ports.summaries.lock().extend([
@@ -122,7 +122,7 @@ fn finder_arrow_navigation_opens_highlighted_conversation(cx: &mut TestAppContex
     let (window, view) = setup(cx, ports);
     cx.run_until_parked();
 
-    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
     visual.dispatch_action(OpenConversationFinder);
     visual.run_until_parked();
     visual.simulate_keystrokes("down enter");
@@ -134,7 +134,7 @@ fn finder_arrow_navigation_opens_highlighted_conversation(cx: &mut TestAppContex
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn finder_result_list_scrolls_when_history_exceeds_the_dialog(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     ports
@@ -144,7 +144,7 @@ fn finder_result_list_scrolls_when_history_exceeds_the_dialog(cx: &mut TestAppCo
     let (window, _) = setup(cx, ports);
     cx.run_until_parked();
 
-    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
     visual.dispatch_action(OpenConversationFinder);
     visual.run_until_parked();
     let list = visual
@@ -155,9 +155,9 @@ fn finder_result_list_scrolls_when_history_exceeds_the_dialog(cx: &mut TestAppCo
         .expect("the first conversation should be rendered")
         .top();
 
-    visual.simulate_event(gpui::ScrollWheelEvent {
-        position: gpui::point(list.center().x, list.top() + px(150.)),
-        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-240.))),
+    visual.simulate_event(gpui_kit::ScrollWheelEvent {
+        position: gpui_kit::point(list.center().x, list.top() + px(150.)),
+        delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(-240.))),
         ..Default::default()
     });
     visual.run_until_parked();

@@ -1,5 +1,5 @@
-use gpui::{App, Entity, SharedString};
-use gpui_component::setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem};
+use gpui_kit::component::setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem};
+use gpui_kit::{App, Entity, SharedString};
 use magenta_core::{AppSettings, AppearanceMode, FontChoice};
 
 use super::SettingsWindow;

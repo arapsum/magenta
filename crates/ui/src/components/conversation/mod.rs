@@ -13,14 +13,7 @@ use std::{
 };
 
 use futures_util::StreamExt as _;
-use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FollowMode,
-    InteractiveElement as _, IntoElement, ListAlignment, ListSizingBehavior, ListState,
-    MouseButton, ObjectFit, ParentElement as _, Render, Role, StatefulInteractiveElement as _,
-    Styled as _, StyledImage as _, Task, Window, div, img, list, prelude::FluentBuilder as _, px,
-    rems,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
     WindowExt as _,
     button::{Button, ButtonVariants as _},
@@ -29,6 +22,13 @@ use gpui_component::{
     scroll::ScrollableElement as _,
     text::{TextView, TextViewState, TextViewStyle},
     v_flex,
+};
+use gpui_kit::{
+    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FollowMode,
+    InteractiveElement as _, IntoElement, ListAlignment, ListSizingBehavior, ListState,
+    MouseButton, ObjectFit, ParentElement as _, Render, Role, StatefulInteractiveElement as _,
+    Styled as _, StyledImage as _, Task, Window, div, img, list, prelude::FluentBuilder as _, px,
+    rems,
 };
 use magenta_application::AgentApprovalController;
 use magenta_core::{
@@ -54,13 +54,13 @@ pub struct ConversationThread {
     pub messages: Vec<Message>,
 }
 
-const MESSAGE_MAX_WIDTH: gpui::Pixels = px(760.);
-const USER_MESSAGE_MAX_WIDTH: gpui::Pixels = px(560.);
-const LIST_OVERDRAW: gpui::Pixels = px(640.);
+const MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(760.);
+const USER_MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(560.);
+const LIST_OVERDRAW: gpui_kit::Pixels = px(640.);
 const GENERATION_CLOCK_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_RENDERED_MESSAGES: usize = 150;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
 #[action(namespace = magenta)]
 struct CloseAttachmentPreview;
 

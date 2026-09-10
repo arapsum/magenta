@@ -9,8 +9,8 @@ use std::{
     },
 };
 
-use gpui::{AppContext as _, Entity, TestAppContext, WindowHandle, px, size};
-use gpui_component::Root;
+use gpui_kit::component::Root;
+use gpui_kit::{AppContext as _, Entity, TestAppContext, WindowHandle, px, size};
 
 mod finder;
 use magenta_application::{ConversationHistory, ProjectCatalog, RegenerateMessage, SendMessage};
@@ -269,10 +269,10 @@ fn setup_with_projects(cx: &mut TestAppContext, ports: Arc<TestPorts>) -> TestWi
 fn setup_with_projects_at(
     cx: &mut TestAppContext,
     ports: Arc<TestPorts>,
-    window_size: gpui::Size<gpui::Pixels>,
+    window_size: gpui_kit::Size<gpui_kit::Pixels>,
 ) -> TestWindow {
     cx.update(|cx| {
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
         crate::settings::init(cx);
     });
     let slot = Rc::new(RefCell::new(None));
@@ -305,10 +305,10 @@ fn setup_with_projects_at(
 fn setup_at(
     cx: &mut TestAppContext,
     ports: Arc<TestPorts>,
-    window_size: gpui::Size<gpui::Pixels>,
+    window_size: gpui_kit::Size<gpui_kit::Pixels>,
 ) -> TestWindow {
     cx.update(|cx| {
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
         crate::settings::init(cx);
     });
     let slot = Rc::new(RefCell::new(None));
@@ -337,7 +337,7 @@ fn setup_at(
     (window, view)
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn new_chat_layout_keeps_primary_content_visible(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     ports
@@ -347,7 +347,7 @@ fn new_chat_layout_keeps_primary_content_visible(cx: &mut TestAppContext) {
     let (window, _) = setup(cx, ports);
     cx.run_until_parked();
 
-    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
 
     let start = visual
@@ -367,12 +367,12 @@ fn new_chat_layout_keeps_primary_content_visible(cx: &mut TestAppContext) {
     assert!(account.origin.y + account.size.height <= px(700.));
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn narrow_new_chat_layout_keeps_the_composer_in_view(cx: &mut TestAppContext) {
     let (window, _) = setup_at(cx, Arc::new(TestPorts::default()), size(px(680.), px(640.)));
     cx.run_until_parked();
 
-    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
 
     let start = visual
@@ -389,7 +389,7 @@ fn narrow_new_chat_layout_keeps_the_composer_in_view(cx: &mut TestAppContext) {
     assert!(visual.debug_bounds("account-dropdown-trigger").is_none());
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn initialization_failure_can_be_retried_without_demo_history(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     ports.fail_initialize.store(true, Ordering::SeqCst);
@@ -409,7 +409,7 @@ fn initialization_failure_can_be_retried_without_demo_history(cx: &mut TestAppCo
     assert!(view.read_with(cx, |main, _| main.storage_ready.is_ready()));
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn stale_and_failed_loads_keep_the_correct_selection(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     let (sender, receiver) = futures_channel::oneshot::channel();
@@ -460,7 +460,7 @@ fn stale_and_failed_loads_keep_the_correct_selection(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn switching_conversations_immediately_closes_and_clears_the_workbench(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     let (window, view) = setup_with_projects(cx, ports);
@@ -497,7 +497,7 @@ fn switching_conversations_immediately_closes_and_clears_the_workbench(cx: &mut 
         .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn collapsed_sidebar_workbench_fills_a_wide_window(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     let (window, view) = setup_with_projects_at(cx, ports, size(px(2000.), px(800.)));
@@ -530,7 +530,7 @@ fn collapsed_sidebar_workbench_fills_a_wide_window(cx: &mut TestAppContext) {
         })
         .unwrap();
 
-    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
     let workbench = visual
         .debug_bounds("agent-workbench")
@@ -542,7 +542,7 @@ fn collapsed_sidebar_workbench_fills_a_wide_window(cx: &mut TestAppContext) {
     );
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn failed_finalization_retains_response_until_retry_before_navigation(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     ports.fail_save.store(true, Ordering::SeqCst);
@@ -594,7 +594,7 @@ fn failed_finalization_retains_response_until_retry_before_navigation(cx: &mut T
     assert_eq!(ports.saves.lock().as_slice(), &[response.clone(), response]);
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn delete_confirmation_removes_the_thread_and_clears_the_active_view(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     ports.summaries.lock().push(summary(1, "Delete me"));
@@ -615,14 +615,14 @@ fn delete_confirmation_removes_the_thread_and_clears_the_active_view(cx: &mut Te
         })
         .unwrap();
 
-    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
     assert!(view.read_with(cx, |main, _| main.pending_deletion.is_some()));
 
     let delete_bounds = visual
         .debug_bounds("confirm-delete-conversation")
         .expect("the delete confirmation button should be rendered");
-    visual.simulate_click(delete_bounds.center(), gpui::Modifiers::default());
+    visual.simulate_click(delete_bounds.center(), gpui_kit::Modifiers::default());
     visual.run_until_parked();
 
     assert_eq!(ports.deleted.lock().as_slice(), &[ConversationId(1)]);

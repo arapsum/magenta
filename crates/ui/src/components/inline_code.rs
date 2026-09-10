@@ -1,11 +1,11 @@
 use std::ops::Range;
 
-use gpui::{
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::text::{MarkdownNode, MarkdownParseContext, MarkdownPlugin, markdown_ast};
+use gpui_kit::{
     AnyElement, App, FontStyle, FontWeight, HighlightStyle, IntoElement, ParentElement as _,
     SharedString, Styled as _, StyledText, Window, div,
 };
-use gpui_component::ActiveTheme as _;
-use gpui_component::text::{MarkdownNode, MarkdownParseContext, MarkdownPlugin, markdown_ast};
 
 const INLINE_CODE_PLUGIN_NAME: &str = "magenta-inline-code";
 
@@ -152,13 +152,13 @@ fn render_styled_text(
     let mut container = div().whitespace_normal();
     if let Some(level) = heading {
         let (size, weight) = match level {
-            1 => (gpui::rems(2.), FontWeight::BOLD),
-            2 => (gpui::rems(1.5), FontWeight::SEMIBOLD),
-            3 => (gpui::rems(1.25), FontWeight::SEMIBOLD),
-            4 => (gpui::rems(1.125), FontWeight::SEMIBOLD),
-            5 => (gpui::rems(1.), FontWeight::SEMIBOLD),
-            6 => (gpui::rems(1.), FontWeight::MEDIUM),
-            _ => (gpui::rems(1.), FontWeight::NORMAL),
+            1 => (gpui_kit::rems(2.), FontWeight::BOLD),
+            2 => (gpui_kit::rems(1.5), FontWeight::SEMIBOLD),
+            3 => (gpui_kit::rems(1.25), FontWeight::SEMIBOLD),
+            4 => (gpui_kit::rems(1.125), FontWeight::SEMIBOLD),
+            5 => (gpui_kit::rems(1.), FontWeight::SEMIBOLD),
+            6 => (gpui_kit::rems(1.), FontWeight::MEDIUM),
+            _ => (gpui_kit::rems(1.), FontWeight::NORMAL),
         };
         container = container.text_size(size).font_weight(weight);
     }
@@ -175,8 +175,8 @@ fn highlight_for(mark: InlineMark, cx: &App) -> HighlightStyle {
         highlight.font_style = Some(FontStyle::Italic);
     }
     if mark.contains(InlineMark::STRIKETHROUGH) {
-        highlight.strikethrough = Some(gpui::StrikethroughStyle {
-            thickness: gpui::px(1.),
+        highlight.strikethrough = Some(gpui_kit::StrikethroughStyle {
+            thickness: gpui_kit::px(1.),
             ..Default::default()
         });
     }

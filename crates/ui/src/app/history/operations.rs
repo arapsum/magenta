@@ -1,4 +1,4 @@
-use gpui::{Context, Window};
+use gpui_kit::{Context, Window};
 use magenta_application::{
     AgentSendTarget, PendingAgentGeneration, PendingGeneration, RegenerateMessageInput,
     RunWorkspaceAgentInput,

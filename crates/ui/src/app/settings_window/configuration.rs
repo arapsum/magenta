@@ -1,11 +1,11 @@
-use gpui::{App, Entity, IntoElement, ParentElement as _, Styled as _, div, px};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, IconName, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     setting::{SettingGroup, SettingItem},
     v_flex,
 };
+use gpui_kit::{App, Entity, IntoElement, ParentElement as _, Styled as _, div, px};
 
 use super::SettingsWindow;
 

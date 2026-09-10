@@ -12,7 +12,7 @@ pub(super) struct AccountDropdown {
 
 #[derive(Clone, Copy, Default)]
 struct AccountDropdownAnchor {
-    bounds: Bounds<gpui::Pixels>,
+    bounds: Bounds<gpui_kit::Pixels>,
     captured: bool,
 }
 

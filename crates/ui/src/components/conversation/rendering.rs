@@ -90,7 +90,7 @@ impl ConversationView {
             .flex_col()
             .items_end()
             .gap(px(5.))
-            .when_some(attachments, gpui::ParentElement::child)
+            .when_some(attachments, gpui_kit::ParentElement::child)
             .when(!message.message.content.trim().is_empty(), |this| {
                 this.child(
                     div()
@@ -237,7 +237,7 @@ impl ConversationView {
         path: PathBuf,
         name: String,
         view: Entity<Self>,
-        muted_foreground: gpui::Hsla,
+        muted_foreground: gpui_kit::Hsla,
         cx: &App,
     ) -> AnyElement {
         div()
@@ -382,21 +382,21 @@ impl ConversationView {
             .child(self.render_assistant_header(message, cx))
             .when_some(
                 Self::render_context_notice(rendered),
-                gpui::ParentElement::child,
+                gpui_kit::ParentElement::child,
             )
             .when(streaming, |this| {
                 this.when_some(
                     self.render_generation_progress(message.id, cx, view),
-                    gpui::ParentElement::child,
+                    gpui_kit::ParentElement::child,
                 )
             })
             .when_some(
                 self.render_agent_activities(message, cx, view),
-                gpui::ParentElement::child,
+                gpui_kit::ParentElement::child,
             )
             .when_some(
                 self.render_agent_approval(message.id, cx, view),
-                gpui::ParentElement::child,
+                gpui_kit::ParentElement::child,
             )
             .when(message.status == MessageStatus::Failed, |this| {
                 this.child(

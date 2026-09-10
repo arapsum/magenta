@@ -1,7 +1,7 @@
 mod operations;
 
-use gpui::{Context, Window};
-use gpui_component::WindowExt as _;
+use gpui_kit::component::WindowExt as _;
+use gpui_kit::{Context, Window};
 use magenta_application::{SendMessageInput, SendTarget};
 use magenta_core::{
     AttachmentDraft, ConversationId, ConversationMode, ConversationSearchResult, MessageStatus,

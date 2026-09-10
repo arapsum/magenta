@@ -4,8 +4,14 @@ impl SidebarView {
     fn new_chat_button(&self, view: Entity<Self>, _cx: &App) -> AnyElement {
         let selected = self.active_conversation.is_none() && self.active_project.is_none();
         Button::new("sidebar-new-chat")
-            .when(selected, gpui_component::button::ButtonVariants::primary)
-            .when(!selected, gpui_component::button::ButtonVariants::ghost)
+            .when(
+                selected,
+                gpui_kit::component::button::ButtonVariants::primary,
+            )
+            .when(
+                !selected,
+                gpui_kit::component::button::ButtonVariants::ghost,
+            )
             .accessibility_id("new-chat")
             .w_full()
             .h(px(36.))
@@ -121,7 +127,7 @@ impl SidebarView {
                             .whitespace_nowrap()
                             .text_ellipsis()
                             .text_size(px(13.))
-                            .when(selected, gpui_component::StyledExt::font_medium)
+                            .when(selected, gpui_kit::component::StyledExt::font_medium)
                             .child(conversation.title.clone()),
                     ),
             )
@@ -187,8 +193,8 @@ impl SidebarView {
                         .font_family(cx.theme().mono_font_family.clone())
                         .text_size(px(10.))
                         .text_color(cx.theme().muted_foreground.opacity(0.8))
-                        .when(selected, gpui::Styled::invisible)
-                        .group_hover(group_name.clone(), gpui::Styled::invisible)
+                        .when(selected, gpui_kit::Styled::invisible)
+                        .group_hover(group_name.clone(), gpui_kit::Styled::invisible)
                         .child(updated),
                 )
             })
@@ -198,7 +204,7 @@ impl SidebarView {
                     .inset_0()
                     .when(!selected, |this| {
                         this.invisible()
-                            .group_hover(group_name, gpui::Styled::visible)
+                            .group_hover(group_name, gpui_kit::Styled::visible)
                     })
                     .child(
                         Button::new(("conversation-more", id.0))
@@ -309,7 +315,7 @@ impl SidebarView {
 
     fn render_history_status(
         &self,
-        mut content: gpui::Div,
+        mut content: gpui_kit::Div,
         view: Entity<Self>,
         cx: &App,
     ) -> AnyElement {

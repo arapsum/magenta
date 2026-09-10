@@ -1,8 +1,8 @@
-use gpui::{
+use gpui_kit::component::{ActiveTheme as _, button::Button};
+use gpui_kit::{
     App, Context, InteractiveElement as _, IntoElement, Modifiers, ParentElement as _, Render,
     Styled as _, TestAppContext, Window, div, px,
 };
-use gpui_component::{ActiveTheme as _, button::Button};
 use magenta_core::{ProviderAccount, ProviderId};
 
 use super::{ProfileDetails, account_dropdown::AccountDropdown, profile_details};
@@ -34,9 +34,9 @@ impl Render for AccountDropdownHarness {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn account_dropdown_opens_and_dismisses_from_an_outside_click(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (_, cx) = cx.add_window_view(|_, _| AccountDropdownHarness);
     cx.update(|window, cx| window.draw(cx).clear(cx));
 
@@ -46,7 +46,7 @@ fn account_dropdown_opens_and_dismisses_from_an_outside_click(cx: &mut TestAppCo
 
     assert!(cx.debug_bounds("account-dropdown-test-menu").is_some());
 
-    cx.simulate_click(gpui::point(px(5.), px(5.)), Modifiers::default());
+    cx.simulate_click(gpui_kit::point(px(5.), px(5.)), Modifiers::default());
     cx.update(|window, cx| window.draw(cx).clear(cx));
 
     assert!(cx.debug_bounds("account-dropdown-test-menu").is_none());

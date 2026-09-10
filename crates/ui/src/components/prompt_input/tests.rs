@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use gpui::{TestAppContext, size};
+use gpui_kit::{TestAppContext, size};
 use magenta_core::{EffortLevel, GenerationConfig, GenerationLimits, ModelDescriptor};
 
 use super::{PromptComposer, PromptComposerEvent, is_supported_image};
@@ -18,10 +18,13 @@ fn model(id: &str, default_effort: EffortLevel) -> ModelDescriptor {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn cancel_is_emitted_only_while_a_response_is_generating(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
-    let window = cx.open_window(size(gpui::px(720.), gpui::px(420.)), PromptComposer::new);
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
     let cancellations = Rc::new(RefCell::new(0));
     let observed = Rc::clone(&cancellations);
 
@@ -44,10 +47,13 @@ fn cancel_is_emitted_only_while_a_response_is_generating(cx: &mut TestAppContext
     drop(subscription);
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn pending_storage_blocks_submit_and_preserves_newer_draft(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
-    let window = cx.open_window(size(gpui::px(900.), gpui::px(640.)), PromptComposer::new);
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(900.), gpui_kit::px(640.)),
+        PromptComposer::new,
+    );
     window
         .update(cx, |composer, window, cx| {
             composer.select_model(model("model", EffortLevel::Medium), cx);
@@ -79,10 +85,13 @@ fn supported_image_extensions_are_case_insensitive() {
     assert!(!is_supported_image(std::path::Path::new("reference")));
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn composer_requires_content_model_and_effort(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
-    let window = cx.open_window(size(gpui::px(720.), gpui::px(420.)), PromptComposer::new);
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
 
     window
         .update(cx, |composer, window, cx| {
@@ -103,10 +112,13 @@ fn composer_requires_content_model_and_effort(cx: &mut TestAppContext) {
         .expect("the composer test window should remain open");
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn request_trims_prompt_and_preserves_configuration(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
-    let window = cx.open_window(size(gpui::px(720.), gpui::px(420.)), PromptComposer::new);
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
 
     window
         .update(cx, |composer, window, cx| {
@@ -148,10 +160,13 @@ fn model_options_round_trip_through_core_generation_configuration() {
     assert_eq!(configuration.effort, EffortLevel::Medium);
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn selecting_a_model_uses_only_its_advertised_efforts(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
-    let window = cx.open_window(size(gpui::px(720.), gpui::px(420.)), PromptComposer::new);
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
     let openai = ModelDescriptor {
         supported_efforts: vec![EffortLevel::Low, EffortLevel::Medium, EffortLevel::XHigh],
         default_effort: EffortLevel::XHigh,
@@ -181,10 +196,13 @@ fn selecting_a_model_uses_only_its_advertised_efforts(cx: &mut TestAppContext) {
         .expect("the composer test window should remain open");
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn core_configuration_restores_the_composer_selection(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
-    let window = cx.open_window(size(gpui::px(720.), gpui::px(420.)), PromptComposer::new);
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
     let configuration = GenerationConfig::new(
         magenta_core::ProviderId::new("openai"),
         magenta_core::ModelId::new("gpt-5.4"),
@@ -204,10 +222,13 @@ fn core_configuration_restores_the_composer_selection(cx: &mut TestAppContext) {
         .expect("the composer test window should remain open");
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn shift_enter_pairs_a_fence_and_keeps_the_caret_in_the_code_body(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
-    let window = cx.open_window(size(gpui::px(720.), gpui::px(420.)), PromptComposer::new);
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
 
     window
         .update(cx, |composer, window, cx| {

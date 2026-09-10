@@ -1,5 +1,5 @@
-use gpui::{Entity, SharedString};
-use gpui_component::input::InputState;
+use gpui_kit::component::input::InputState;
+use gpui_kit::{Entity, SharedString};
 
 use super::ConversationId;
 

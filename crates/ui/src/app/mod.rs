@@ -10,19 +10,19 @@ mod tests;
 
 use std::{sync::Arc, time::Duration};
 
-use gpui::{
-    AnyElement, AppContext as _, Context, Entity, FocusHandle, Focusable as _, FontWeight,
-    HighlightStyle, KeyBinding, MouseButton, Render, Role, SharedString,
-    StatefulInteractiveElement as _, StyledText, Subscription, Task, Window, WindowHandle, div,
-    prelude::*, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
     scroll::ScrollableElement as _,
     v_flex,
+};
+use gpui_kit::{
+    AnyElement, AppContext as _, Context, Entity, FocusHandle, Focusable as _, FontWeight,
+    HighlightStyle, KeyBinding, MouseButton, Render, Role, SharedString,
+    StatefulInteractiveElement as _, StyledText, Subscription, Task, Window, WindowHandle, div,
+    prelude::*, px,
 };
 use magenta_application::{
     ConversationHistory, ProjectCatalog, RegenerateMessage, RunWorkspaceAgent, SendMessage,
@@ -41,31 +41,31 @@ use crate::components::{
     titlebar, workspace,
 };
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
 #[action(namespace = magenta)]
 pub struct OpenConversationFinder;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
 #[action(namespace = magenta)]
 pub struct CloseConversationFinder;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
 #[action(namespace = magenta)]
 struct SelectNextFinderResult;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
 #[action(namespace = magenta)]
 struct SelectPreviousFinderResult;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
 #[action(namespace = magenta)]
 struct ConfirmFinderResult;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
 #[action(namespace = magenta)]
 struct ConfirmConversationDeletion;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
 #[action(namespace = magenta)]
 struct CancelConversationDeletion;
 
@@ -114,7 +114,7 @@ pub struct MainView {
     model_task: Option<Task<()>>,
     settings_store: Arc<dyn SettingsStore>,
     settings_load_task: Option<Task<()>>,
-    settings_window: Option<WindowHandle<gpui_component::Root>>,
+    settings_window: Option<WindowHandle<gpui_kit::component::Root>>,
     settings_view: Option<Entity<SettingsWindow>>,
     settings_subscription: Option<Subscription>,
     subscriptions: Vec<Subscription>,

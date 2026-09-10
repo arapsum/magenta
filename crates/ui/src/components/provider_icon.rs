@@ -1,4 +1,4 @@
-use gpui_component::{Icon, IconName};
+use gpui_kit::component::{Icon, IconName};
 use magenta_core::ProviderId;
 
 pub fn provider_icon(provider: Option<&ProviderId>) -> Icon {

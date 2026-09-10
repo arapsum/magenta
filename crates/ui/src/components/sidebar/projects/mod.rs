@@ -182,7 +182,7 @@ impl SidebarView {
                             .whitespace_nowrap()
                             .text_ellipsis()
                             .text_size(px(13.))
-                            .when(active, gpui_component::StyledExt::font_medium)
+                            .when(active, gpui_kit::component::StyledExt::font_medium)
                             .child(project.name.clone()),
                     ),
             )
@@ -206,7 +206,7 @@ impl SidebarView {
             .size(px(28.))
             .when(!active, |this| {
                 this.invisible()
-                    .group_hover(group_name, gpui::Styled::visible)
+                    .group_hover(group_name, gpui_kit::Styled::visible)
             })
             .child(
                 Button::new(format!("project-more-{}", project.root.display()))

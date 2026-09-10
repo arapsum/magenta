@@ -1,5 +1,5 @@
 use super::*;
-use gpui_component::resizable::{h_resizable, resizable_panel};
+use gpui_kit::component::resizable::{h_resizable, resizable_panel};
 
 impl MainView {
     fn titlebar_controls(&self, cx: &Context<'_, Self>) -> AnyElement {
@@ -83,13 +83,13 @@ impl MainView {
             .child(
                 resizable_panel()
                     .size(px(620.))
-                    .size_range(px(360.)..gpui::Pixels::MAX)
+                    .size_range(px(360.)..gpui_kit::Pixels::MAX)
                     .child(conversation),
             )
             .child(
                 resizable_panel()
                     .size(px(760.))
-                    .size_range(px(280.)..gpui::Pixels::MAX)
+                    .size_range(px(280.)..gpui_kit::Pixels::MAX)
                     .child(workbench.clone()),
             )
             .into_any_element()
@@ -109,7 +109,7 @@ impl MainView {
                     .flex_1()
                     .min_h_0()
                     .min_w_0()
-                    .when(narrow, gpui::Styled::p_0)
+                    .when(narrow, gpui_kit::Styled::p_0)
                     .when(!narrow, |this| this.p(px(12.)))
                     .child(
                         div()

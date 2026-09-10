@@ -1,18 +1,18 @@
 #[cfg(not(target_os = "linux"))]
-use gpui::{AnyElement, IntoElement, ParentElement, Styled as _, px};
+use gpui_kit::component::h_flex;
 #[cfg(not(target_os = "linux"))]
-use gpui_component::h_flex;
+use gpui_kit::{AnyElement, IntoElement, ParentElement, Styled as _, px};
 #[cfg(target_os = "linux")]
 mod linux {
     use std::rc::Rc;
 
-    use gpui::{
+    use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex};
+    use gpui_kit::{
         AnyElement, App, Context, Decorations, Entity, Hsla, InteractiveElement, IntoElement,
         MouseButton, ParentElement, Pixels, Render, RenderOnce, StatefulInteractiveElement as _,
         Styled, Subscription, Window, WindowButton, WindowButtonLayout, WindowControls, div,
         prelude::FluentBuilder as _, px,
     };
-    use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex};
 
     const LINUX_TITLE_BAR_HEIGHT: Pixels = px(32.0);
     type CloseWindowHandler = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -149,10 +149,10 @@ mod linux {
             .bg(cx.theme().title_bar)
             .border_b_1()
             .border_color(title_bar_border(window, cx))
-            .when_some(left_controls, gpui::ParentElement::child)
+            .when_some(left_controls, gpui_kit::ParentElement::child)
             .child(controls)
             .child(drag_region)
-            .when_some(right_controls, gpui::ParentElement::child)
+            .when_some(right_controls, gpui_kit::ParentElement::child)
             .into_any_element()
     }
 
@@ -303,7 +303,7 @@ mod linux {
                     .text_color(colors.hover_foreground)
             })
             .focus_visible(|style| style.border_1().border_color(cx.theme().ring))
-            .role(gpui::Role::Button)
+            .role(gpui_kit::Role::Button)
             .aria_label(details.aria_label)
             .track_focus(&focus_handle)
             .tab_index(0)
@@ -403,7 +403,7 @@ pub use linux::{render, render_minimize_close};
 
 #[cfg(not(target_os = "linux"))]
 pub fn render(controls: impl IntoElement) -> AnyElement {
-    gpui_component::TitleBar::new()
+    gpui_kit::component::TitleBar::new()
         .h(px(32.))
         .child(
             h_flex()
@@ -419,9 +419,9 @@ pub fn render(controls: impl IntoElement) -> AnyElement {
 #[cfg(not(target_os = "linux"))]
 pub fn render_minimize_close(
     controls: impl IntoElement,
-    on_close: impl Fn(&mut gpui::Window, &mut gpui::App) + 'static,
+    on_close: impl Fn(&mut gpui_kit::Window, &mut gpui_kit::App) + 'static,
 ) -> AnyElement {
-    gpui_component::TitleBar::new()
+    gpui_kit::component::TitleBar::new()
         .h(px(32.))
         .on_close_window(move |_, window, cx| on_close(window, cx))
         .child(
@@ -434,6 +434,6 @@ pub fn render_minimize_close(
         )
         .into_any_element()
 }
-#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
 #[action(namespace = magenta)]
 pub struct CloseWindow;

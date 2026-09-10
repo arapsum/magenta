@@ -6,13 +6,13 @@ use std::{
     sync::Arc,
 };
 
-use gpui::{
-    AnyElement, App, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px, svg,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, h_flex,
     text::{MarkdownNode, MarkdownParseContext, MarkdownPlugin, markdown_ast},
+};
+use gpui_kit::{
+    AnyElement, App, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px, svg,
 };
 use parking_lot::Mutex;
 use ratex_layout::{LayoutOptions, layout, to_display_list};
@@ -377,7 +377,7 @@ mod tests {
             .expect("circle area formula should render");
 
         assert!(rendered.svg.starts_with("<svg"));
-        assert!(rendered.width > gpui::px(0.));
-        assert!(rendered.height > gpui::px(0.));
+        assert!(rendered.width > gpui_kit::px(0.));
+        assert!(rendered.height > gpui_kit::px(0.));
     }
 }

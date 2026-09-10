@@ -31,7 +31,7 @@ impl ConversationView {
             .reset_with_uniform_height(self.messages.len(), px(96.));
         self.list_state.set_follow_mode(FollowMode::Normal);
         if self.has_newer {
-            self.list_state.scroll_to(gpui::ListOffset {
+            self.list_state.scroll_to(gpui_kit::ListOffset {
                 item_ix: self.messages.len().saturating_sub(1) / 2,
                 offset_in_item: px(0.),
             });
@@ -59,7 +59,7 @@ impl ConversationView {
             .iter()
             .position(|rendered| rendered.message.id == id)
         {
-            self.list_state.scroll_to(gpui::ListOffset {
+            self.list_state.scroll_to(gpui_kit::ListOffset {
                 item_ix,
                 offset_in_item: px(0.),
             });
@@ -167,7 +167,7 @@ impl ConversationView {
         _window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> Self {
-        cx.bind_keys([gpui::KeyBinding::new(
+        cx.bind_keys([gpui_kit::KeyBinding::new(
             "escape",
             CloseAttachmentPreview,
             Some("AttachmentPreview"),

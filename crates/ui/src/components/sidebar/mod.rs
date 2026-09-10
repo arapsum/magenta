@@ -13,14 +13,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use gpui::{
-    AnyElement, App, AppContext as _, Bounds, Context, ElementId, Entity, EventEmitter,
-    FocusHandle, Focusable as _, InteractiveElement as _, IntoElement, KeyBinding, MouseButton,
-    ParentElement as _, Render, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, Window, deferred, div, prelude::FluentBuilder as _, px,
-};
-use gpui_base::{Align, Placement, PopoverState, Positioner, actions::Cancel};
-use gpui_component::{
+use gpui_kit::base::{Align, Placement, PopoverState, Positioner, actions::Cancel};
+use gpui_kit::component::{
     ActiveTheme as _, Collapsible, Disableable as _, ElementExt as _, Icon, IconName,
     Selectable as _, Sizable as _, StyledExt as _, ThemeStyled as _,
     button::{Button, ButtonVariants as _},
@@ -30,6 +24,12 @@ use gpui_component::{
     sidebar::{Sidebar, SidebarCollapsible, SidebarItem},
     v_flex,
 };
+use gpui_kit::{
+    AnyElement, App, AppContext as _, Bounds, Context, ElementId, Entity, EventEmitter,
+    FocusHandle, Focusable as _, InteractiveElement as _, IntoElement, KeyBinding, MouseButton,
+    ParentElement as _, Render, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Window, deferred, div, prelude::FluentBuilder as _, px,
+};
 use magenta_core::ProviderAccount;
 
 use crate::{app::OpenConversationFinder, components::provider_icon};
@@ -38,16 +38,16 @@ pub use model::{ConversationId, ConversationPeriod, ConversationSummary, Sidebar
 
 use self::model::title_matches;
 
-const EXPANDED_WIDTH: gpui::Pixels = px(272.);
-const ROW_HEIGHT: gpui::Pixels = px(34.);
-const ROW_RADIUS: gpui::Pixels = px(7.);
-const SECTION_LABEL_HEIGHT: gpui::Pixels = px(28.);
+const EXPANDED_WIDTH: gpui_kit::Pixels = px(272.);
+const ROW_HEIGHT: gpui_kit::Pixels = px(34.);
+const ROW_RADIUS: gpui_kit::Pixels = px(7.);
+const SECTION_LABEL_HEIGHT: gpui_kit::Pixels = px(28.);
 const INITIAL_RECENCY_LIMIT: usize = 6;
 const RECENCY_PAGE_SIZE: usize = 6;
-const ACCOUNT_MENU_WIDTH: gpui::Pixels = px(248.);
-const ACCOUNT_MENU_GAP: gpui::Pixels = px(6.);
+const ACCOUNT_MENU_WIDTH: gpui_kit::Pixels = px(248.);
+const ACCOUNT_MENU_GAP: gpui_kit::Pixels = px(6.);
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
 #[action(namespace = magenta)]
 struct CancelConversationRename;
 
@@ -552,7 +552,7 @@ impl Collapsible for SidebarContent {
 impl SidebarItem for SidebarContent {
     fn render(
         self,
-        id: impl Into<gpui::ElementId>,
+        id: impl Into<gpui_kit::ElementId>,
         window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {

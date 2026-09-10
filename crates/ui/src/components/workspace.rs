@@ -1,13 +1,13 @@
-use gpui::{
-    AnyElement, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    Styled as _, div, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     scroll::ScrollableElement as _,
     v_flex,
+};
+use gpui_kit::{
+    AnyElement, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
+    Styled as _, div, px,
 };
 use magenta_core::Project;
 

@@ -1,5 +1,5 @@
-use gpui::{App, Global, SharedString, px};
-use gpui_component::{Theme, ThemeMode};
+use gpui_kit::component::{Theme, ThemeMode};
+use gpui_kit::{App, Global, SharedString, px};
 use magenta_core::{AppSettings, AppearanceMode, FontChoice, MathFontStyle};
 
 use crate::theme::{self, BuiltInTheme};
@@ -76,8 +76,8 @@ fn resolve_font(choice: &FontChoice) -> SharedString {
     }
 }
 
-impl From<gpui::WindowAppearance> for BuiltInTheme {
-    fn from(appearance: gpui::WindowAppearance) -> Self {
+impl From<gpui_kit::WindowAppearance> for BuiltInTheme {
+    fn from(appearance: gpui_kit::WindowAppearance) -> Self {
         if ThemeMode::from(appearance).is_dark() {
             Self::Dark
         } else {

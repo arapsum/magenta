@@ -2,13 +2,13 @@ mod diagnostics;
 
 use std::{borrow::Cow, cell::Cell, process::ExitCode, rc::Rc, sync::Arc};
 
-use gpui::{
+use gpui_kit::component::Root;
+use gpui_kit::{
     px, size, App, AppContext, Application, AssetSource, Bounds, Result as GpuiResult,
     SharedString, WindowBounds, WindowHandle, WindowOptions,
 };
 #[cfg(target_os = "linux")]
-use gpui::{WindowBackgroundAppearance, WindowDecorations};
-use gpui_component::Root;
+use gpui_kit::{WindowBackgroundAppearance, WindowDecorations};
 use magenta_application::{
     ConversationHistory, ProjectCatalog, RegenerateMessage, RunWorkspaceAgent, SendMessage,
 };
@@ -82,13 +82,13 @@ impl AssetSource for MagentaAssets {
         };
 
         asset.map_or_else(
-            || gpui_component_assets::Assets.load(path),
+            || gpui_kit::assets::Assets.load(path),
             |asset| Ok(Some(Cow::Borrowed(asset))),
         )
     }
 
     fn list(&self, path: &str) -> GpuiResult<Vec<SharedString>> {
-        let mut assets = gpui_component_assets::Assets.list(path)?;
+        let mut assets = gpui_kit::assets::Assets.list(path)?;
         if path.is_empty() || path == "icons" {
             assets.extend([
                 "icons/conversation-pin.svg".into(),
@@ -146,7 +146,7 @@ fn initialize_diagnostics() -> (Option<diagnostics::DiagnosticsGuard>, Option<Ma
 }
 
 fn run_application(diagnostics_error: Option<MagentaError>, launch_failed: Rc<Cell<bool>>) {
-    let app: Application = gpui_platform::application().with_assets(MagentaAssets);
+    let app: Application = gpui_kit::application().with_assets(MagentaAssets);
 
     app.run(move |cx: &mut App| {
         initialize_application(cx);
@@ -164,7 +164,7 @@ fn initialize_application(cx: &mut App) {
         "starting Magenta"
     );
     cx.set_app_identity("magenta-1", "Magenta");
-    gpui_component::init(cx);
+    gpui_kit::init(cx);
     magenta_ui::init_settings(cx);
 }
 
@@ -294,7 +294,7 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
 
 fn main_window_options(cx: &App) -> WindowOptions {
     let bounds = Bounds::centered(None, size(px(1180.), px(760.)), cx);
-    let mut window_options = gpui_component::TitleBar::window_options();
+    let mut window_options = gpui_kit::component::TitleBar::window_options();
     window_options.window_bounds = Some(WindowBounds::Windowed(bounds));
     window_options.app_id = Some("magenta-1".into());
     configure_titlebar(&mut window_options);

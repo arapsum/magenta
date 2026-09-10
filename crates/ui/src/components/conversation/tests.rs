@@ -11,8 +11,8 @@ use std::{
 };
 
 use futures_util::{Stream, stream};
-use gpui::{TestAppContext, size};
-use gpui_component::Root;
+use gpui_kit::component::Root;
+use gpui_kit::{TestAppContext, size};
 use magenta_core::{
     ConversationId, ConversationMode, EffortLevel, FinishReason, GenerationConfig, ModelId,
     TokenUsage,
@@ -63,9 +63,9 @@ fn elapsed_time_uses_compact_stable_units() {
     assert_eq!(format_elapsed(Duration::from_secs(3_725)), "1h 02m");
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn attachment_preview_can_be_opened_and_dismissed(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
         let composer = cx.new(|cx| PromptComposer::new(window, cx));
         ConversationView::new(composer, window, cx)
@@ -83,9 +83,9 @@ fn attachment_preview_can_be_opened_and_dismissed(cx: &mut TestAppContext) {
         .expect("the conversation test window should remain open");
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn generation_progress_tracks_stream_phases_and_clears_on_stop(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
         let composer = cx.new(|cx| PromptComposer::new(window, cx));
         ConversationView::new(composer, window, cx)
@@ -149,9 +149,9 @@ fn generation_progress_tracks_stream_phases_and_clears_on_stop(cx: &mut TestAppC
         .expect("the conversation test window should remain open");
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn prepending_history_preserves_visible_message_and_offset(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
         let composer = cx.new(|cx| PromptComposer::new(window, cx));
         ConversationView::new(composer, window, cx)
@@ -165,7 +165,7 @@ fn prepending_history_preserves_visible_message_and_offset(cx: &mut TestAppConte
                 },
                 cx,
             );
-            view.list_state.scroll_to(gpui::ListOffset {
+            view.list_state.scroll_to(gpui_kit::ListOffset {
                 item_ix: 10,
                 offset_in_item: px(7.),
             });
@@ -182,9 +182,9 @@ fn prepending_history_preserves_visible_message_and_offset(cx: &mut TestAppConte
         .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn bidirectional_pages_keep_only_the_bounded_render_window(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
         let composer = cx.new(|cx| PromptComposer::new(window, cx));
         ConversationView::new(composer, window, cx)
@@ -207,9 +207,9 @@ fn bidirectional_pages_keep_only_the_bounded_render_window(cx: &mut TestAppConte
         .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn stored_context_omission_is_retained_for_the_assistant_notice(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
         let composer = cx.new(|cx| PromptComposer::new(window, cx));
         ConversationView::new(composer, window, cx)
@@ -230,9 +230,9 @@ fn stored_context_omission_is_retained_for_the_assistant_notice(cx: &mut TestApp
         .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn stream_deltas_do_not_emit_persistence_events(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let saved = Rc::new(RefCell::new(Vec::new()));
     let events = Rc::clone(&saved);
     let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
@@ -308,9 +308,9 @@ impl Drop for DropAwareStream {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn loading_a_fixture_keeps_the_conversation_in_the_view(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
         let composer = cx.new(|cx| PromptComposer::new(window, cx));
         ConversationView::new(composer, window, cx)
@@ -331,9 +331,9 @@ fn loading_a_fixture_keeps_the_conversation_in_the_view(cx: &mut TestAppContext)
         .expect("the conversation test window should remain open");
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn user_messages_keep_prose_literal_and_isolate_fenced_code(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
         let composer = cx.new(|cx| PromptComposer::new(window, cx));
         ConversationView::new(composer, window, cx)
@@ -372,9 +372,9 @@ fn user_messages_keep_prose_literal_and_isolate_fenced_code(cx: &mut TestAppCont
         .expect("the conversation test window should remain open");
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn completed_stream_stores_its_outcome(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
         let composer = cx.new(|cx| PromptComposer::new(window, cx));
         ConversationView::new(composer, window, cx)
@@ -428,9 +428,9 @@ fn completed_stream_stores_its_outcome(cx: &mut TestAppContext) {
         .expect("the conversation test window should remain open");
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn stream_ending_without_completion_marks_the_response_failed(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let view_slot = Rc::new(RefCell::new(None));
     let view_for_window = Rc::clone(&view_slot);
     let window = cx.open_window(size(px(900.), px(640.)), move |window, cx| {
@@ -478,9 +478,9 @@ fn stream_ending_without_completion_marks_the_response_failed(cx: &mut TestAppCo
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn cancellation_drops_the_stream_and_rejects_stale_chunks(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
         let composer = cx.new(|cx| PromptComposer::new(window, cx));
         ConversationView::new(composer, window, cx)
@@ -526,9 +526,9 @@ fn cancellation_drops_the_stream_and_rejects_stale_chunks(cx: &mut TestAppContex
     assert!(dropped.load(Ordering::SeqCst));
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn superseding_a_generation_rejects_chunks_from_the_old_stream(cx: &mut TestAppContext) {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
         let composer = cx.new(|cx| PromptComposer::new(window, cx));
         ConversationView::new(composer, window, cx)

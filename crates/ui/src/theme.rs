@@ -1,5 +1,7 @@
-use gpui::{App, SharedString};
-use gpui_component::{Theme, ThemeConfig, ThemeMode, ThemeRegistry, highlighter::HighlightTheme};
+use gpui_kit::component::{
+    Theme, ThemeConfig, ThemeMode, ThemeRegistry, highlighter::HighlightTheme,
+};
+use gpui_kit::{App, SharedString};
 use std::rc::Rc;
 
 use crate::{MagentaError, Result};
@@ -178,14 +180,14 @@ fn apply_config(theme: Rc<ThemeConfig>, cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use gpui::TestAppContext;
+    use gpui_kit::TestAppContext;
 
     use super::*;
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn unknown_theme_is_reported_without_changing_the_active_theme(cx: &TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
             let outcome = init(cx);
             assert!(matches!(
                 outcome,
@@ -200,10 +202,10 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn bundled_themes_toggle_successfully(cx: &TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
             assert!(matches!(
                 init(cx),
                 ThemeInitOutcome::Applied(BuiltInTheme::Dark)
@@ -217,10 +219,10 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn malformed_bundled_theme_falls_back_to_default_dark(cx: &TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
 
             let outcome = init_from_str("{ definitely not valid json", cx);
 
@@ -235,10 +237,10 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn missing_magenta_dark_falls_back_without_panicking(cx: &TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
 
             let outcome = init_from_str(r#"{"name":"Empty","themes":[]}"#, cx);
 

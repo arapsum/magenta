@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use gpui_component::accordion::Accordion;
+use gpui_kit::component::accordion::Accordion;
 
 use super::super::*;
 
@@ -24,7 +24,7 @@ impl ActivityStatus {
         }
     }
 
-    fn color(self, cx: &App) -> gpui::Hsla {
+    fn color(self, cx: &App) -> gpui_kit::Hsla {
         match self {
             Self::Working | Self::AwaitingApproval => cx.theme().warning,
             Self::Completed => cx.theme().success,
@@ -693,7 +693,7 @@ impl ConversationView {
 fn render_command_card(
     command: &WorkspaceCommand,
     status: &'static str,
-    status_color: gpui::Hsla,
+    status_color: gpui_kit::Hsla,
     status_icon: Icon,
     output: String,
     cx: &App,

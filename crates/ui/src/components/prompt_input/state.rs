@@ -5,15 +5,15 @@ use std::{
     time::Duration,
 };
 
-use gpui::{
-    App, AppContext as _, Context, Entity, EventEmitter, Focusable as _, PathPromptOptions,
-    SharedString, Subscription, Task, Window,
-};
-use gpui_component::{
+use gpui_kit::component::{
     WindowExt,
     input::{InputEvent, TextareaState},
     notification::{Notification, NotificationType},
     text::TextViewState,
+};
+use gpui_kit::{
+    App, AppContext as _, Context, Entity, EventEmitter, Focusable as _, PathPromptOptions,
+    SharedString, Subscription, Task, Window,
 };
 use magenta_core::{ConversationMode, EffortLevel, GenerationConfig, ModelDescriptor};
 

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use gpui::{Context, Window};
+use gpui_kit::{Context, Window};
 use magenta_core::{ConversationMode, Project};
 
 use super::MainView;
@@ -23,7 +23,7 @@ impl MainView {
         let Some(catalog) = self.projects.clone() else {
             return;
         };
-        let picker = cx.prompt_for_paths(gpui::PathPromptOptions {
+        let picker = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
             files: false,
             directories: true,
             multiple: false,

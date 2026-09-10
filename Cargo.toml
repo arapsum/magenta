@@ -29,7 +29,7 @@ dirs = "6"
 futures-core = "0.3"
 futures-channel = "0.3"
 futures-util = { version = "0.3", features = ["io"] }
-http_client = { git = "https://github.com/zed-industries/zed" }
+http_client = { package = "gpui-pre-http-client", version = "0.3.1" }
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service"] }
 magenta-application = { path = "crates/application" }
 magenta-core = { path = "crates/core" }
@@ -41,18 +41,12 @@ chrono = "0.4"
 tempfile = "3"
 magenta-ui = { path = "crates/ui" }
 parking_lot = "0.12"
-gpui = { git = "https://github.com/zed-industries/zed" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
-  "font-kit",
-  "wayland",
-  "x11",
-] }
-gpui-base = { git = "https://github.com/longbridge/gpui-component", rev = "49229371e095bfd2ca77d336b5972b16956f0a87" }
-gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "49229371e095bfd2ca77d336b5972b16956f0a87", features = [
+gpui-kit = { version = "=0.6.1", features = [
     "tree-sitter-bash",
     "tree-sitter-c",
     "tree-sitter-cmake",
     "tree-sitter-cpp",
+    "tree-sitter-diff",
     "tree-sitter-javascript",
     "tree-sitter",
     "tree-sitter-markdown",
@@ -63,8 +57,7 @@ gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "
     "tree-sitter-typescript",
     "tree-sitter-yaml",
 ] }
-gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "49229371e095bfd2ca77d336b5972b16956f0a87" }
-reqwest_client = { git = "https://github.com/zed-industries/zed" }
+reqwest_client = { package = "gpui-pre-reqwest-client", version = "0.3.1" }
 rand = "0.9"
 ratex-layout = "0.1.14"
 ratex-parser = "0.1.14"

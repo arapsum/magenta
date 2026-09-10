@@ -5,12 +5,7 @@ use std::{
     path::Path,
 };
 
-use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window,
-    div, prelude::FluentBuilder as _, px, relative,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _,
     breadcrumb::{Breadcrumb, BreadcrumbItem},
     button::{Button, ButtonVariants as _},
@@ -22,21 +17,26 @@ use gpui_component::{
     tree::{TreeEvent, TreeItem, TreeState, tree},
     v_flex,
 };
+use gpui_kit::{
+    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window,
+    div, prelude::FluentBuilder as _, px, relative,
+};
 use magenta_application::ProjectCatalog;
 use magenta_core::{
     AgentWorkspaceChange, Project, WorkspaceChangeState, WorkspaceDocument, WorkspaceEntry,
     WorkspaceEntryKind,
 };
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
 #[action(namespace = magenta)]
 struct SelectNextWorkbenchTab;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
 #[action(namespace = magenta)]
 struct SelectPreviousWorkbenchTab;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, gpui::Action)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
 #[action(namespace = magenta)]
 struct CloseActiveWorkbenchTab;
 
@@ -103,13 +103,13 @@ impl EventEmitter<AgentWorkbenchEvent> for AgentWorkbench {}
 impl AgentWorkbench {
     pub fn new(catalog: ProjectCatalog, window: &Window, cx: &mut Context<'_, Self>) -> Self {
         cx.bind_keys([
-            gpui::KeyBinding::new("ctrl-tab", SelectNextWorkbenchTab, Some("AgentWorkbench")),
-            gpui::KeyBinding::new(
+            gpui_kit::KeyBinding::new("ctrl-tab", SelectNextWorkbenchTab, Some("AgentWorkbench")),
+            gpui_kit::KeyBinding::new(
                 "ctrl-shift-tab",
                 SelectPreviousWorkbenchTab,
                 Some("AgentWorkbench"),
             ),
-            gpui::KeyBinding::new(
+            gpui_kit::KeyBinding::new(
                 CLOSE_TAB_KEY,
                 CloseActiveWorkbenchTab,
                 Some("AgentWorkbench"),
@@ -593,7 +593,7 @@ impl AgentWorkbench {
         let tab_view = view.clone();
         TabBar::new("workbench-tabs")
             .w_full()
-            .with_size(gpui_component::Size::Small)
+            .with_size(gpui_kit::component::Size::Small)
             .max_width(px(190.))
             .menu(true)
             .when_some(active_index, TabBar::selected_index)
@@ -958,7 +958,7 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use gpui::{TestAppContext, px, size};
+    use gpui_kit::{TestAppContext, px, size};
     use magenta_application::ProjectCatalog;
     use magenta_core::{
         AgentWorkspaceChange, Project, ProjectStore, StorageFuture, Timestamp, WorkspaceBrowser,
@@ -1024,8 +1024,8 @@ mod tests {
     fn setup(
         cx: &mut TestAppContext,
         projects: Arc<TestProjects>,
-    ) -> gpui::WindowHandle<AgentWorkbench> {
-        cx.update(gpui_component::init);
+    ) -> gpui_kit::WindowHandle<AgentWorkbench> {
+        cx.update(gpui_kit::init);
         cx.open_window(size(px(900.), px(640.)), move |window, cx| {
             AgentWorkbench::new(ProjectCatalog::new(projects.clone(), projects), window, cx)
         })
@@ -1045,7 +1045,7 @@ mod tests {
         assert_eq!(shortest_unique_suffix("README.md", &paths), "README.md");
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn workspace_changes_upsert_tabs_and_closing_selects_the_neighbor(cx: &mut TestAppContext) {
         let window = setup(cx, Arc::new(TestProjects::default()));
         window
@@ -1069,7 +1069,7 @@ mod tests {
             .unwrap();
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn stale_load_cannot_overwrite_a_reopened_tab(cx: &mut TestAppContext) {
         let projects = Arc::new(TestProjects::default());
         let (old_sender, old_receiver) = futures_channel::oneshot::channel();

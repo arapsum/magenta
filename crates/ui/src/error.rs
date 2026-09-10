@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use gpui_component::notification::{Notification, NotificationType};
+use gpui_kit::component::notification::{Notification, NotificationType};
 use magenta_application::{RegenerateMessageError, SendMessageError};
 use magenta_core::{ProviderError, ProviderId};
 
@@ -282,10 +282,10 @@ pub fn notification_for_error(error: &MagentaError) -> Notification {
 mod tests {
     use std::error::Error as _;
 
-    use gpui::{
+    use gpui_kit::component::Root;
+    use gpui_kit::{
         AppContext as _, Context, IntoElement, Render, TestAppContext, Window, div, px, size,
     };
-    use gpui_component::Root;
 
     use super::*;
 
@@ -379,9 +379,9 @@ mod tests {
         assert_eq!(codes.len(), errors.len());
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn repeated_errors_replace_their_existing_notification(cx: &mut TestAppContext) {
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let window_handle = cx.open_window(size(px(480.), px(320.)), |window, cx| {
             let view = cx.new(|_| EmptyView);
             Root::new(view, window, cx)
