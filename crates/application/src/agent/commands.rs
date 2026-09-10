@@ -69,7 +69,7 @@ pub fn execute_command(
         .await
         .map_err(|error| agent_error(&provider_id, &error))?;
         yield AgentRunEvent::ApprovalRequired(approval.clone());
-        if await_decision(&approvals, &approval.request_id).await != AgentApprovalDecision::Approve {
+        if await_decision(&approvals, &approval.request_id).await == AgentApprovalDecision::Reject {
             let output = rejected_output(&call.id, "the user rejected this command");
             persist_result(&context, &call, &output, &provider_id).await?;
             yield AgentRunEvent::ToolResult(output);
@@ -132,6 +132,7 @@ fn command_approval(call: &AgentToolCall, command: &WorkspaceCommand) -> AgentAp
         tool_name: call.name.clone(),
         reason: "This command can modify files in the selected workspace.".to_owned(),
         subject: AgentApprovalSubject::Command(command.clone()),
+        can_approve_for_run: false,
     }
 }
 

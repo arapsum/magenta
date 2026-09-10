@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use async_channel::Receiver;
 use futures_util::StreamExt as _;
 use magenta_core::{
@@ -8,6 +10,7 @@ use super::{
     AgentStreamContext, ApprovalResponse, MAX_AGENT_ROUNDS, MAX_AGENT_TOOL_CALLS, agent_error,
     tools,
 };
+use tools::{AgentRunPermissions, AgentRunPermissionsHandle};
 
 pub fn agent_stream(
     context: AgentStreamContext,
@@ -20,6 +23,7 @@ pub fn agent_stream(
         let mut rounds = 0_usize;
         let mut tool_calls = 0_usize;
         let mut first_started = false;
+        let permissions = Arc::new(Mutex::new(AgentRunPermissions::default()));
 
         loop {
             let mut calls = Vec::new();
@@ -66,6 +70,7 @@ pub fn agent_stream(
                 calls,
                 approvals.clone(),
                 provider_id.clone(),
+                permissions.clone(),
             );
             while let Some(event) = tool_stream.next().await {
                 let event = event?;

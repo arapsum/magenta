@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::{path::Path, sync::{Arc, Mutex}};
 
 use async_channel::Receiver;
 use magenta_core::{
@@ -11,11 +11,19 @@ use magenta_core::{
 
 use super::{AgentStreamContext, ApprovalResponse, agent_error};
 
+#[derive(Default)]
+pub(super) struct AgentRunPermissions {
+    approve_workspace_edits: bool,
+}
+
+pub(super) type AgentRunPermissionsHandle = Arc<Mutex<AgentRunPermissions>>;
+
 pub fn execute_tools(
     context: AgentStreamContext,
     calls: Vec<AgentToolCall>,
     approvals: Receiver<ApprovalResponse>,
     provider_id: ProviderId,
+    permissions: AgentRunPermissionsHandle,
 ) -> AgentRunStream {
     Box::pin(async_stream::try_stream! {
         for call in calls {
@@ -55,36 +63,34 @@ pub fn execute_tools(
             }
             if prepared.operation.is_mutating() || preview.protected {
                 let approval = workspace_approval(&call, &prepared.operation, &preview);
-                record_approval(
-                    &context.store,
-                    context.run_id,
-                    &context.assistant_message,
-                    context.conversation.id,
-                    &call,
-                    &approval,
-                )
-                .await
-                .map_err(|error| agent_error(&provider_id, &error))?;
-                yield AgentRunEvent::ApprovalRequired(approval.clone());
-                let decision = await_decision(&approvals, &approval.request_id).await;
-                if decision != AgentApprovalDecision::Approve {
-                    if let Some(mut change) = proposed_change {
-                        change.state = WorkspaceChangeState::Rejected;
-                        yield AgentRunEvent::WorkspaceChange(change);
+                let granted_for_run = approval.can_approve_for_run
+                    && permissions
+                        .lock()
+                        .is_ok_and(|permissions| permissions.approve_workspace_edits);
+                if !granted_for_run {
+                    record_workspace_approval(&context, &call, &approval, &provider_id).await?;
+                    yield AgentRunEvent::ApprovalRequired(approval.clone());
+                    let decision = await_decision(&approvals, &approval.request_id).await;
+                    if decision == AgentApprovalDecision::Reject {
+                        let (change, output) = reject_workspace_tool(
+                            &context,
+                            &call,
+                            proposed_change,
+                            &provider_id,
+                        )
+                        .await?;
+                        if let Some(change) = change {
+                            yield AgentRunEvent::WorkspaceChange(change);
+                        }
+                        yield AgentRunEvent::ToolResult(output);
+                        continue;
                     }
-                    let output = rejected_output(&call.id, "the user rejected this operation");
-                    record_result(
-                        &context.store,
-                        context.run_id,
-                        &context.assistant_message,
-                        context.conversation.id,
-                        &call.name,
-                        &output,
-                    )
-                    .await
-                    .map_err(|error| agent_error(&provider_id, &error))?;
-                    yield AgentRunEvent::ToolResult(output);
-                    continue;
+                    if decision == AgentApprovalDecision::ApproveWorkspaceEditsForRun
+                        && approval.can_approve_for_run
+                        && let Ok(mut permissions) = permissions.lock()
+                    {
+                        permissions.approve_workspace_edits = true;
+                    }
                 }
                 if preview.protected {
                     preview = match context
@@ -118,6 +124,48 @@ struct PreparedTool {
     call: AgentToolCall,
     operation: WorkspaceOperation,
     preview: WorkspacePreview,
+}
+
+async fn record_workspace_approval(
+    context: &AgentStreamContext,
+    call: &AgentToolCall,
+    approval: &AgentApprovalRequest,
+    provider_id: &ProviderId,
+) -> Result<(), magenta_core::ProviderError> {
+    record_approval(
+        &context.store,
+        context.run_id,
+        &context.assistant_message,
+        context.conversation.id,
+        call,
+        approval,
+    )
+    .await
+    .map_err(|error| agent_error(provider_id, &error))
+}
+
+async fn reject_workspace_tool(
+    context: &AgentStreamContext,
+    call: &AgentToolCall,
+    proposed_change: Option<AgentWorkspaceChange>,
+    provider_id: &ProviderId,
+) -> Result<(Option<AgentWorkspaceChange>, AgentToolOutput), magenta_core::ProviderError> {
+    let change = proposed_change.map(|mut change| {
+        change.state = WorkspaceChangeState::Rejected;
+        change
+    });
+    let output = rejected_output(&call.id, "the user rejected this operation");
+    record_result(
+        &context.store,
+        context.run_id,
+        &context.assistant_message,
+        context.conversation.id,
+        &call.name,
+        &output,
+    )
+    .await
+    .map_err(|error| agent_error(provider_id, &error))?;
+    Ok((change, output))
 }
 
 async fn prepare_tool(
@@ -224,7 +272,16 @@ fn workspace_approval(
             diff: preview.diff.clone(),
             protected_read: preview.protected,
         },
+        can_approve_for_run: can_approve_for_run(operation, preview),
     }
+}
+
+const fn can_approve_for_run(operation: &WorkspaceOperation, preview: &WorkspacePreview) -> bool {
+    !preview.protected
+        && matches!(
+            operation,
+            WorkspaceOperation::ApplyPatch { .. } | WorkspaceOperation::CreateFile { .. }
+        )
 }
 
 fn workspace_change(
@@ -558,5 +615,54 @@ pub(super) fn failed_output(call_id: &str, message: &str) -> AgentToolOutput {
         call_id: call_id.to_owned(),
         output: message.to_owned(),
         is_error: true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn preview(protected: bool) -> WorkspacePreview {
+        WorkspacePreview {
+            path: "src/lib.rs".to_owned(),
+            summary: "update file".to_owned(),
+            output: String::new(),
+            diff: None,
+            protected,
+            mutation: None,
+        }
+    }
+
+    #[test]
+    fn run_permission_is_limited_to_unprotected_file_edits() {
+        assert!(can_approve_for_run(
+            &WorkspaceOperation::ApplyPatch {
+                path: "src/lib.rs".to_owned(),
+                unified_diff: String::new(),
+            },
+            &preview(false),
+        ));
+        assert!(can_approve_for_run(
+            &WorkspaceOperation::CreateFile {
+                path: "src/new.rs".to_owned(),
+                content: String::new(),
+            },
+            &preview(false),
+        ));
+        assert!(!can_approve_for_run(
+            &WorkspaceOperation::ReadFile {
+                path: "src/lib.rs".to_owned(),
+                start_line: None,
+                line_count: None,
+            },
+            &preview(false),
+        ));
+        assert!(!can_approve_for_run(
+            &WorkspaceOperation::ApplyPatch {
+                path: "src/lib.rs".to_owned(),
+                unified_diff: String::new(),
+            },
+            &preview(true),
+        ));
     }
 }

@@ -90,6 +90,7 @@ pub struct AgentApprovalRequest {
     pub tool_name: String,
     pub reason: String,
     pub subject: AgentApprovalSubject,
+    pub can_approve_for_run: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,6 +106,7 @@ pub enum AgentApprovalSubject {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentApprovalDecision {
     Approve,
+    ApproveWorkspaceEditsForRun,
     Reject,
 }
 
