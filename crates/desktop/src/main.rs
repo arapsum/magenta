@@ -1,3 +1,10 @@
+//! The `magenta` desktop executable and application composition root.
+//!
+//! Startup initializes diagnostics, assets, GPUI Kit, settings, and themes;
+//! constructs provider, persistence, and workspace adapters; and injects their
+//! ports into the application workflows and UI. Window and process setup live
+//! here, while interaction and layout belong to `magenta-ui`.
+
 mod diagnostics;
 
 use std::{borrow::Cow, cell::Cell, process::ExitCode, rc::Rc, sync::Arc};

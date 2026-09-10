@@ -1,218 +1,135 @@
 # Magenta
 
-Magenta is an experimental native AI chat client written in Rust with
-[GPUI](https://gpui.rs/) and
-[GPUI Component](https://github.com/longbridge/gpui-component).
+Magenta is an experimental native AI chat and workspace client written in Rust
+with GPUI through [GPUI Kit](https://github.com/longbridge/gpui-kit). The workspace
+currently pins `gpui-kit` to `0.6.1`.
 
-Its premise is deliberately focused: provide a polished, local-first desktop
-experience for remote AI providers without turning a chat client into a
-browser tab in a desktop wrapper. Magenta is intended to be fast at idle,
-careful with memory, and pleasant to use for long-lived conversations.
+It combines streaming conversations, local history, and an approval-controlled
+workspace agent in a native desktop window. Linux is the platform exercised by
+this repository. The production provider is OpenAI through ChatGPT browser
+sign-in; provider icons in the UI do not imply additional integrations.
 
-> **Status:** Magenta supports ChatGPT sign-in, OpenAI streaming, local SQLite
-> conversation history, an editable TOML-backed settings window, and a
-> constrained workspace agent with approval-gated file and command tools.
-> Conversations survive restarts, including their model, effort, pinned state,
-> and completed, stopped, or failed responses. The application remains
-> experimental; Linux is the platform exercised here.
+## Start here
 
-The visual language takes inspiration from the
-[Mogonta AI Chat Workspace UI design](https://dribbble.com/shots/27203662-Mogonta-AI-Chat-Workspace-UI-Design).
-Magenta is an independent implementation and is not affiliated with the
-original designer.
+Use Rust **1.98.0**, the version used by [CI](.github/workflows/ci.yml), and install
+the native Linux dependencies in the [development guide](docs/development.md).
+Then run from the repository root:
 
-## Product direction
-
-Magenta is a general AI chat client with an intentionally constrained local
-workspace agent, not an unrestricted terminal workstation. Its core experience is:
-
-```text
-Native GPUI interface
-        |
-        v
-Conversation workflows
-        |
-        +---- provider adapters ----> remote model APIs
-        |
-        +---- local persistence ----> SQLite + local attachment files
+```bash
+cargo run --locked
 ```
 
-The product is guided by a few constraints:
+Connect your ChatGPT account from the sidebar account menu or Settings. Choose a
+model and its supported effort level in the composer. For Agent mode, add a
+project or choose a workspace directory first. Commands require Bubblewrap and
+a successful isolation probe; file tools remain available without it.
 
-- **Native all the way down.** The chat experience should not require an
-  embedded Chromium, Electron, or WebView runtime.
-- **Provider-neutral domain model.** The application should model
-  conversations, messages, attachments, and generation events—not one
-  provider’s request JSON.
-- **Local-first history.** Conversations and settings belong on the user’s
-  machine; credentials should use the operating system’s secure credential
-  store rather than a plaintext database.
-- **Bounded working set.** Memory should scale chiefly with what is visible:
-  lightweight conversation summaries in the sidebar, paged messages in an
-  open thread, and released attachment buffers when they are no longer needed.
-- **Streaming without churn.** Provider stream chunks should update the active
-  message at a sensible visual cadence rather than rebuilding an entire
-  conversation for every token.
+## Current features
 
-## What works today
+- Streaming chat with cancellation, Markdown, syntax-highlighted code, inline
+  code, copy actions, and inline/display math rendered with RaTeX.
+- Up to four local image attachments per Chat message, with validation and
+  managed copies so moving the original file does not break history.
+- SQLite history with pins, rename, confirmed deletion, generated titles,
+  full-text search, and navigation to matched messages. Pages contain up to
+  50 messages; the conversation view retains at most 150 rendered messages.
+- Model-aware context budgeting that selects recent whole turns independently
+  of the visible page and indicates when older context was omitted.
+- Registered projects, project conversations, and a read-only code workbench
+  with a collapsible explorer, independent file tabs, breadcrumbs, search, and
+  folding. Switching conversations closes and clears the workbench session.
+- File and unified-diff view modes for agent changes, change status, hunk
+  navigation, and a per-tab view selection. Diff review is read-only; approvals
+  remain in the conversation.
+- Workspace listing, literal text search, bounded reads, file creation, and
+  patch previews. Ordinary file edits can be approved individually or for the
+  current run; protected reads and commands still need individual approval.
+- Sandboxed, non-interactive commands with streaming output, timeouts, and
+  explicit exit/failure states. Commands and tool sections open for active work
+  and otherwise collapse automatically unless manually overridden.
+- Persistent, categorized response failures with relevant recovery actions,
+  preserved partial output, and copyable, allowlisted diagnostic details.
+- Warm light/dark themes, an accent-colored sidebar and composer, and separate
+  UI, code, and math typography preferences in a TOML-backed settings window.
 
-- Native GPUI window with custom Linux client-side chrome.
-- Bundled JSON light and dark themes, including safe fallback behavior if a
-  bundled theme cannot be loaded.
-- A responsive, collapsible chat sidebar with:
-  - New Chat state;
-  - full-text search across persisted titles and message bodies, with matched
-    snippets and navigation to the matching message;
-  - pinned conversations and grouped recent history;
-  - durable pin/unpin, inline rename, selection, expansion, and “Show more”
-    interactions;
-  - permanent conversation deletion behind a confirmation dialog;
-  - an active-selection bevel that moves from New Chat to the selected
-    conversation;
-  - a local account menu with profile details, settings, theme switching,
-    provider connection, and sign-out actions.
-- Empty workspace with Magenta’s animated glass orb and ambient surface.
-- Native multiline prompt composer with model-specific effort selection,
-  image validation and previews, fenced-code previews, and a circular
-  send/stop control. OpenAI requests stream text and up to four local images
-  per user message.
-- Chat and Agent modes. Agent mode can inspect and edit a selected workspace,
-  presents proposed file changes for approval, and shows project files in a
-  split code workbench.
-- Approval-gated, non-interactive workspace commands isolated with Bubblewrap.
-  Commands receive no network, stdin, host home directory, credentials, or Git
-  metadata; output, runtime, arguments, and captured bytes are bounded.
-- ChatGPT browser sign-in, OS-keyring credentials, account restoration,
-  model discovery, and real OpenAI response streaming.
-- A separate settings window with System/Light/Dark appearance modes, UI and
-  monospace font families and sizes, KaTeX math styles and sizes, OpenAI
-  connection controls, and local configuration-file actions.
-- A conversation surface backed by provider-independent core types and SQLite.
-- Conversation selection, new-thread creation, rich Markdown responses,
-  code-block copy actions, response regeneration, cancellable streaming,
-  provider failure handling, and per-response model attribution.
-- Focused `SendMessage` and `RegenerateMessage` application workflows that
-  commit message turns before invoking the provider, loading complete context
-  from storage independently of the visible message page.
-- `ChatProvider` and `ConversationStore` ports in `core`, implemented by the
-  provider and storage crates. A deterministic `DemoProvider` remains available
-  for tests; production history starts empty.
-- Asynchronous history loading, 50-message pages with “Load earlier messages,”
-  preserved scroll position, and recoverable save failures.
-- Generation completion metadata on assistant messages, including normalized
-  finish reasons and optional input/output token usage. GPUI owns the active
-  stream task, so cancelling or superseding a response drops the stream and
-  stale chunks cannot alter the conversation.
-- Workflow-specific application errors plus a typed `MagentaError` and
-  `Result<T>` alias at the UI boundary.
-- Recoverable notifications and privacy-safe error presentation.
-- Local structured diagnostics with daily rotation and stderr fallback.
+The full-height sidebar remains separate from the main panel: **the titlebar
+must not extend over the sidebar**. This layout rule applies to future UI work
+as well as the current design.
 
-## Not implemented yet
+## Documentation and crate ownership
 
-- Additional provider integrations.
-- Automatic context-budget management.
-- Non-image attachments, remote image URLs, and clipboard image capture.
-- Rich provider events such as reasoning and citations.
+Each crate has a guide to its responsibilities, public API, source layout, and
+verification commands. The package names below are also the names accepted by
+`cargo -p`.
 
-## Architecture
+| Crate | Responsibility | Direct internal runtime dependencies |
+| --- | --- | --- |
+| [magenta-core](crates/core/README.md) | Domain values, ports, stream contracts, context budgeting | None |
+| [magenta-application](crates/application/README.md) | Sending, regeneration, retry, agent orchestration, history and project workflows | core |
+| [magenta-providers](crates/providers/README.md) | OpenAI authentication, model discovery, streaming; deterministic demo provider | core |
+| [magenta-storage](crates/storage/README.md) | SQLite history/projects, migrations, attachments, TOML settings | core |
+| [magenta-workspace](crates/workspace/README.md) | Workspace file access, patch commits, Bubblewrap command execution | core |
+| [magenta-ui](crates/ui/README.md) | GPUI views, stream lifecycle, recovery presentation, themes and settings | application, core |
+| [magenta-desktop](crates/desktop/README.md) | `magenta` executable, adapter wiring, assets, windows and diagnostics | All six library crates |
 
-The workspace intentionally starts small:
+See also the [development guide](docs/development.md) and
+[error-handling guide](docs/error-handling.md). Generate the API reference with:
 
-```text
-crates/
-├── application # headless application workflows such as sending a message
-├── core        # provider-independent values, ports, events, and errors
-├── desktop     # executable, diagnostics, platform/window composition
-├── providers   # OpenAI adapter and deterministic test provider
-├── storage     # SQLite adapter, migrations, and record conversion
-├── ui          # GPUI app shell, components, themes, and active conversation
-└── workspace   # constrained file access and Bubblewrap command execution
+```bash
+cargo doc --workspace --locked --all-features --no-deps
 ```
 
-The current dependency direction is intentionally small:
+Cargo's default workspace member is `magenta-desktop`. Use `--workspace` when
+you intend to document or test every crate; `--all-targets` alone does not select
+all workspace packages.
 
-```text
-desktop
-├── application
-│   └── core
-├── providers
-│   └── core
-├── storage
-│   └── core
-└── ui
-    ├── application
-    │   └── core
-    └── core
-```
+## How a conversation runs
 
-`desktop` constructs the adapters and injects them into application workflows.
-`application` coordinates durable turns and provider requests; `ui` owns stream
-lifecycle, cancellation, loaded pages, and rendering. SQLite allocates IDs and
-message sequences. The `SettingsStore` port keeps settings persistence behind
-the same boundary: `storage` provides the TOML adapter and `ui` applies the
-active settings to the running windows. `core` has no dependency on GPUI, HTTP,
-or SQLite.
+The desktop crate constructs concrete providers and stores and injects their
+core traits into the application and UI. Core does not depend on GPUI, HTTP, or
+SQLite. Application code uses ports rather than concrete adapters.
 
-## Local conversation history
+1. A workflow validates the request and asks storage to prepare a durable turn.
+2. Storage selects budgeted context and commits the user message and a streaming
+   assistant placeholder before provider work starts.
+3. The UI consumes the returned stream, batches visual updates, and owns its
+   cancellation lifetime. Agent runs additionally process tools and approvals.
+4. Completion, cancellation, or failure saves the terminal message. Agent
+   activity is recorded separately; individual text deltas do not write to SQLite.
 
-History is stored at `<platform-local-data>/magenta/conversations.sqlite3`.
-On Linux this is normally `~/.local/share/magenta/conversations.sqlite3`, with
-`XDG_DATA_HOME` respected. The database contains plaintext message content,
-generation configuration, usage metadata, timestamps, pins, and attachment
-metadata. Credentials remain in the OS keyring. When a user sends an image,
-Magenta validates and copies it into the sibling `attachments/` directory using
-an opaque filename; the original file may then move or be deleted without
-breaking history. Magenta supports PNG, JPEG, WebP, and non-animated GIF
-images, with a maximum of four images and 10 MiB per image in each message.
+Retry appends a new assistant attempt while retaining the failed response and
+excluding its partial text from request context. Regeneration replaces the
+addressed assistant response. Preparing an agent continuation puts a draft in
+the composer for review; it does not resume or replay tools automatically.
 
-SQLite uses bundled native libraries, WAL mode, foreign keys, a five-second
-busy timeout, and transactional schema migrations. Blocking database work runs
-off the GPUI thread. A send commits the user message and an assistant placeholder
-before the provider starts. Completion, stop, and failure each save the final
-response; individual streamed chunks do not cause database writes.
+## Local data and settings
 
-Normal window closure waits for a pending response save. After an abrupt exit,
-unfinished placeholders recover as stopped; text streamed since the turn began
-may be lost. Failed saves retain the visible response and offer Retry before
-navigation. Existing in-memory demo history is not imported.
+| Data | Location |
+| --- | --- |
+| Conversations, projects, agent activity | `<platform-local-data>/magenta/conversations.sqlite3` |
+| Managed image copies | `<platform-local-data>/magenta/attachments/` |
+| Daily rotating logs | `<platform-local-data>/magenta/logs/` |
+| User preferences | `<platform-config>/magenta/settings.toml` |
+| Provider credentials | Operating system keyring |
 
-The sidebar loads lightweight summaries. Ctrl+K opens a debounced SQLite FTS5
-search across conversation titles and message bodies, including prefix matches,
-highlighted snippets, and direct navigation to older matched messages. Search
-indexes are backfilled during migration and maintained transactionally as titles
-and messages change. Conversation titles can be renamed inline from a row’s
-overflow menu; Enter or focus loss saves a non-empty changed title, while Escape
-cancels. Renaming preserves the conversation’s recency and pin state. The same
-menu can permanently delete a conversation after confirmation; this removes its
-SQLite records and Magenta-managed attachment copies, but never deletes the
-original files. Opening a thread loads its
-latest 50 messages. Earlier pages load on demand, and leaving a thread releases
-its rendered messages. Provider context currently includes all
-completed messages preceding the response, even when they are outside the
-loaded page; token-budget truncation and page eviction are future work.
+On Linux, local data normally lives under `~/.local/share` and configuration
+under `~/.config`; `XDG_DATA_HOME` and `XDG_CONFIG_HOME` are respected. History,
+attachments, and activity records are local and unencrypted. Selected message
+context, attached images, and agent tool results are sent to the connected
+provider to perform the requested work. Diagnostics have no built-in upload.
 
-## Application settings
+SQLite uses WAL mode, foreign keys, a five-second busy timeout, and transactional
+migrations. On normal close, Magenta waits for a pending response save. On
+restart after an abrupt exit, streaming placeholders and running agent records
+recover as stopped; unsaved streamed text may be lost. A failed terminal save
+keeps the visible response and defers navigation until retry succeeds.
 
-Magenta stores user preferences in an editable TOML file at
-`<platform-config>/magenta/settings.toml`. On Linux this is normally
-`~/.config/magenta/settings.toml`, with `XDG_CONFIG_HOME` respected. The file is
-opened from the sidebar account menu by selecting **Settings**.
+Deleting a conversation removes its database records and Magenta-managed image
+copies, not the original attachments or workspace files. Forgetting a project
+removes its registration, not its directory or conversations.
 
-The settings window applies changes immediately and persists them without
-blocking the GPUI thread. It currently provides:
-
-- System, Light, and Dark appearance modes;
-- UI and monospace font families, including installed font names and the
-  `system-ui`/`system-monospace` defaults;
-- UI and monospace font sizes;
-- KaTeX Default, Roman, Sans-serif, and Typewriter math styles;
-- inline and display-math sizes; and
-- OpenAI account connection and disconnection controls.
-
-The file uses the following shape. Values not listed here are preserved when
-Magenta updates a setting, so comments and application-specific TOML keys can
-remain in the file:
+Settings apply across Magenta windows and persist without blocking the UI. The
+default configuration is:
 
 ```toml
 version = 1
@@ -222,7 +139,7 @@ theme = "dark"
 
 [typography]
 ui_font = "system-ui"
-ui_size = 15
+ui_size = 16
 monospace_font = "system-monospace"
 monospace_size = 13
 math_font = "default"
@@ -230,131 +147,78 @@ inline_math_size = 13
 display_math_size = 16
 ```
 
-**Reload from disk** applies edits made outside Magenta after a successful
-parse. **Restore defaults** copies the current file to a timestamped
-`settings.toml.bak-*` sibling before writing the default values. Missing files
-start from defaults. Provider credentials are never written to this file; they
-remain in the operating system keyring.
+Appearance accepts `system`, `light`, or `dark`; math styles accept `default`,
+`roman`, `sans-serif`, or `typewriter`. The UI labels those math choices as KaTeX
+styles. Font sizes accept values from 8 through 72, with invalid sizes falling
+back to defaults. Component-specific text sizes also contribute to the visual
+hierarchy; the UI size setting is not a global zoom control.
 
-## Constrained workspace agent
+System font choices resolve to preferred installed families, starting with
+Manrope for UI text and Google Sans Code for code, with platform fallbacks.
+These fonts are not bundled or downloaded. A named family can be selected in
+Settings. Existing saved preferences remain in effect after an update.
 
-Agent mode is scoped to a project selected in the composer. File operations
-resolve beneath that canonical workspace root. Protected files such as `.env`,
-private keys, and `.git` are hidden from command execution; protected file
-reads use the existing explicit approval flow. File mutations remain
-preview-first and require approval before they are committed.
+TOML saves preserve comments and unknown keys. **Reload from disk** applies a
+successfully parsed file. **Restore defaults** backs up an existing file to a
+`settings.toml.bak-*` sibling before attempting to save defaults. A malformed
+TOML file must be repaired before that save can succeed. Credentials are never
+stored in this file.
 
-On Linux, Magenta enables the `run_command` tool only when `bwrap` is installed
-and a startup isolation probe succeeds. Every command is shown with its exact
-executable, arguments, working directory, timeout, and network policy before it
-can run. Approved commands execute without shell interpolation, network access,
-stdin, host credentials, or access outside the selected workspace. The command
-card streams bounded stdout and stderr and reports completion, non-zero exit,
-timeout, cancellation, or sandbox failure. If Bubblewrap is unavailable, Agent
-mode continues to provide file tools and labels itself as files-only.
+## Agent behavior and limits
 
-User-installed Rust and Node.js toolchains, including pnpm, are exposed through
-read-only mounts when Magenta can discover them. pnpm runs with the installed
-version and can reuse locally cached package content through a disposable,
-writable store index. Dependency versions that are not already cached still
-require an explicit future network-enabled command policy; the current sandbox
-never silently reaches the network.
+File tools resolve paths beneath the selected canonical workspace root. Use
+relative paths and `.` for the root. Parent traversal, paths escaping through
+symlinks, and `.git` access are rejected. Protected reads such as `.env` files
+need approval; protected file creation and patching are disallowed.
 
-## Requirements
+**Approve workspace edits for this run** covers eligible file creation and
+patches only. It expires when the run ends and does not authorize protected
+reads or commands. Every file mutation still goes through a preview and commit
+check, including checking that an existing file has not changed since preview.
 
-- Rust 1.97.1 or newer; the locked GPUI revision currently requires it.
-- Git and network access for the first dependency fetch.
-- A Linux Wayland or X11 desktop with the native development libraries needed
-  by GPUI. Linux is the platform currently exercised by this repository.
-- Bubblewrap (`bwrap`) with working unprivileged namespaces to enable sandboxed
-  Agent commands. Without it, Agent file operations remain available.
+On Linux, commands run through Bubblewrap with a writable workspace, read-only
+system/toolchain mounts, an isolated temporary home, no network, and no stdin.
+The host home is not mounted wholesale; protected workspace paths and Git
+metadata are masked. Approval is for the displayed command and its arguments,
+not a per-file authorization for everything that command might change.
 
-The dependency graph is committed in `Cargo.lock`. Use `--locked` for
-reproducible development and verification.
+Discovered Rust, Node.js, and pnpm toolchains can be exposed to the sandbox.
+pnpm uses offline mode and can reuse discovered cached packages through a
+temporary store index. A package absent from the local cache cannot be fetched
+inside the current sandbox.
 
-## Run Magenta
+The current guard permits up to **64 tool rounds and 256 tool calls per run**.
+It stops before executing a third consecutive identical tool batch, comparing
+tool names and normalized arguments. These are fixed guards, not user settings.
+See the [application guide](crates/application/README.md) for orchestration and
+the [workspace guide](crates/workspace/README.md) for file and command limits.
 
-From the repository root:
-
-```bash
-cargo run --locked
-```
-
-The first build compiles GPUI and its graphics stack, so it can take longer
-than subsequent launches.
-
-The repository also includes a [bacon](https://dystroy.org/bacon/) setup:
-
-```bash
-bacon
-bacon run-long
-```
-
-`bacon` is optional and must be installed separately.
-
-## Development checks
-
-Run formatting, the workspace test suite, and the project’s strict lint gate:
+## Development
 
 ```bash
 cargo fmt --all -- --check
 cargo test --workspace --locked --all-features
-cargo clippy --all-targets --all-features -- \
+cargo clippy --workspace --locked --all-targets --all-features -- \
   -D warnings -W clippy::pedantic -W clippy::nursery -W rust-2018-idioms
 ```
 
-Compilation and unit tests do not replace launching the application. UI changes
-should also be exercised in the real window, including expanded and collapsed
-sidebar states, keyboard focus, search, selection, theme switching, and a
-small window size. Settings changes should additionally exercise opening,
-minimizing, and closing the separate settings window, changing typography,
-reloading the TOML file, and restoring defaults.
+UI changes also need a real-window check. The
+[development guide](docs/development.md) covers setup, focused crate checks,
+documentation builds, and the manual review checklist.
 
-## Themes
+## Current boundaries
 
-Magenta’s bundled themes live in [`themes/magenta.json`](themes/magenta.json).
-They use the GPUI Component schema and provide `Magenta Light` and `Magenta
-Dark` configurations.
+Additional providers, non-image attachments, remote image URLs, clipboard image
+capture, and rich reasoning/citation events are not implemented. The workbench
+does not provide direct editing/saving, Git staging, branch comparison, or
+side-by-side diffs. Agent diff state is session-local, and tab sessions are not
+restored after switching conversations or restarting.
 
-Theme operations return typed results:
+Context selection uses conservative estimates, not an exact provider tokenizer
+or conversation summarization. Budgeting is applied when preparing a turn or
+retry; provider-specific tool continuations are not automatically compacted.
+Network-enabled or interactive workspace commands are not supported.
 
-```rust
-magenta_ui::theme::apply_named("Magenta Dark", cx)?;
-magenta_ui::theme::toggle(cx)?;
-```
-
-An unavailable theme leaves the active theme unchanged. A malformed bundled
-theme falls back to GPUI Component’s default dark theme and presents a safe
-warning.
-
-## Errors and diagnostics
-
-Application failures use `MagentaError`, retaining technical source chains for
-diagnostics while mapping user-facing messages separately. Raw paths,
-credentials, prompts, clipboard data, and internal details must not appear in
-the interface.
-
-Logs are stored in the platform-local Magenta data directory under
-`magenta/logs`, rotate daily, and retain seven files. If file logging is not
-available, Magenta continues with stderr logging. Development verbosity can be
-adjusted with `RUST_LOG`:
-
-```bash
-RUST_LOG=magenta=debug,gpui=info cargo run --locked
-```
-
-See [`docs/error-handling.md`](docs/error-handling.md) for presentation,
-recovery, privacy, and asynchronous-work conventions.
-
-## Roadmap
-
-1. Continue visual and keyboard/accessibility QA for the conversation surface.
-2. Bound provider context and evict distant loaded message pages.
-3. Add document attachments and additional providers.
-
-## Contributing
-
-Keep changes scoped to the owning crate and preserve the application’s clean
-dependency direction. Add focused tests for behavioral changes, run the checks
-above, and launch the real application for changes that affect layout,
-interaction, themes, windows, or platform behavior.
+The original visual direction drew inspiration from the
+[Mogonta AI Chat Workspace design](https://dribbble.com/shots/27203662-Mogonta-AI-Chat-Workspace-UI-Design).
+Magenta is an independent implementation and is not affiliated with the designer.

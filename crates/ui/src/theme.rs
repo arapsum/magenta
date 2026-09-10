@@ -60,8 +60,8 @@ impl ThemeInitOutcome {
     }
 }
 
-/// Registers Magenta's bundled themes with gpui-component and applies the
-/// dark appearance used by the product reference.
+/// Registers Magenta's bundled themes with GPUI Kit and applies the default
+/// dark appearance. Persisted appearance settings are applied after loading.
 pub fn init(cx: &mut App) -> ThemeInitOutcome {
     init_from_str(BUILT_IN_THEMES, cx)
 }
@@ -91,7 +91,7 @@ fn fallback_to_default_dark(
     ThemeInitOutcome::Fallback { requested, error }
 }
 
-/// Returns every theme known to gpui-component, including themes registered
+/// Returns every theme known to GPUI Kit, including themes registered
 /// by the application later.
 pub fn available(cx: &App) -> Vec<ThemeOption> {
     ThemeRegistry::global(cx)
@@ -114,8 +114,8 @@ pub fn apply(theme: BuiltInTheme, cx: &mut App) -> Result<()> {
     apply_named(theme.name(), cx)
 }
 
-/// Applies any registered gpui-component theme by name. A future theme picker
-/// or persisted preference can use the same entry point.
+/// Applies any registered GPUI Kit theme by name without changing the
+/// persisted appearance preference.
 ///
 /// # Errors
 ///

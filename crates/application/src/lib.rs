@@ -1,4 +1,10 @@
 //! Application workflows that coordinate Magenta's domain values and ports.
+//!
+//! [`SendMessage`], [`RegenerateMessage`], and [`RunWorkspaceAgent`] prepare
+//! durable turns before returning provider streams. Callers own consumption,
+//! cancellation, and terminal-message saving through [`ConversationHistory`].
+//! [`ProjectCatalog`] registers workspaces and exposes read-only browsing.
+//! Runtime dependencies use core ports rather than concrete adapters or GPUI.
 
 mod agent;
 mod error;

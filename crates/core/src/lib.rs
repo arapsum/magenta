@@ -1,5 +1,10 @@
-//! Provider-independent conversation values shared by Magenta's UI and
-//! future storage/provider adapters.
+//! Provider-independent domain values and ports for Magenta.
+//!
+//! Conversation, generation, agent, workspace, persistence, and settings
+//! contracts are shared by the application workflows and concrete adapters.
+//! This crate has no GPUI, HTTP, or SQLite dependency. [`select_context`] keeps
+//! recent whole turns within a model budget; [`MessageFailure`] carries safe,
+//! durable failure details independently of technical error sources.
 
 mod agent;
 mod auth;

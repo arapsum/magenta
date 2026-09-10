@@ -1,4 +1,9 @@
-//! SQLite adapter. Connections and migrations are confined to blocking workers.
+//! Local SQLite, managed-attachment, and TOML settings adapters for Magenta.
+//!
+//! [`SqliteConversationStore`] implements conversation and project persistence;
+//! initialize it through [`magenta_core::ConversationStore`] before use.
+//! [`TomlSettingsStore`] preserves editable preferences and unknown TOML keys.
+//! Connections, migrations, and filesystem work are confined to blocking workers.
 
 mod attachments;
 mod managed_attachments;

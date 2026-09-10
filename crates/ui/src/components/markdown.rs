@@ -6,7 +6,7 @@ struct Fence {
 
 /// Normalize Markdown constructs that the native text renderer does not support.
 ///
-/// `gpui_component` currently treats hard line breaks inside a paragraph as an
+/// GPUI Kit's text renderer treats hard line breaks inside a paragraph as an
 /// unsupported inline node. A regular line break has the same conversational
 /// appearance and avoids dropping content while the response is rendered.
 /// Fenced code is copied byte-for-byte so formatting inside code blocks remains
