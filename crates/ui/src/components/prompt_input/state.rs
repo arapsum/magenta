@@ -6,19 +6,17 @@ use std::{
 };
 
 use gpui_kit::component::{
-    WindowExt,
     input::{InputEvent, TextareaState},
-    notification::{Notification, NotificationType},
     text::TextViewState,
 };
 use gpui_kit::{
     App, AppContext as _, Context, Entity, EventEmitter, Focusable as _, PathPromptOptions,
     SharedString, Subscription, Task, Window,
 };
-use magenta_core::{ConversationMode, EffortLevel, GenerationConfig, ModelDescriptor};
+use magenta_core::{ConversationMode, EffortLevel, GenerationConfig, MessageId, ModelDescriptor};
 
 use super::{MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS};
-use crate::{MagentaError, components::code_fence, notification_for_error};
+use crate::{ErrorPresentation, MagentaError, components::code_fence};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ReferenceImage {
@@ -91,6 +89,9 @@ pub struct PromptComposer {
     pub(super) generating: bool,
     storage_ready: bool,
     pub(super) attachments: Vec<ReferenceImage>,
+    retry_target: Option<MessageId>,
+    inline_error: Option<ErrorPresentation>,
+    blocking_error: Option<ErrorPresentation>,
     attachment_task: Option<Task<()>>,
     workspace_task: Option<Task<()>>,
     preview_task: Option<Task<()>>,
@@ -112,7 +113,10 @@ impl PromptComposer {
             &input,
             window,
             |composer, _, event: &InputEvent, window, cx| match event {
-                InputEvent::Change => composer.schedule_code_preview(window, cx),
+                InputEvent::Change => {
+                    composer.inline_error = None;
+                    composer.schedule_code_preview(window, cx);
+                }
                 InputEvent::Focus | InputEvent::Blur => cx.notify(),
                 InputEvent::PressEnter { shift: false, .. } => composer.submit(cx),
                 InputEvent::PressEnter { shift: true, .. } => {
@@ -135,6 +139,9 @@ impl PromptComposer {
             generating: false,
             storage_ready: true,
             attachments: Vec::new(),
+            retry_target: None,
+            inline_error: None,
+            blocking_error: None,
             attachment_task: None,
             workspace_task: None,
             preview_task: None,
@@ -247,6 +254,67 @@ impl PromptComposer {
         cx.notify();
     }
 
+    pub(crate) fn set_account_error(
+        &mut self,
+        error: Option<ErrorPresentation>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.blocking_error = error;
+        cx.notify();
+    }
+
+    pub(crate) fn prepare_model_retry(
+        &mut self,
+        message_id: MessageId,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.retry_target = Some(message_id);
+        self.focus(window, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn clear_model_retry(&mut self, cx: &mut Context<'_, Self>) {
+        if self.retry_target.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn set_inline_error(
+        &mut self,
+        error: ErrorPresentation,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.inline_error = Some(error);
+        cx.notify();
+    }
+
+    pub(super) const fn inline_error(&self) -> Option<ErrorPresentation> {
+        self.inline_error
+    }
+
+    pub(super) const fn blocking_error(&self) -> Option<ErrorPresentation> {
+        self.blocking_error
+    }
+
+    pub(super) const fn is_model_retry(&self) -> bool {
+        self.retry_target.is_some()
+    }
+
+    pub(crate) fn prepare_continuation(
+        &mut self,
+        prompt: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.retry_target = None;
+        self.input.update(cx, |input, cx| {
+            input.set_value(prompt, window, cx);
+        });
+        self.focus(window, cx);
+        cx.notify();
+    }
+
     pub fn clear_after_submit(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.input
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -254,6 +322,7 @@ impl PromptComposer {
         self.preview_task.take();
         self.clear_code_preview(cx);
         self.attachments.clear();
+        self.inline_error = None;
         cx.notify();
     }
 
@@ -363,7 +432,7 @@ impl PromptComposer {
                     .as_deref()
                     .is_some_and(std::path::Path::is_dir));
         self.storage_ready
-            && self.has_content(cx)
+            && (self.retry_target.is_some() || self.has_content(cx))
             && self.model.is_some()
             && self.effort.is_some()
             && workspace_ready
@@ -394,10 +463,10 @@ impl PromptComposer {
             let selection = match picker.await {
                 Ok(Ok(paths)) => paths,
                 Ok(Err(source)) => {
-                    _ = composer.update_in(window, |composer, window, cx| {
+                    _ = composer.update_in(window, |composer, _window, cx| {
                         composer.workspace_task = None;
                         let error = MagentaError::AttachmentPicker { source };
-                        window.push_notification(notification_for_error(&error), cx);
+                        composer.set_inline_error(error.presentation(), cx);
                     });
                     return;
                 }
@@ -436,15 +505,15 @@ impl PromptComposer {
         }
     }
 
-    pub(super) fn choose_attachments(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub(super) fn choose_attachments(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
         if self.attachments.len() >= MAX_ATTACHMENTS {
-            window.push_notification(
-                Notification::new()
-                    .title("Four images already attached")
-                    .message("Remove an image before adding another attachment.")
-                    .with_type(NotificationType::Warning),
-                cx,
-            );
+            self.inline_error = Some(ErrorPresentation {
+                code: "MAG-ATTACHMENT-COUNT",
+                severity: crate::ErrorSeverity::Warning,
+                title: "Four images already attached",
+                message: "Remove an image before adding another attachment.",
+            });
+            cx.notify();
             return;
         }
 
@@ -458,10 +527,10 @@ impl PromptComposer {
             let selection = match picker.await {
                 Ok(Ok(paths)) => paths,
                 Ok(Err(source)) => {
-                    _ = composer.update_in(window, |composer, window, cx| {
+                    _ = composer.update_in(window, |composer, _window, cx| {
                         composer.attachment_task = None;
                         let error = MagentaError::AttachmentPicker { source };
-                        window.push_notification(notification_for_error(&error), cx);
+                        composer.set_inline_error(error.presentation(), cx);
                     });
                     return;
                 }
@@ -499,7 +568,7 @@ impl PromptComposer {
     fn add_attachments(
         &mut self,
         paths: Vec<(PathBuf, bool, Option<u64>)>,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
         let mut unsupported = 0;
@@ -530,26 +599,13 @@ impl PromptComposer {
 
         let skipped = unsupported + unreadable + too_large + duplicates + overflow;
         if skipped > 0 {
-            let message = format!(
-                concat!(
-                    "Skipped {skipped} file(s): {unsupported} unsupported, ",
-                    "{unreadable} unreadable, {too_large} over 10 MiB, {duplicates} duplicate, ",
-                    "{overflow} over the four-image limit."
-                ),
-                skipped = skipped,
-                unsupported = unsupported,
-                unreadable = unreadable,
-                too_large = too_large,
-                duplicates = duplicates,
-                overflow = overflow
-            );
-            window.push_notification(
-                Notification::new()
-                    .title("Some images were not added")
-                    .message(message)
-                    .with_type(NotificationType::Warning),
-                cx,
-            );
+            let _ = (unsupported, unreadable, too_large, duplicates, overflow);
+            self.inline_error = Some(ErrorPresentation {
+                code: "MAG-ATTACHMENT-SKIPPED",
+                severity: crate::ErrorSeverity::Warning,
+                title: "Some images were not added",
+                message: "Some selected images were unsupported, unreadable, too large, duplicated, or beyond the four-image limit.",
+            });
         }
         cx.notify();
     }

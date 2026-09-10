@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants},
     clipboard::Clipboard,
     h_flex,
@@ -420,6 +420,46 @@ impl Render for PromptComposer {
                     .flex_1()
                     .min_h_0()
                     .gap(px(7.))
+                    .when_some(self.inline_error(), |this, error| {
+                        this.child(
+                            h_flex()
+                                .items_start()
+                                .gap(px(6.))
+                                .text_size(px(12.))
+                                .text_color(cx.theme().danger)
+                                .child(Icon::new(IconName::CircleX).xsmall())
+                                .child(
+                                    v_flex()
+                                        .gap(px(2.))
+                                        .child(div().font_medium().child(error.title))
+                                        .child(div().child(error.message)),
+                                ),
+                        )
+                    })
+                    .when_some(self.blocking_error(), |this, error| {
+                        this.child(
+                            h_flex()
+                                .items_start()
+                                .gap(px(6.))
+                                .text_size(px(12.))
+                                .text_color(cx.theme().warning)
+                                .child(Icon::new(IconName::CircleX).xsmall())
+                                .child(
+                                    v_flex()
+                                        .gap(px(2.))
+                                        .child(div().font_medium().child(error.title))
+                                        .child(div().child(error.message)),
+                                ),
+                        )
+                    })
+                    .when(self.is_model_retry(), |this| {
+                        this.child(
+                            div()
+                                .text_size(px(12.))
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Choose a model above, then press Retry to try this response again."),
+                        )
+                    })
                     .when(!self.attachments.is_empty(), |this| {
                         this.child(self.attachment_strip(cx))
                     })

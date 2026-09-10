@@ -1,36 +1,37 @@
 use gpui_kit::{Context, Window};
 use magenta_application::{
     AgentSendTarget, PendingAgentGeneration, PendingGeneration, RegenerateMessageInput,
-    RunWorkspaceAgentInput,
+    RetryMessageInput, RetryWorkspaceAgentInput, RunWorkspaceAgentInput,
 };
-use magenta_core::{ConversationId, Message, MessageId};
+use magenta_core::{ConversationId, GenerationConfig, Message, MessageId};
 
 use super::{AccountState, CloseState, MainView, Operation};
-use crate::{MagentaError, components::conversation::ConversationThread};
+use crate::{
+    MagentaError,
+    components::{conversation::ConversationThread, prompt_input::PromptComposer},
+};
 
 impl MainView {
     pub(super) fn submit_agent(
         &mut self,
         request: &crate::components::prompt_input::PromptRequest,
-        window: &mut Window,
+        window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
         let Some(agent) = self.agent.clone() else {
-            Self::present_storage_error(
+            self.present_composer_error(
                 &MagentaError::SendMessage {
                     source: magenta_application::SendMessageError::WorkspaceUnavailable,
                 },
-                window,
                 cx,
             );
             return;
         };
         let Some(workspace_root) = request.workspace_root.clone() else {
-            Self::present_storage_error(
+            self.present_composer_error(
                 &MagentaError::SendMessage {
                     source: magenta_application::SendMessageError::WorkspaceUnavailable,
                 },
-                window,
                 cx,
             );
             return;
@@ -74,11 +75,7 @@ impl MainView {
                         }
                     }
                     Err(source) => {
-                        Self::present_storage_error(
-                            &MagentaError::SendMessage { source },
-                            window,
-                            cx,
-                        );
+                        main.present_composer_error(&MagentaError::SendMessage { source }, cx);
                         main.continue_navigation(window, cx);
                     }
                 }
@@ -247,6 +244,132 @@ impl MainView {
         }));
     }
 
+    pub(crate) fn retry_response(
+        &mut self,
+        target: MessageId,
+        generation_override: Option<GenerationConfig>,
+        window: &Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if !self.can_write(cx) || !matches!(self.account_state, AccountState::Connected(_)) {
+            return;
+        }
+        let Some(id) = self.active_conversation else {
+            return;
+        };
+        if self.conversation.read(cx).is_agent_conversation() {
+            self.retry_agent_response(target, generation_override, id, window, cx);
+            return;
+        }
+        let generation = generation_override
+            .or_else(|| self.conversation.read(cx).generation_for_message(target))
+            .or_else(|| self.conversation.read(cx).conversation_generation());
+        let Some(generation) = generation else {
+            return;
+        };
+        let workflow = self.regenerate_message.clone();
+        self.operation = Operation::Preparing;
+        self.update_composer_availability(cx);
+        self.operation_task = Some(cx.spawn_in(window, async move |view, window| {
+            let result = workflow
+                .retry(RetryMessageInput {
+                    conversation_id: id,
+                    target_message_id: target,
+                    generation,
+                })
+                .await;
+            _ = view.update_in(window, |main, window, cx| {
+                main.operation_task = None;
+                main.operation = Operation::Idle;
+                match result {
+                    Ok(pending) => {
+                        main.composer.update(cx, PromptComposer::clear_model_retry);
+                        main.conversation.update(cx, |view, cx| {
+                            view.start_retry(pending, window, cx);
+                        });
+                    }
+                    Err(source) => {
+                        Self::present_storage_error(
+                            &MagentaError::RetryMessage { source },
+                            window,
+                            cx,
+                        );
+                        main.retry_target = Some(target);
+                    }
+                }
+                main.update_composer_availability(cx);
+            });
+        }));
+    }
+
+    fn retry_agent_response(
+        &mut self,
+        target: MessageId,
+        generation_override: Option<GenerationConfig>,
+        id: ConversationId,
+        window: &Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(agent) = self.agent.clone() else {
+            return;
+        };
+        let generation = generation_override
+            .or_else(|| self.conversation.read(cx).generation_for_message(target))
+            .or_else(|| self.conversation.read(cx).conversation_generation());
+        let Some(generation) = generation else {
+            return;
+        };
+        self.operation = Operation::Preparing;
+        self.update_composer_availability(cx);
+        self.operation_task = Some(cx.spawn_in(window, async move |view, window| {
+            let result = agent
+                .retry(RetryWorkspaceAgentInput {
+                    conversation_id: id,
+                    target_message_id: target,
+                    generation,
+                })
+                .await;
+            _ = view.update_in(window, |main, window, cx| {
+                main.operation_task = None;
+                main.operation = Operation::Idle;
+                match result {
+                    Ok(pending) => {
+                        main.composer.update(cx, PromptComposer::clear_model_retry);
+                        main.conversation
+                            .update(cx, |view, cx| view.start_agent_retry(pending, window, cx));
+                    }
+                    Err(source) => {
+                        Self::present_storage_error(
+                            &MagentaError::RetryMessage { source },
+                            window,
+                            cx,
+                        );
+                        main.retry_target = Some(target);
+                    }
+                }
+                main.update_composer_availability(cx);
+            });
+        }));
+    }
+
+    pub(crate) fn prepare_continuation(
+        &mut self,
+        target: MessageId,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let prompt = "Continue from the completed work above. Do not repeat operations that already succeeded; inspect the current state first.";
+        self.retry_target = None;
+        self.composer.update(cx, |composer, cx| {
+            composer.prepare_continuation(prompt, window, cx);
+        });
+        tracing::info!(
+            message_id = target.0,
+            operation = "conversation.prepare_continuation",
+            "prepared a manual continuation after a failed agent response"
+        );
+    }
+
     pub(crate) fn cancel_generation(&self, cx: &mut Context<'_, Self>) {
         self.conversation
             .update(cx, super::super::ConversationView::cancel);
@@ -320,10 +443,11 @@ impl MainView {
                     }
                     Err(source) => {
                         main.close_requested = CloseState::Open;
-                        Self::present_storage_error(
-                            &MagentaError::StorageWrite { source },
-                            window,
-                            cx,
+                        let error = MagentaError::StorageWrite { source };
+                        tracing::error!(
+                            code = error.presentation().code,
+                            operation = "response.save",
+                            "response could not be saved; keeping the recovery banner visible"
                         );
                     }
                 }

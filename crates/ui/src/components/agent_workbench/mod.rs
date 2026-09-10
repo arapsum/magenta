@@ -19,13 +19,13 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window,
-    div, prelude::FluentBuilder as _, px, relative,
+    IntoElement, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Task, Window, div, prelude::FluentBuilder as _, px, relative,
 };
 use magenta_application::ProjectCatalog;
 use magenta_core::{
     AgentWorkspaceChange, Project, WorkspaceChangeKind, WorkspaceChangeState, WorkspaceDocument,
-    WorkspaceEntry, WorkspaceEntryKind,
+    WorkspaceEntry, WorkspaceEntryKind, WorkspaceError,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
@@ -70,7 +70,53 @@ pub enum AgentWorkbenchEvent {
 enum TabLoadState {
     Loading,
     Ready,
-    Failed(String),
+    Failed(FileLoadFailure),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FileLoadFailure {
+    Missing,
+    Permission,
+    Encoding,
+    Oversized,
+    Other,
+}
+
+impl FileLoadFailure {
+    const fn title(self) -> &'static str {
+        match self {
+            Self::Missing => "File is no longer available",
+            Self::Permission => "File access was denied",
+            Self::Encoding => "File encoding is not supported",
+            Self::Oversized => "File is too large to preview",
+            Self::Other => "File could not be opened",
+        }
+    }
+
+    const fn message(self) -> &'static str {
+        match self {
+            Self::Missing => "The file may have been moved or deleted. Retry or close this tab.",
+            Self::Permission => "Magenta could not read this file with the current permissions.",
+            Self::Encoding => "Only bounded UTF-8 text files can be previewed in the workbench.",
+            Self::Oversized => "The workbench only previews files up to 1 MiB.",
+            Self::Other => "Magenta could not read this file. Retry or close this tab.",
+        }
+    }
+}
+
+fn classify_file_error(error: &WorkspaceError) -> FileLoadFailure {
+    let source = error.source.to_string().to_ascii_lowercase();
+    if source.contains("not found") || source.contains("regular file") {
+        FileLoadFailure::Missing
+    } else if source.contains("permission") || source.contains("access denied") {
+        FileLoadFailure::Permission
+    } else if source.contains("utf-8") {
+        FileLoadFailure::Encoding
+    } else if source.contains("one mib") || source.contains("too large") {
+        FileLoadFailure::Oversized
+    } else {
+        FileLoadFailure::Other
+    }
 }
 
 impl TabLoadState {
@@ -496,8 +542,11 @@ impl AgentWorkbench {
                             workbench.load_directory(path, cx);
                         }
                     }
-                    Err(error) => {
-                        workbench.tree_error = Some((task_path, error.to_string()));
+                    Err(_error) => {
+                        workbench.tree_error = Some((
+                            task_path,
+                            "Project files could not be listed. Retry the folder scan.".to_owned(),
+                        ));
                     }
                 }
                 cx.notify();
@@ -586,7 +635,8 @@ impl AgentWorkbench {
                         apply_document(&tab.editor, &document, window, cx);
                     }
                     Err(error) => {
-                        workbench.tabs[index].state = TabLoadState::Failed(error.to_string());
+                        workbench.tabs[index].state =
+                            TabLoadState::Failed(classify_file_error(&error));
                     }
                 }
                 cx.notify();
@@ -773,6 +823,10 @@ impl AgentWorkbench {
                 .gap(px(8.))
                 .px(px(14.))
                 .text_center()
+                .id("workbench-tree-error")
+                .role(gpui_kit::Role::Alert)
+                .aria_label(error.clone())
+                .child(Icon::new(IconName::CircleX).small())
                 .child(
                     div()
                         .text_size(px(12.))
@@ -1099,6 +1153,7 @@ impl AgentWorkbench {
         bar.into_any_element()
     }
 
+    #[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
     fn render_active_content(&self, view: Entity<Self>, cx: &App) -> AnyElement {
         let Some(index) = self
             .active_path
@@ -1134,7 +1189,9 @@ impl AgentWorkbench {
         match &tab.state {
             TabLoadState::Loading => Self::render_loading_lines(cx, 9),
             TabLoadState::Failed(error) => {
-                let retry_view = view;
+                let retry_view = view.clone();
+                let close_view = view;
+                let close_path = tab.path.clone();
                 v_flex()
                     .size_full()
                     .items_center()
@@ -1142,18 +1199,27 @@ impl AgentWorkbench {
                     .gap(px(8.))
                     .px(px(24.))
                     .child(
-                        div()
-                            .text_size(px(13.))
-                            .font_medium()
-                            .child("File could not be opened"),
-                    )
-                    .child(
-                        div()
-                            .max_w(px(480.))
-                            .text_center()
-                            .text_size(px(12.))
-                            .text_color(cx.theme().muted_foreground)
-                            .child(error.clone()),
+                        h_flex()
+                            .items_start()
+                            .gap(px(7.))
+                            .id("workbench-file-error")
+                            .role(gpui_kit::Role::Alert)
+                            .aria_label(format!("{}: {}", error.title(), error.message()))
+                            .child(Icon::new(IconName::CircleX).small())
+                            .child(
+                                v_flex()
+                                    .gap(px(2.))
+                                    .child(
+                                        div().text_size(px(13.)).font_medium().child(error.title()),
+                                    )
+                                    .child(
+                                        div()
+                                            .max_w(px(480.))
+                                            .text_size(px(12.))
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(error.message()),
+                                    ),
+                            ),
                     )
                     .child(
                         Button::new("retry-workbench-file")
@@ -1163,6 +1229,17 @@ impl AgentWorkbench {
                             .on_click(move |_, window, cx| {
                                 retry_view.update(cx, |workbench, cx| {
                                     workbench.retry_active_tab(window, cx);
+                                });
+                            }),
+                    )
+                    .child(
+                        Button::new("close-failed-workbench-file")
+                            .ghost()
+                            .small()
+                            .label("Close tab")
+                            .on_click(move |_, _, cx| {
+                                close_view.update(cx, |workbench, cx| {
+                                    workbench.close_tab(&close_path, cx);
                                 });
                             }),
                     )

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use gpui_kit::component::notification::{Notification, NotificationType};
-use magenta_application::{RegenerateMessageError, SendMessageError};
+use magenta_application::{RegenerateMessageError, RetryMessageError, SendMessageError};
 use magenta_core::{ProviderError, ProviderId};
 
 /// The errors that can cross Magenta's subsystem boundaries.
@@ -72,6 +72,12 @@ pub enum MagentaError {
         #[source]
         source: RegenerateMessageError,
     },
+
+    #[error("retry-message workflow failed")]
+    RetryMessage {
+        #[source]
+        source: RetryMessageError,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, MagentaError>;
@@ -93,6 +99,7 @@ pub struct ErrorPresentation {
 impl MagentaError {
     /// Returns stable, privacy-safe copy suitable for display to the user.
     #[must_use]
+    #[allow(clippy::too_many_lines)]
     pub const fn presentation(&self) -> ErrorPresentation {
         match self {
             Self::StorageInitialize { .. } => ErrorPresentation {
@@ -184,7 +191,77 @@ impl MagentaError {
                     },
                 },
             },
+            Self::RetryMessage { source } => match source {
+                RetryMessageError::Storage(error) => match error.kind {
+                    magenta_core::StorageErrorKind::ContextTooLarge => {
+                        context_too_large_presentation()
+                    }
+                    _ => ErrorPresentation {
+                        code: "MAG-RETRY-MESSAGE",
+                        severity: ErrorSeverity::Error,
+                        title: "Response could not be retried",
+                        message: "Magenta kept the failed response. Try again or prepare a continuation.",
+                    },
+                },
+                RetryMessageError::AgentContinuation => ErrorPresentation {
+                    code: "MAG-RETRY-AGENT-CONTINUATION",
+                    severity: ErrorSeverity::Warning,
+                    title: "Continue from the completed work",
+                    message: "This agent response may have changed files. Review the workspace, then continue manually.",
+                },
+                RetryMessageError::WorkspaceUnavailable => ErrorPresentation {
+                    code: "MAG-RETRY-AGENT-WORKSPACE",
+                    severity: ErrorSeverity::Warning,
+                    title: "Workspace unavailable",
+                    message: "Choose the conversation workspace again, then prepare a continuation.",
+                },
+            },
         }
+    }
+}
+
+/// Maps provider failures to safe account/model-settings copy.
+#[must_use]
+pub const fn provider_error_presentation(
+    kind: magenta_core::ProviderErrorKind,
+) -> ErrorPresentation {
+    match kind {
+        magenta_core::ProviderErrorKind::AuthenticationRequired => ErrorPresentation {
+            code: "MAG-ACCOUNT-AUTH",
+            severity: ErrorSeverity::Error,
+            title: "Sign-in required",
+            message: "Reconnect the provider account to load models and generate responses.",
+        },
+        magenta_core::ProviderErrorKind::PermissionDenied => ErrorPresentation {
+            code: "MAG-ACCOUNT-PERMISSION",
+            severity: ErrorSeverity::Error,
+            title: "Account access denied",
+            message: "This account cannot access the requested provider resource.",
+        },
+        magenta_core::ProviderErrorKind::RateLimited => ErrorPresentation {
+            code: "MAG-ACCOUNT-RATE-LIMIT",
+            severity: ErrorSeverity::Warning,
+            title: "Provider is temporarily busy",
+            message: "Wait a moment, then reload the account or models.",
+        },
+        magenta_core::ProviderErrorKind::Transport => ErrorPresentation {
+            code: "MAG-ACCOUNT-CONNECTION",
+            severity: ErrorSeverity::Error,
+            title: "Provider connection failed",
+            message: "Check the connection and retry loading the account.",
+        },
+        magenta_core::ProviderErrorKind::ServiceUnavailable => ErrorPresentation {
+            code: "MAG-ACCOUNT-SERVICE",
+            severity: ErrorSeverity::Error,
+            title: "Provider unavailable",
+            message: "The provider is temporarily unavailable. Retry in a moment.",
+        },
+        _ => ErrorPresentation {
+            code: "MAG-ACCOUNT-LOAD",
+            severity: ErrorSeverity::Error,
+            title: "Provider setup unavailable",
+            message: "Magenta could not finish loading this provider. Retry from settings.",
+        },
     }
 }
 
@@ -250,8 +327,8 @@ const fn context_too_large_presentation() -> ErrorPresentation {
     ErrorPresentation {
         code: "MAG-CONTEXT-TOO-LARGE",
         severity: ErrorSeverity::Warning,
-        title: "Message is too large",
-        message: "Shorten this message or remove some images, then try again.",
+        title: "Context limit reached",
+        message: "Shorten this message or remove some images and context, then try again.",
     }
 }
 
@@ -275,7 +352,7 @@ pub fn notification_for_error(error: &MagentaError) -> Notification {
             presentation.message, presentation.code
         ))
         .with_type(notification_type)
-        .autohide(false)
+        .autohide(presentation.severity == ErrorSeverity::Warning)
 }
 
 #[cfg(test)]
@@ -366,6 +443,9 @@ mod tests {
                     magenta_core::StorageErrorKind::NotFound,
                     std::io::Error::other("missing response"),
                 )),
+            },
+            MagentaError::RetryMessage {
+                source: RetryMessageError::AgentContinuation,
             },
         ];
 

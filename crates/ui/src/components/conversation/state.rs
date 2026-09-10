@@ -347,6 +347,48 @@ impl ConversationView {
         cx.notify();
     }
 
+    pub(crate) fn start_retry(
+        &mut self,
+        pending: magenta_application::PendingRetry,
+        window: &Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let magenta_application::PendingRetry {
+            conversation,
+            assistant_message,
+            provider_id,
+            stream,
+            assistant_sequence,
+            context_report,
+        } = pending;
+        self.cancel_generation(cx);
+        self.conversation = Some(conversation.clone());
+        self.origins
+            .insert(assistant_message.id, conversation.generation);
+        let assistant = Self::rendered_message(assistant_message, cx);
+        let old_count = self.messages.len();
+        let assistant_id = assistant.message.id;
+        self.messages.push(assistant);
+        self.set_pending_metadata(
+            MessageId(0),
+            magenta_core::MessageSequence(0),
+            assistant_id,
+            assistant_sequence,
+            context_report.omitted_messages,
+            cx,
+        );
+        if self.trim_oldest_to_limit(cx) == 0 {
+            self.list_state.splice(old_count..old_count, 1);
+        } else {
+            self.list_state
+                .reset_with_uniform_height(self.messages.len(), px(96.));
+        }
+        self.list_state.set_follow_mode(FollowMode::Tail);
+        self.list_state.scroll_to_end();
+        self.begin_stream(assistant_id, provider_id, stream, window, cx);
+        cx.notify();
+    }
+
     pub(crate) fn cancel(&mut self, cx: &mut Context<'_, Self>) {
         self.cancel_generation(cx);
     }
@@ -373,13 +415,61 @@ impl ConversationView {
 
     pub(crate) fn request_regenerate(&self, message_id: MessageId, cx: &mut Context<'_, Self>) {
         if !self.is_streaming()
-            && self
+            && self.messages.iter().any(|message| {
+                message.message.id == message_id
+                    && message.message.status != MessageStatus::Streaming
+            })
+        {
+            let Some(message) = self
                 .messages
                 .iter()
-                .any(|message| message.message.id == message_id)
-        {
-            cx.emit(ConversationViewEvent::Regenerate(message_id));
+                .find(|message| message.message.id == message_id)
+            else {
+                return;
+            };
+            let failed = message.message.status == MessageStatus::Failed;
+            let has_side_effects = message.message.agent_activities.iter().any(|activity| {
+                matches!(
+                    activity.kind,
+                    AgentActivityKind::ToolCall | AgentActivityKind::ToolResult
+                ) && matches!(
+                    activity.tool_name.as_str(),
+                    "create_file" | "apply_patch" | "run_command"
+                )
+            });
+            cx.emit(if has_side_effects && failed {
+                ConversationViewEvent::PrepareContinue(message_id)
+            } else if failed {
+                ConversationViewEvent::Retry(message_id)
+            } else {
+                ConversationViewEvent::Regenerate(message_id)
+            });
         }
+    }
+
+    pub(crate) fn request_choose_model(&self, message_id: MessageId, cx: &mut Context<'_, Self>) {
+        if !self.is_streaming() {
+            cx.emit(ConversationViewEvent::ChooseModelForRetry(message_id));
+        }
+    }
+
+    pub(crate) fn generation_for_message(
+        &self,
+        message_id: MessageId,
+    ) -> Option<magenta_core::GenerationConfig> {
+        self.origins.get(&message_id).cloned()
+    }
+
+    pub(crate) fn conversation_generation(&self) -> Option<magenta_core::GenerationConfig> {
+        self.conversation
+            .as_ref()
+            .map(|conversation| conversation.generation.clone())
+    }
+
+    pub(crate) fn is_agent_conversation(&self) -> bool {
+        self.conversation
+            .as_ref()
+            .is_some_and(|conversation| conversation.mode == magenta_core::ConversationMode::Agent)
     }
 
     pub(super) fn rendered_message(

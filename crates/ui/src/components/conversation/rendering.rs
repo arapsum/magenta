@@ -1,6 +1,10 @@
 mod agent;
 
+use std::fmt::Write as _;
+
 use super::*;
+
+use gpui_kit::component::accordion::Accordion;
 
 impl ConversationView {
     pub(super) fn render_message(
@@ -324,6 +328,9 @@ impl ConversationView {
         );
         let label = match message.status {
             MessageStatus::Stopped => format!("{model_label} · stopped"),
+            MessageStatus::Failed if self.has_successful_retry(message.id) => {
+                format!("{model_label} · previous attempt")
+            }
             MessageStatus::Failed => format!("{model_label} · failed"),
             MessageStatus::Complete | MessageStatus::Streaming => model_label,
         };
@@ -347,6 +354,7 @@ impl ConversationView {
             .into_any_element()
     }
 
+    #[allow(clippy::too_many_lines)]
     fn render_assistant_message(
         &self,
         rendered: &RenderedMessage,
@@ -375,6 +383,12 @@ impl ConversationView {
         let message_id = message.id;
         let code_id = message.id.0;
         let streaming = message.status == MessageStatus::Streaming;
+        let superseded_failure = self.has_successful_retry(message_id);
+        let action_label = if message.status == MessageStatus::Failed {
+            "Retry response"
+        } else {
+            "Regenerate response"
+        };
 
         v_flex()
             .w_full()
@@ -398,14 +412,27 @@ impl ConversationView {
                 self.render_agent_approval(message.id, cx, view),
                 gpui_kit::ParentElement::child,
             )
-            .when(message.status == MessageStatus::Failed, |this| {
-                this.child(
-                    div()
-                        .text_size(px(12.))
-                        .text_color(cx.theme().muted_foreground)
-                        .child("The response could not be generated. Try again."),
-                )
-            })
+            .when_some(
+                message
+                    .failure
+                    .as_ref()
+                    .filter(|_| !superseded_failure)
+                    .map(|failure| Self::render_generation_failure(message, failure, cx, view)),
+                gpui_kit::ParentElement::child,
+            )
+            .when(
+                message.status == MessageStatus::Failed
+                    && message.failure.is_none()
+                    && !superseded_failure,
+                |this| {
+                    this.child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(cx.theme().muted_foreground)
+                            .child("The response could not be generated. Try again."),
+                    )
+                },
+            )
             .when(!message.content.is_empty(), |this| {
                 this.child(
                     TextView::new(markdown)
@@ -426,28 +453,272 @@ impl ConversationView {
                         }),
                 )
             })
-            .when(!streaming, |this| {
+            .when(
+                !streaming
+                    && !superseded_failure
+                    && (message.status != MessageStatus::Failed || message.failure.is_none()),
+                |this| {
+                    this.child(
+                        h_flex()
+                            .h(px(24.))
+                            .items_center()
+                            .gap(px(2.))
+                            .child(copy)
+                            .child(
+                                Button::new(("regenerate-message", message_id.0))
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(IconName::Redo2)
+                                    .tooltip(action_label)
+                                    .accessibility_id(format!(
+                                        "regenerate-message-{}",
+                                        message_id.0
+                                    ))
+                                    .on_click(move |_, _, cx| {
+                                        regenerate_view.update(cx, |view, cx| {
+                                            view.request_regenerate(message_id, cx);
+                                        });
+                                    }),
+                            ),
+                    )
+                },
+            )
+            .into_any_element()
+    }
+
+    fn has_successful_retry(&self, message_id: MessageId) -> bool {
+        let Some(index) = self
+            .messages
+            .iter()
+            .position(|candidate| candidate.message.id == message_id)
+        else {
+            return false;
+        };
+
+        self.messages[index + 1..]
+            .iter()
+            .take_while(|candidate| candidate.message.role != MessageRole::User)
+            .any(|candidate| {
+                candidate.message.role == MessageRole::Assistant
+                    && candidate.message.status == MessageStatus::Complete
+            })
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn render_generation_failure(
+        message: &Message,
+        failure: &magenta_core::MessageFailure,
+        cx: &App,
+        view: &Entity<Self>,
+    ) -> AnyElement {
+        let has_side_effects = message.agent_activities.iter().any(|activity| {
+            matches!(
+                activity.kind,
+                AgentActivityKind::ToolCall | AgentActivityKind::ToolResult
+            ) && matches!(
+                activity.tool_name.as_str(),
+                "create_file" | "apply_patch" | "run_command"
+            )
+        });
+        let (title, explanation, primary_label, secondary_label) = match failure.category {
+            magenta_core::MessageFailureCategory::Authentication => (
+                "Sign in required",
+                "Reconnect the provider account before trying this response again.",
+                "Open provider settings",
+                None,
+            ),
+            magenta_core::MessageFailureCategory::Permission => (
+                "Model access unavailable",
+                "This account cannot use the selected model. Choose another model to continue.",
+                "Choose another model",
+                None,
+            ),
+            magenta_core::MessageFailureCategory::RateLimit => (
+                "Rate limit reached",
+                "The provider temporarily limited this request. Try again in a moment.",
+                "Retry",
+                None,
+            ),
+            magenta_core::MessageFailureCategory::Connection => (
+                "Connection interrupted",
+                "The provider connection was interrupted before the response finished.",
+                "Retry",
+                None,
+            ),
+            magenta_core::MessageFailureCategory::Service => (
+                "Provider unavailable",
+                "The selected provider is having trouble. Try the response again.",
+                "Retry",
+                None,
+            ),
+            magenta_core::MessageFailureCategory::InvalidRequest => (
+                "Request needs adjustment",
+                "Change the request, then try again.",
+                "Edit request",
+                None,
+            ),
+            magenta_core::MessageFailureCategory::Context => (
+                "Context limit reached",
+                "This request is larger than the selected model can accept. Remove some context, then try again.",
+                "Edit request",
+                None,
+            ),
+            magenta_core::MessageFailureCategory::AgentLimit
+            | magenta_core::MessageFailureCategory::RepeatedToolCalls => (
+                if failure.category == magenta_core::MessageFailureCategory::AgentLimit {
+                    "Out of limits"
+                } else {
+                    "Agent stopped safely"
+                },
+                if failure.category == magenta_core::MessageFailureCategory::AgentLimit {
+                    "The workspace agent reached its safety ceiling before finishing. Continue from the completed work."
+                } else {
+                    "The workspace agent repeated actions without making progress. Continue from the completed work."
+                },
+                if has_side_effects {
+                    "Prepare continuation"
+                } else {
+                    "Retry"
+                },
+                None,
+            ),
+            magenta_core::MessageFailureCategory::IncompleteResponse => (
+                "Response incomplete",
+                "The provider ended the response before it was complete.",
+                "Retry",
+                None,
+            ),
+            magenta_core::MessageFailureCategory::Unknown => (
+                "Response could not be generated",
+                "The selected model could not finish this response. Try again or choose another model.",
+                "Retry",
+                Some("Choose another model"),
+            ),
+        };
+        let message_id = message.id;
+        let primary_view = view.clone();
+        let primary_event = match failure.category {
+            magenta_core::MessageFailureCategory::Authentication => {
+                ConversationViewEvent::OpenProviderSettings
+            }
+            magenta_core::MessageFailureCategory::Permission => {
+                ConversationViewEvent::ChooseModelForRetry(message_id)
+            }
+            magenta_core::MessageFailureCategory::InvalidRequest
+            | magenta_core::MessageFailureCategory::Context => ConversationViewEvent::FocusComposer,
+            magenta_core::MessageFailureCategory::AgentLimit
+            | magenta_core::MessageFailureCategory::RepeatedToolCalls
+                if has_side_effects =>
+            {
+                ConversationViewEvent::PrepareContinue(message_id)
+            }
+            _ => ConversationViewEvent::Retry(message_id),
+        };
+        let mut technical = format!(
+            "Reference: {}\nProvider: {}",
+            failure.reference_code, failure.provider.0
+        );
+        if let Some(detail) = failure.detail {
+            match detail {
+                magenta_core::MessageFailureDetail::HttpStatus { status } => {
+                    let _ = write!(technical, "\nHTTP status: {status}");
+                }
+                magenta_core::MessageFailureDetail::AgentLimits {
+                    observed_rounds,
+                    permitted_rounds,
+                    observed_tool_calls,
+                    permitted_tool_calls,
+                } => {
+                    let _ = write!(
+                        technical,
+                        "\nRounds: {observed_rounds}/{permitted_rounds}\nTool calls: {observed_tool_calls}/{permitted_tool_calls}"
+                    );
+                }
+            }
+        }
+        let copy = Clipboard::new(("copy-failure-diagnostics", message_id.0))
+            .value(technical.clone())
+            .tooltip("Copy diagnostics");
+        let mut details = Accordion::new(("generation-failure-details", message_id.0))
+            .multiple(false)
+            .bordered(false)
+            .small();
+        details = details.item(|item| {
+            item.open(false).title("Technical details").child(
+                v_flex()
+                    .gap(px(6.))
+                    .text_size(px(11.))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(technical)
+                    .child(copy),
+            )
+        });
+        v_flex()
+            .w_full()
+            .gap(px(8.))
+            .p(px(12.))
+            .rounded(px(10.))
+            .border_1()
+            .border_color(cx.theme().danger.opacity(0.55))
+            .bg(cx.theme().danger.opacity(0.08))
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap(px(7.))
+                    .child(Icon::new(IconName::CircleX).small())
+                    .child(
+                        v_flex()
+                            .gap(px(2.))
+                            .child(div().font_medium().child(title))
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(explanation),
+                            ),
+                    ),
+            )
+            .when(!message.content.is_empty(), |this| {
                 this.child(
-                    h_flex()
-                        .h(px(24.))
-                        .items_center()
-                        .gap(px(2.))
-                        .child(copy)
-                        .child(
-                            Button::new(("regenerate-message", message_id.0))
-                                .ghost()
-                                .xsmall()
-                                .icon(IconName::Redo2)
-                                .tooltip("Regenerate response")
-                                .accessibility_id(format!("regenerate-message-{}", message_id.0))
-                                .on_click(move |_, _, cx| {
-                                    regenerate_view.update(cx, |view, cx| {
-                                        view.request_regenerate(message_id, cx);
-                                    });
-                                }),
-                        ),
+                    div()
+                        .text_size(px(11.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Partial response preserved below"),
                 )
             })
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(
+                        Button::new(("generation-failure-primary", message_id.0))
+                            .primary()
+                            .small()
+                            .label(primary_label)
+                            .accessibility_id(format!(
+                                "generation-failure-primary-{}",
+                                message_id.0
+                            ))
+                            .on_click(move |_, _, cx| {
+                                primary_view.update(cx, |_, cx| cx.emit(primary_event.clone()));
+                            }),
+                    )
+                    .when_some(secondary_label, |this, label| {
+                        let secondary_view = view.clone();
+                        this.child(
+                            Button::new(("generation-failure-secondary", message_id.0))
+                                .ghost()
+                                .small()
+                                .label(label)
+                                .on_click(move |_, _, cx| {
+                                    secondary_view.update(cx, |view, cx| {
+                                        view.request_choose_model(message_id, cx);
+                                    });
+                                }),
+                        )
+                    }),
+            )
+            .child(details)
             .into_any_element()
     }
 

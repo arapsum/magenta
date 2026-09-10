@@ -21,7 +21,10 @@ impl MainView {
                             operation = "account.restore",
                             "could not restore the OpenAI account"
                         );
-                        main.set_account_state(AccountState::Failed(error.source.to_string()), cx);
+                        main.set_account_state(
+                            AccountState::Failed(crate::provider_error_presentation(error.kind)),
+                            cx,
+                        );
                     }
                 }
                 cx.notify();
@@ -48,7 +51,10 @@ impl MainView {
                             operation = "models.load",
                             "could not load OpenAI models"
                         );
-                        main.set_account_state(AccountState::Failed(error.source.to_string()), cx);
+                        main.set_account_state(
+                            AccountState::Failed(crate::provider_error_presentation(error.kind)),
+                            cx,
+                        );
                     }
                 }
                 cx.notify();
@@ -69,7 +75,10 @@ impl MainView {
                 Err(error) => {
                     _ = view.update_in(window, |main, _, cx| {
                         main.account_task = None;
-                        main.set_account_state(AccountState::Failed(error.source.to_string()), cx);
+                        main.set_account_state(
+                            AccountState::Failed(crate::provider_error_presentation(error.kind)),
+                            cx,
+                        );
                         cx.notify();
                     });
                     return;
@@ -88,7 +97,10 @@ impl MainView {
                         main.load_models(window, cx);
                     }
                     Err(error) => {
-                        main.set_account_state(AccountState::Failed(error.source.to_string()), cx);
+                        main.set_account_state(
+                            AccountState::Failed(crate::provider_error_presentation(error.kind)),
+                            cx,
+                        );
                     }
                 }
                 cx.notify();
@@ -113,7 +125,10 @@ impl MainView {
             _ = view.update_in(window, |main, _, cx| {
                 main.account_task = None;
                 if let Err(error) = result {
-                    main.set_account_state(AccountState::Failed(error.source.to_string()), cx);
+                    main.set_account_state(
+                        AccountState::Failed(crate::provider_error_presentation(error.kind)),
+                        cx,
+                    );
                 }
                 cx.notify();
             });
@@ -122,6 +137,21 @@ impl MainView {
     }
 
     fn set_account_state(&mut self, state: AccountState, cx: &mut Context<'_, Self>) {
+        let composer_error = match &state {
+            AccountState::Failed(error) => Some(*error),
+            AccountState::SignedOut => Some(crate::ErrorPresentation {
+                code: "MAG-ACCOUNT-SIGNED-OUT",
+                severity: crate::ErrorSeverity::Warning,
+                title: "Connect a provider account",
+                message: "Open provider settings to load models and send a response.",
+            }),
+            AccountState::Restoring
+            | AccountState::WaitingForBrowser
+            | AccountState::Connected(_) => None,
+        };
+        self.composer.update(cx, |composer, cx| {
+            composer.set_account_error(composer_error, cx);
+        });
         let account = match &state {
             AccountState::Connected(account) => Some(account.clone()),
             AccountState::Restoring
@@ -150,7 +180,7 @@ impl MainView {
                 ..Default::default()
             },
             AccountState::Failed(error) => AccountSettingsState {
-                error: Some(error.clone()),
+                error: Some(*error),
                 ..Default::default()
             },
             AccountState::SignedOut => AccountSettingsState::default(),

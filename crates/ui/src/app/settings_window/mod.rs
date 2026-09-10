@@ -22,6 +22,7 @@ use self::{
     configuration::configuration_group,
 };
 use crate::{
+    ErrorPresentation,
     components::{provider_icon, titlebar},
     settings,
 };
@@ -37,15 +38,28 @@ pub enum SettingsWindowEvent {
 pub struct AccountSettingsState {
     pub account: Option<ProviderAccount>,
     pub waiting: bool,
-    pub error: Option<String>,
+    pub error: Option<ErrorPresentation>,
 }
 
 pub struct SettingsWindow {
     store: Arc<dyn SettingsStore>,
     account: AccountSettingsState,
     save_task: Option<Task<()>>,
-    feedback: Option<String>,
+    feedback: Option<SettingsFeedback>,
 }
+
+#[derive(Clone, Debug)]
+enum SettingsFeedback {
+    Notice(String),
+    Error(ErrorPresentation),
+}
+
+const SETTINGS_ERROR: ErrorPresentation = ErrorPresentation {
+    code: "MAG-SETTINGS-IO",
+    severity: crate::ErrorSeverity::Error,
+    title: "Settings could not be saved",
+    message: "Magenta could not update local settings. Retry, or keep using the current values.",
+};
 
 impl EventEmitter<SettingsWindowEvent> for SettingsWindow {}
 
@@ -97,7 +111,9 @@ impl SettingsWindow {
             let result = store.save(value).await;
             _ = view.update(cx, |view, cx| {
                 view.save_task = None;
-                view.feedback = result.err().map(|error| error.source.to_string());
+                view.feedback = result
+                    .err()
+                    .map(|_| SettingsFeedback::Error(SETTINGS_ERROR));
                 cx.notify();
             });
         }));
@@ -113,10 +129,12 @@ impl SettingsWindow {
                 match result {
                     Ok(value) => {
                         settings::replace(value, cx);
-                        view.feedback = Some("Reloaded settings from disk.".to_owned());
+                        view.feedback = Some(SettingsFeedback::Notice(
+                            "Reloaded settings from disk.".to_owned(),
+                        ));
                         cx.emit(SettingsWindowEvent::TypographyChanged);
                     }
-                    Err(error) => view.feedback = Some(error.source.to_string()),
+                    Err(_) => view.feedback = Some(SettingsFeedback::Error(SETTINGS_ERROR)),
                 }
                 cx.notify();
             });
@@ -136,9 +154,10 @@ impl SettingsWindow {
                 match result {
                     Ok(()) => {
                         cx.open_with_system(&path);
-                        view.feedback = Some("Opened settings file.".to_owned());
+                        view.feedback =
+                            Some(SettingsFeedback::Notice("Opened settings file.".to_owned()));
                     }
-                    Err(error) => view.feedback = Some(error.source.to_string()),
+                    Err(_) => view.feedback = Some(SettingsFeedback::Error(SETTINGS_ERROR)),
                 }
                 cx.notify();
             });
@@ -156,10 +175,12 @@ impl SettingsWindow {
                 match result {
                     Ok(value) => {
                         settings::replace(value, cx);
-                        view.feedback = Some("Restored default settings.".to_owned());
+                        view.feedback = Some(SettingsFeedback::Notice(
+                            "Restored default settings.".to_owned(),
+                        ));
                         cx.emit(SettingsWindowEvent::TypographyChanged);
                     }
-                    Err(error) => view.feedback = Some(error.source.to_string()),
+                    Err(_) => view.feedback = Some(SettingsFeedback::Error(SETTINGS_ERROR)),
                 }
                 cx.notify();
             });
@@ -208,10 +229,10 @@ impl SettingsWindow {
             ),
             None => (
                 "Not connected",
-                self.account
-                    .error
-                    .clone()
-                    .unwrap_or_else(|| "Connect ChatGPT to use your subscription.".to_owned()),
+                self.account.error.map_or_else(
+                    || "Connect ChatGPT to use your subscription.".to_owned(),
+                    |error| format!("{} ({})", error.message, error.code),
+                ),
                 "Connect ChatGPT",
                 SettingsWindowEvent::BeginLogin,
             ),
@@ -273,15 +294,39 @@ impl Render for SettingsWindow {
             .size_full()
             .bg(cx.theme().background)
             .when_some(self.feedback.clone(), |this, feedback| {
+                let (icon, title, message, color) = match feedback {
+                    SettingsFeedback::Notice(message) => {
+                        (IconName::Info, "", message, cx.theme().muted_foreground)
+                    }
+                    SettingsFeedback::Error(error) => (
+                        IconName::CircleX,
+                        error.title,
+                        format!("{} Reference: {}", error.message, error.code),
+                        cx.theme().danger,
+                    ),
+                };
                 this.child(
                     div()
                         .px(px(16.))
                         .py(px(8.))
                         .text_size(px(12.))
-                        .text_color(cx.theme().muted_foreground)
+                        .text_color(color)
                         .border_b_1()
                         .border_color(cx.theme().border)
-                        .child(feedback),
+                        .child(
+                            h_flex()
+                                .items_start()
+                                .gap(px(6.))
+                                .child(Icon::new(icon).xsmall())
+                                .child(
+                                    v_flex()
+                                        .gap(px(2.))
+                                        .when(!title.is_empty(), |this| {
+                                            this.child(div().font_medium().child(title))
+                                        })
+                                        .child(message),
+                                ),
+                        ),
                 )
             })
             .child(

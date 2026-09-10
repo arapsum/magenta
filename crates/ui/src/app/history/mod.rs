@@ -45,24 +45,22 @@ impl MainView {
                 history.summaries().await
             }
             .await;
-            _ = view.update_in(window, |main, window, cx| {
+            _ = view.update_in(window, |main, _window, cx| {
                 main.history_task = None;
                 match result {
                     Ok(summaries) => {
                         main.storage_ready = StorageState::Ready;
+                        main.history_error = None;
                         main.sidebar
                             .update(cx, |sidebar, cx| sidebar.set_history(summaries, cx));
                         main.refresh_projects(cx);
                     }
                     Err(source) => {
                         main.storage_ready = StorageState::Failed;
+                        let error = MagentaError::StorageInitialize { source };
+                        main.history_error = Some(error.presentation());
                         main.sidebar
                             .update(cx, |sidebar, cx| sidebar.set_history_loading(true, cx));
-                        Self::present_storage_error(
-                            &MagentaError::StorageInitialize { source },
-                            window,
-                            cx,
-                        );
                     }
                 }
                 main.update_composer_availability(cx);
@@ -75,17 +73,18 @@ impl MainView {
         let history = self.history.clone();
         self.history_task = Some(cx.spawn_in(window, async move |view, window| {
             let result = history.summaries().await;
-            _ = view.update_in(window, |main, window, cx| {
+            _ = view.update_in(window, |main, _window, cx| {
                 main.history_task = None;
                 match result {
-                    Ok(summaries) => main
-                        .sidebar
-                        .update(cx, |sidebar, cx| sidebar.set_history(summaries, cx)),
-                    Err(source) => Self::present_storage_error(
-                        &MagentaError::StorageLoad { source },
-                        window,
-                        cx,
-                    ),
+                    Ok(summaries) => {
+                        main.history_error = None;
+                        main.sidebar
+                            .update(cx, |sidebar, cx| sidebar.set_history(summaries, cx));
+                    }
+                    Err(source) => {
+                        main.history_error =
+                            Some(MagentaError::StorageLoad { source }.presentation());
+                    }
                 }
             });
         }));
@@ -202,6 +201,7 @@ impl MainView {
                 main.loading_conversation = None;
                 match result {
                     Ok(loaded) => {
+                        main.history_error = None;
                         let workspace_root = loaded.conversation.workspace_root.clone();
                         let project = workspace_root
                             .as_deref()
@@ -235,11 +235,10 @@ impl MainView {
                             });
                         }
                     }
-                    Err(source) => Self::present_storage_error(
-                        &MagentaError::StorageLoad { source },
-                        window,
-                        cx,
-                    ),
+                    Err(source) => {
+                        main.history_error =
+                            Some(MagentaError::StorageLoad { source }.presentation());
+                    }
                 }
                 main.update_composer_availability(cx);
                 cx.notify();
@@ -264,7 +263,7 @@ impl MainView {
             .update(cx, |view, cx| view.set_loading_earlier(true, cx));
         self.page_task = Some(cx.spawn_in(window, async move |view, window| {
             let result = history.earlier(id, cursor).await;
-            _ = view.update_in(window, |main, window, cx| {
+            _ = view.update_in(window, |main, _window, cx| {
                 if main.active_conversation != Some(id) || main.load_generation != generation {
                     return;
                 }
@@ -276,11 +275,8 @@ impl MainView {
                     Err(source) => {
                         main.conversation
                             .update(cx, |view, cx| view.set_loading_earlier(false, cx));
-                        Self::present_storage_error(
-                            &MagentaError::StorageLoad { source },
-                            window,
-                            cx,
-                        );
+                        main.history_error =
+                            Some(MagentaError::StorageLoad { source }.presentation());
                     }
                 }
             });
@@ -303,7 +299,7 @@ impl MainView {
             .update(cx, |view, cx| view.set_loading_newer(true, cx));
         self.page_task = Some(cx.spawn_in(window, async move |view, window| {
             let result = history.later(id, cursor).await;
-            _ = view.update_in(window, |main, window, cx| {
+            _ = view.update_in(window, |main, _window, cx| {
                 if main.active_conversation != Some(id) || main.load_generation != generation {
                     return;
                 }
@@ -315,11 +311,8 @@ impl MainView {
                     Err(source) => {
                         main.conversation
                             .update(cx, |view, cx| view.set_loading_newer(false, cx));
-                        Self::present_storage_error(
-                            &MagentaError::StorageLoad { source },
-                            window,
-                            cx,
-                        );
+                        main.history_error =
+                            Some(MagentaError::StorageLoad { source }.presentation());
                     }
                 }
                 main.update_composer_availability(cx);
@@ -330,7 +323,7 @@ impl MainView {
     pub(super) fn submit(
         &mut self,
         request: &PromptRequest,
-        window: &mut Window,
+        window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
         if !matches!(self.account_state, AccountState::Connected(_)) {
@@ -396,11 +389,7 @@ impl MainView {
                         }
                     }
                     Err(source) => {
-                        Self::present_storage_error(
-                            &MagentaError::SendMessage { source },
-                            window,
-                            cx,
-                        );
+                        main.present_composer_error(&MagentaError::SendMessage { source }, cx);
                         main.continue_navigation(window, cx);
                     }
                 }
@@ -492,5 +481,16 @@ impl MainView {
             "conversation operation failed"
         );
         window.push_notification(notification_for_error(error), cx);
+    }
+
+    pub(super) fn present_composer_error(&self, error: &MagentaError, cx: &mut Context<'_, Self>) {
+        tracing::warn!(
+            code = error.presentation().code,
+            operation = "composer.submit",
+            "message validation failed"
+        );
+        self.composer.update(cx, |composer, cx| {
+            composer.set_inline_error(error.presentation(), cx);
+        });
     }
 }

@@ -28,8 +28,8 @@ use magenta_application::{
     ConversationHistory, ProjectCatalog, RegenerateMessage, RunWorkspaceAgent, SendMessage,
 };
 use magenta_core::{
-    ConversationId, ConversationSearchResult, ModelCatalog, ProviderAccount, ProviderAuthenticator,
-    SettingsStore,
+    ConversationId, ConversationSearchResult, MessageId, ModelCatalog, ProviderAccount,
+    ProviderAuthenticator, SettingsStore,
 };
 
 use self::settings_window::{AccountSettingsState, SettingsWindow, SettingsWindowEvent};
@@ -83,11 +83,13 @@ pub struct MainView {
     send_message: SendMessage,
     agent: Option<RunWorkspaceAgent>,
     regenerate_message: RegenerateMessage,
+    retry_target: Option<MessageId>,
     authenticator: Arc<dyn ProviderAuthenticator>,
     model_catalog: Arc<dyn ModelCatalog>,
     history: ConversationHistory,
     projects: Option<ProjectCatalog>,
     storage_ready: StorageState,
+    history_error: Option<crate::ErrorPresentation>,
     operation: history::Operation,
     operation_task: Option<Task<()>>,
     history_task: Option<Task<()>>,
@@ -157,7 +159,7 @@ enum AccountState {
     SignedOut,
     WaitingForBrowser,
     Connected(ProviderAccount),
-    Failed(String),
+    Failed(crate::ErrorPresentation),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -266,11 +268,13 @@ impl MainView {
             send_message,
             agent: services.agent,
             regenerate_message,
+            retry_target: None,
             authenticator: services.authenticator,
             model_catalog: services.model_catalog,
             history,
             projects: services.projects,
             storage_ready: StorageState::Loading,
+            history_error: None,
             operation: history::Operation::Idle,
             operation_task: None,
             history_task: None,
@@ -315,6 +319,7 @@ impl MainView {
         main
     }
 
+    #[allow(clippy::too_many_lines)]
     fn subscribe_to_children(
         composer: &Entity<PromptComposer>,
         sidebar: &Entity<SidebarView>,
@@ -329,7 +334,18 @@ impl MainView {
                 composer,
                 window,
                 |main, _, event: &PromptComposerEvent, window, cx| match event {
-                    PromptComposerEvent::Submit(request) => main.submit(request, window, cx),
+                    PromptComposerEvent::Submit(request) => {
+                        if let Some(target) = main.retry_target.take() {
+                            main.retry_response(
+                                target,
+                                Some(request.generation.clone()),
+                                window,
+                                cx,
+                            );
+                        } else {
+                            main.submit(request, window, cx);
+                        }
+                    }
                     PromptComposerEvent::Cancel => main.cancel_generation(cx),
                     PromptComposerEvent::WorkspaceSelected(root) => {
                         main.register_project(root.clone(), window, cx);
@@ -444,6 +460,23 @@ impl MainView {
                 ConversationViewEvent::Regenerate(message_id) => {
                     main.regenerate(*message_id, window, cx);
                 }
+                ConversationViewEvent::Retry(message_id) => {
+                    main.retry_response(*message_id, None, window, cx);
+                }
+                ConversationViewEvent::PrepareContinue(message_id) => {
+                    main.prepare_continuation(*message_id, window, cx);
+                }
+                ConversationViewEvent::ChooseModelForRetry(message_id) => {
+                    main.retry_target = Some(*message_id);
+                    main.composer.update(cx, |composer, cx| {
+                        composer.prepare_model_retry(*message_id, window, cx);
+                    });
+                }
+                ConversationViewEvent::FocusComposer => {
+                    main.composer
+                        .update(cx, |composer, cx| composer.focus(window, cx));
+                }
+                ConversationViewEvent::OpenProviderSettings => main.open_settings(window, cx),
                 ConversationViewEvent::WorkspaceChange(change) => {
                     if let Some(workbench) = &main.workbench {
                         main.workbench_open = true;

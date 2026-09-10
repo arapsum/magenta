@@ -15,7 +15,6 @@ use std::{
 use futures_util::StreamExt as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
-    WindowExt as _,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     h_flex,
@@ -46,7 +45,6 @@ use crate::components::{
     prompt_input::PromptComposer,
     provider_icon,
 };
-use crate::{MagentaError, notification_for_error};
 
 #[derive(Clone, Debug)]
 pub struct ConversationThread {
@@ -143,6 +141,11 @@ pub enum ConversationViewEvent {
     LoadNewer,
     ReturnToLatest,
     Regenerate(MessageId),
+    Retry(MessageId),
+    PrepareContinue(MessageId),
+    ChooseModelForRetry(MessageId),
+    FocusComposer,
+    OpenProviderSettings,
     WorkspaceChange(AgentWorkspaceChange),
     WorkspaceInvalidated,
 }

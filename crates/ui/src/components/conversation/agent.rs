@@ -63,6 +63,56 @@ impl ConversationView {
         cx.notify();
     }
 
+    pub(crate) fn start_agent_retry(
+        &mut self,
+        pending: PendingAgentGeneration,
+        window: &Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let PendingAgentGeneration {
+            conversation,
+            assistant_message,
+            stream,
+            controller,
+            assistant_sequence,
+            context_report,
+            ..
+        } = pending;
+        self.cancel_generation(cx);
+        self.conversation = Some(conversation.clone());
+        self.origins
+            .insert(assistant_message.id, conversation.generation.clone());
+        let assistant = Self::rendered_message(assistant_message, cx);
+        let old_count = self.messages.len();
+        let assistant_id = assistant.message.id;
+        self.messages.push(assistant);
+        self.set_pending_metadata(
+            MessageId(0),
+            magenta_core::MessageSequence(0),
+            assistant_id,
+            assistant_sequence,
+            context_report.omitted_messages,
+            cx,
+        );
+        if self.trim_oldest_to_limit(cx) == 0 {
+            self.list_state.splice(old_count..old_count, 1);
+        } else {
+            self.list_state
+                .reset_with_uniform_height(self.messages.len(), gpui_kit::px(96.));
+        }
+        self.list_state.set_follow_mode(gpui_kit::FollowMode::Tail);
+        self.list_state.scroll_to_end();
+        self.agent_controller = Some(controller);
+        self.begin_agent_stream(
+            assistant_id,
+            conversation.generation.provider,
+            stream,
+            window,
+            cx,
+        );
+        cx.notify();
+    }
+
     fn begin_agent_stream(
         &mut self,
         assistant_id: MessageId,
@@ -89,7 +139,7 @@ impl ConversationView {
                     Ok(event) => event,
                     Err(error) => {
                         _ = view.update_in(window, |view, window, cx| {
-                            view.fail_stream(generation, assistant_id, error, window, cx);
+                            view.fail_stream(generation, assistant_id, &error, window, cx);
                         });
                         return;
                     }
@@ -110,9 +160,13 @@ impl ConversationView {
                     view.finish_stream(generation, assistant_id, outcome, cx);
                 });
             } else {
-                let error = ProviderError::new(provider_id, IncompleteGeneration);
+                let error = ProviderError::with_kind(
+                    provider_id,
+                    magenta_core::ProviderErrorKind::IncompleteResponse,
+                    IncompleteGeneration,
+                );
                 _ = view.update_in(window, |view, window, cx| {
-                    view.fail_stream(generation, assistant_id, error, window, cx);
+                    view.fail_stream(generation, assistant_id, &error, window, cx);
                 });
             }
         }));

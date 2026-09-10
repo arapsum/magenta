@@ -96,6 +96,7 @@ impl MainView {
     }
 
     fn main_panel(&self, content: AnyElement, narrow: bool, cx: &Context<'_, Self>) -> AnyElement {
+        let view = cx.entity();
         div()
             .flex()
             .flex_col()
@@ -127,7 +128,62 @@ impl MainView {
                                     .border_0()
                                     .border_color(cx.theme().transparent)
                             })
-                            .child(content),
+                            .child(
+                                v_flex()
+                                    .size_full()
+                                    .min_h_0()
+                                    .when_some(self.history_error, |this, error| {
+                                        let retry_view = view.clone();
+                                        this.child(
+                                            h_flex()
+                                                .id("history-error-banner")
+                                                .role(Role::Alert)
+                                                .aria_label(format!(
+                                                    "{}: {}",
+                                                    error.title, error.message
+                                                ))
+                                                .items_center()
+                                                .justify_between()
+                                                .gap(px(10.))
+                                                .px(px(12.))
+                                                .py(px(8.))
+                                                .border_b_1()
+                                                .border_color(cx.theme().danger.opacity(0.45))
+                                                .bg(cx.theme().danger.opacity(0.08))
+                                                .child(Icon::new(IconName::CircleX).xsmall())
+                                                .child(
+                                                    v_flex()
+                                                        .gap(px(2.))
+                                                        .child(
+                                                            div().font_medium().child(error.title),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .text_size(px(12.))
+                                                                .text_color(
+                                                                    cx.theme().muted_foreground,
+                                                                )
+                                                                .child(format!(
+                                                                    "{} Reference: {}",
+                                                                    error.message, error.code
+                                                                )),
+                                                        ),
+                                                )
+                                                .child(
+                                                    Button::new("retry-history-inline")
+                                                        .outline()
+                                                        .small()
+                                                        .label("Retry")
+                                                        .on_click(move |_, window, cx| {
+                                                            retry_view.update(cx, |main, cx| {
+                                                                main.load_history(window, cx);
+                                                            });
+                                                        }),
+                                                ),
+                                        )
+                                    })
+                                    .child(content),
+                            ),
                     ),
             )
             .into_any_element()
@@ -192,13 +248,46 @@ impl MainView {
                 self.unsaved.is_some() && self.operation == history::Operation::Idle,
                 |this| {
                     this.child(
-                        Button::new("retry-save")
-                            .label("Response not saved · Retry")
+                        h_flex()
                             .absolute()
                             .top(px(36.))
                             .right(px(24.))
-                            .on_click(
-                                cx.listener(|main, _, window, cx| main.retry_save(window, cx)),
+                            .items_center()
+                            .gap(px(8.))
+                            .px(px(10.))
+                            .py(px(6.))
+                            .rounded(px(8.))
+                            .border_1()
+                            .border_color(cx.theme().danger.opacity(0.55))
+                            .bg(cx.theme().background)
+                            .child(Icon::new(IconName::CircleX).xsmall())
+                            .child(
+                                v_flex()
+                                    .gap(px(1.))
+                                    .child(div().font_medium().child("Response not saved"))
+                                    .child(
+                                        div()
+                                            .text_size(px(10.))
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(
+                                                "The response is still visible. Retry before leaving.",
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(10.))
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child("Reference: MAG-STORAGE-WRITE"),
+                                    ),
+                            )
+                            .child(
+                                Button::new("retry-save")
+                                    .outline()
+                                    .small()
+                                    .label("Retry")
+                                    .on_click(cx.listener(|main, _, window, cx| {
+                                        main.retry_save(window, cx);
+                                    })),
                             ),
                     )
                 },

@@ -50,7 +50,7 @@ impl ConversationView {
                     }
                     Err(error) => {
                         _ = view.update_in(window, |view, window, cx| {
-                            view.fail_stream(generation, assistant_id, error, window, cx);
+                            view.fail_stream(generation, assistant_id, &error, window, cx);
                         });
                         return;
                     }
@@ -62,9 +62,13 @@ impl ConversationView {
                     view.finish_stream(generation, assistant_id, outcome, cx);
                 });
             } else {
-                let error = ProviderError::new(provider_id, IncompleteGeneration);
+                let error = ProviderError::with_kind(
+                    provider_id,
+                    magenta_core::ProviderErrorKind::IncompleteResponse,
+                    IncompleteGeneration,
+                );
                 _ = view.update_in(window, |view, window, cx| {
-                    view.fail_stream(generation, assistant_id, error, window, cx);
+                    view.fail_stream(generation, assistant_id, &error, window, cx);
                 });
             }
         }));
@@ -225,8 +229,8 @@ impl ConversationView {
         &mut self,
         generation: u64,
         assistant_id: MessageId,
-        error: ProviderError,
-        window: &mut Window,
+        error: &ProviderError,
+        _window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
         if self.generation != generation || self.streaming_message != Some(assistant_id) {
@@ -244,8 +248,9 @@ impl ConversationView {
             .as_ref()
             .and_then(|progress| progress.configuration.as_ref())
             .map_or("unknown", |configuration| configuration.effort.label());
+        let failure = magenta_core::MessageFailure::from_provider_error(error);
         tracing::error!(
-            error = ?error,
+            reference_code = %failure.reference_code,
             provider = %provider.0,
             model,
             effort,
@@ -262,13 +267,9 @@ impl ConversationView {
             .find(|message| message.message.id == assistant_id)
         {
             message.message.status = MessageStatus::Failed;
+            message.message.failure = Some(failure);
         }
         self.streaming_message = None;
-        let application_error = MagentaError::ProviderGeneration {
-            provider,
-            source: error,
-        };
-        window.push_notification(notification_for_error(&application_error), cx);
         if let Some(message) = self
             .messages
             .iter()
