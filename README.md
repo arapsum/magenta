@@ -4,6 +4,8 @@ Magenta is an experimental native AI chat and workspace client written in Rust
 with GPUI through [GPUI Kit](https://github.com/longbridge/gpui-kit). The workspace
 currently pins `gpui-kit` to `0.6.1`.
 
+![Magenta running agentic task](assets/magenta-agent-work.png)
+
 It combines streaming conversations, local history, and an approval-controlled
 workspace agent in a native desktop window. Linux is the platform exercised by
 this repository. The production provider is OpenAI through ChatGPT browser
