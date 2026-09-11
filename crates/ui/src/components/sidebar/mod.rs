@@ -32,7 +32,10 @@ use gpui_kit::{
 };
 use magenta_core::ProviderAccount;
 
-use crate::{app::OpenConversationFinder, components::provider_icon};
+use crate::{
+    app::OpenConversationFinder,
+    components::{provider_icon, sidebar::state::DisclosureState},
+};
 
 pub use model::{ConversationId, ConversationPeriod, ConversationSummary, SidebarEvent};
 
@@ -55,12 +58,13 @@ pub struct SidebarView {
     collapsed: bool,
     conversations: Vec<ConversationSummary>,
     projects: Vec<magenta_core::Project>,
+    projects_disclosure: DisclosureState,
     expanded_projects: HashSet<PathBuf>,
     active_project: Option<PathBuf>,
     active_conversation: Option<ConversationId>,
     finder_launcher_focus: FocusHandle,
     account: Option<ProviderAccount>,
-    pinned_expanded: bool,
+    pinned_disclosure: DisclosureState,
     recency_limit: usize,
     history_status: Option<&'static str>,
     history_failed: bool,
@@ -80,12 +84,13 @@ impl SidebarView {
             collapsed: false,
             conversations: Vec::new(),
             projects: Vec::new(),
+            projects_disclosure: DisclosureState::Expanded,
             expanded_projects: HashSet::new(),
             active_project: None,
             active_conversation: None,
             finder_launcher_focus: cx.focus_handle(),
             account: None,
-            pinned_expanded: true,
+            pinned_disclosure: DisclosureState::Expanded,
             recency_limit: INITIAL_RECENCY_LIMIT,
             history_status: Some("Loading conversations…"),
             history_failed: false,
@@ -97,6 +102,11 @@ impl SidebarView {
 
     pub(crate) fn toggle_collapsed(&mut self, cx: &mut Context<'_, Self>) {
         self.collapsed = !self.collapsed;
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_projects_expanded(&mut self, cx: &mut Context<'_, Self>) {
+        self.projects_disclosure.toggle();
         cx.notify();
     }
 
@@ -430,7 +440,7 @@ impl SidebarView {
     }
 
     fn toggle_pinned_expanded(&mut self, cx: &mut Context<'_, Self>) {
-        self.pinned_expanded = !self.pinned_expanded;
+        self.pinned_disclosure.toggle();
         cx.notify();
     }
 

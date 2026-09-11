@@ -32,3 +32,22 @@ pub(super) struct ConversationActionData {
     pub(super) pinned: bool,
     pub(super) history_actions: HistoryActionState,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisclosureState {
+    Expanded,
+    Collapsed,
+}
+
+impl DisclosureState {
+    pub const fn is_expanded(self) -> bool {
+        matches!(self, Self::Expanded)
+    }
+
+    pub const fn toggle(&mut self) {
+        *self = match self {
+            Self::Expanded => Self::Collapsed,
+            Self::Collapsed => Self::Expanded,
+        }
+    }
+}

@@ -479,11 +479,11 @@ impl SidebarView {
         if !pinned.is_empty() {
             content = content.child(Self::section_label(
                 "Pinned",
-                Some(self.pinned_expanded),
+                Some(self.pinned_disclosure.is_expanded()),
                 view.clone(),
                 cx,
             ));
-            if self.pinned_expanded {
+            if self.pinned_disclosure.is_expanded() {
                 for item in pinned {
                     content = content.child(self.conversation_row(item, view.clone(), cx));
                 }

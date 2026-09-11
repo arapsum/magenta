@@ -3,18 +3,52 @@ use super::*;
 impl SidebarView {
     pub(super) fn render_projects(&self, view: &Entity<Self>, cx: &App) -> AnyElement {
         let add_view = view.clone();
-        let mut section = v_flex().w_full().gap(px(2.)).pt(px(7.)).child(
+
+        let toggle_view = view.clone();
+        let expanded = self.projects_disclosure.is_expanded();
+
+        let mut section = v_flex().w_full().gap(px(2.0)).pt(px(7.0)).child(
             h_flex()
+                .w_full()
                 .h(SECTION_LABEL_HEIGHT)
                 .items_center()
-                .px(px(8.))
                 .child(
-                    div()
-                        .flex_1()
-                        .text_size(px(11.))
-                        .font_medium()
-                        .text_color(cx.theme().muted_foreground.opacity(0.78))
-                        .child("Projects"),
+                    div().flex_1().min_w_0().child(
+                        Button::new("projects-section-toggle")
+                            .ghost()
+                            .w_full()
+                            .h(SECTION_LABEL_HEIGHT)
+                            .px(px(7.))
+                            .rounded(px(6.))
+                            .text_color(cx.theme().muted_foreground)
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .items_center()
+                                    .gap(px(6.))
+                                    .child(
+                                        Icon::new(if expanded {
+                                            IconName::ChevronDown
+                                        } else {
+                                            IconName::ChevronRight
+                                        })
+                                        .xsmall(),
+                                    )
+                                    .child(
+                                        div().text_size(px(11.)).font_medium().child("Projects"),
+                                    ),
+                            )
+                            .tooltip(if expanded {
+                                "Collapse projects"
+                            } else {
+                                "Expand projects"
+                            })
+                            .on_click(move |_, _, cx| {
+                                toggle_view.update(cx, |sidebar, cx| {
+                                    sidebar.toggle_projects_expanded(cx);
+                                });
+                            }),
+                    ),
                 )
                 .child(
                     Button::new("add-project")
@@ -24,10 +58,16 @@ impl SidebarView {
                         .tooltip("Add project")
                         .accessibility_id("add-project")
                         .on_click(move |_, _, cx| {
-                            add_view.update(cx, |_, cx| cx.emit(SidebarEvent::AddProject));
+                            add_view.update(cx, |_, cx| {
+                                cx.emit(SidebarEvent::AddProject);
+                            });
                         }),
                 ),
         );
+
+        if !expanded {
+            return section.into_any_element();
+        }
 
         if self.projects.is_empty() {
             return section
@@ -65,15 +105,20 @@ impl SidebarView {
     ) -> AnyElement {
         let has_conversations = !self.project_conversations(&project.root).is_empty();
         let expanded = self.expanded_projects.contains(&project.root);
+
         let active = self.active_project.as_ref() == Some(&project.root);
         let group_name: SharedString = format!("project-row-{}", project.root.display()).into();
+
         let active_background = cx.theme().sidebar_accent;
+
         let hover_background = if active {
             cx.theme().sidebar_accent
         } else {
             cx.theme().sidebar_accent.opacity(0.72)
         };
+
         let disclosure = Self::project_disclosure(project, expanded, has_conversations, view);
+
         let project_button =
             Self::project_button(project, expanded, has_conversations, active, view, cx);
         let actions = Self::project_actions(project, active, group_name.clone(), view);
