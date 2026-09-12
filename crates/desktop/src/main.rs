@@ -58,6 +58,30 @@ impl AssetSource for MagentaAssets {
             "icons/language-bash.svg" => {
                 Some(include_bytes!("../assets/icons/language-bash.svg").as_slice())
             }
+            "icons/language-rust.svg" => {
+                Some(include_bytes!("../assets/icons/language-rust.svg").as_slice())
+            }
+            "icons/language-javascript.svg" => {
+                Some(include_bytes!("../assets/icons/language-javascript.svg").as_slice())
+            }
+            "icons/language-kotlin.svg" => {
+                Some(include_bytes!("../assets/icons/language-kotlin.svg").as_slice())
+            }
+            "icons/language-c.svg" => {
+                Some(include_bytes!("../assets/icons/language-c.svg").as_slice())
+            }
+            "icons/language-cpp.svg" => {
+                Some(include_bytes!("../assets/icons/language-cpp.svg").as_slice())
+            }
+            "icons/language-zig.svg" => {
+                Some(include_bytes!("../assets/icons/language-zig.svg").as_slice())
+            }
+            "icons/language-json.svg" => {
+                Some(include_bytes!("../assets/icons/language-json.svg").as_slice())
+            }
+            "icons/language-python.svg" => {
+                Some(include_bytes!("../assets/icons/language-python.svg").as_slice())
+            }
             "icons/agent-terminal.svg" => {
                 Some(include_bytes!("../assets/icons/agent-terminal.svg").as_slice())
             }
@@ -119,6 +143,14 @@ impl AssetSource for MagentaAssets {
                 "icons/language-java.svg".into(),
                 "icons/language-csharp.svg".into(),
                 "icons/language-bash.svg".into(),
+                "icons/language-rust.svg".into(),
+                "icons/language-javascript.svg".into(),
+                "icons/language-kotlin.svg".into(),
+                "icons/language-c.svg".into(),
+                "icons/language-cpp.svg".into(),
+                "icons/language-zig.svg".into(),
+                "icons/language-json.svg".into(),
+                "icons/language-python.svg".into(),
                 "icons/agent-terminal.svg".into(),
                 "icons/agent-list-check.svg".into(),
                 "icons/agent-file-search.svg".into(),

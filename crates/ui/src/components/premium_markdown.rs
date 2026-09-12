@@ -456,6 +456,16 @@ fn language_icon(language: &str) -> (&'static str, bool) {
         "java" => ("icons/language-java.svg", true),
         "c#" | "cs" | "csharp" | "dotnet" => ("icons/language-csharp.svg", true),
         "bash" | "sh" | "shell" | "zsh" => ("icons/language-bash.svg", true),
+        "rust" | "rs" => ("icons/language-rust.svg", true),
+        "javascript" | "js" | "jsx" | "typescript" | "ts" | "tsx" => {
+            ("icons/language-javascript.svg", true)
+        }
+        "kotlin" | "kt" | "kts" => ("icons/language-kotlin.svg", true),
+        "c" => ("icons/language-c.svg", true),
+        "c++" | "cpp" | "cxx" | "cc" | "hpp" => ("icons/language-cpp.svg", true),
+        "zig" => ("icons/language-zig.svg", true),
+        "json" | "jsonc" | "json5" => ("icons/language-json.svg", true),
+        "python" | "py" | "py3" => ("icons/language-python.svg", true),
         _ => ("icons/code.svg", false),
     }
 }
@@ -499,7 +509,18 @@ mod tests {
         assert_eq!(language_icon("java"), ("icons/language-java.svg", true));
         assert_eq!(language_icon("C#"), ("icons/language-csharp.svg", true));
         assert_eq!(language_icon("zsh"), ("icons/language-bash.svg", true));
-        assert_eq!(language_icon("rust"), ("icons/code.svg", false));
+        assert_eq!(language_icon("rust"), ("icons/language-rust.svg", true));
+        assert_eq!(
+            language_icon("TypeScript"),
+            ("icons/language-javascript.svg", true)
+        );
+        assert_eq!(language_icon("kt"), ("icons/language-kotlin.svg", true));
+        assert_eq!(language_icon("C"), ("icons/language-c.svg", true));
+        assert_eq!(language_icon("cpp"), ("icons/language-cpp.svg", true));
+        assert_eq!(language_icon("zig"), ("icons/language-zig.svg", true));
+        assert_eq!(language_icon("jsonc"), ("icons/language-json.svg", true));
+        assert_eq!(language_icon("py"), ("icons/language-python.svg", true));
+        assert_eq!(language_icon("toml"), ("icons/code.svg", false));
     }
 
     #[test]
