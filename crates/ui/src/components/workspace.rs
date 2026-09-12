@@ -155,7 +155,7 @@ fn render_landing_content(
         .id("new-chat-start-content")
         .debug_selector(|| "new-chat-start-content".into())
         .w_full()
-        .max_w(px(720.))
+        .max_w(px(800.))
         .items_start()
         .gap(px(10.))
         .child(
@@ -193,8 +193,8 @@ fn render_landing_content(
                 )
                 .child(
                     div()
-                        .text_size(px(36.))
-                        .line_height(px(41.))
+                        .text_size(px(34.))
+                        .line_height(px(40.))
                         .font_semibold()
                         .child(heading),
                 ),
@@ -237,7 +237,7 @@ fn render_landing_content(
 fn render_landing_shell(content: AnyElement, cx: &Context<'_, MainView>) -> AnyElement {
     let ambient = linear_gradient(
         145.,
-        linear_color_stop(cx.theme().primary.opacity(0.15), 0.),
+        linear_color_stop(cx.theme().primary.opacity(0.23), 0.),
         linear_color_stop(cx.theme().background.opacity(0.), 0.78),
     );
 
@@ -257,7 +257,7 @@ fn render_landing_shell(content: AnyElement, cx: &Context<'_, MainView>) -> AnyE
                 .top(px(0.))
                 .left(px(0.))
                 .right(px(0.))
-                .h(px(360.))
+                .h(px(520.))
                 .bg(ambient),
         )
         .child(

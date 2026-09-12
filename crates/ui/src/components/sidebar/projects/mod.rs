@@ -25,17 +25,10 @@ impl SidebarView {
                                 h_flex()
                                     .w_full()
                                     .items_center()
-                                    .gap(px(6.))
+                                    .gap(px(8.))
+                                    .child(Icon::new(IconName::Folder).xsmall())
                                     .child(
-                                        Icon::new(if expanded {
-                                            IconName::ChevronDown
-                                        } else {
-                                            IconName::ChevronRight
-                                        })
-                                        .xsmall(),
-                                    )
-                                    .child(
-                                        div().text_size(px(11.)).font_medium().child("Projects"),
+                                        div().text_size(px(13.)).font_medium().child("Projects"),
                                     ),
                             )
                             .tooltip(if expanded {

@@ -42,26 +42,13 @@ impl SidebarView {
             .into_any_element()
     }
 
-    fn new_chat_button(&self, view: Entity<Self>, cx: &App) -> AnyElement {
-        let selected = self.active_conversation.is_none() && self.active_project.is_none();
+    fn new_chat_button(view: Entity<Self>) -> AnyElement {
         Button::new("sidebar-new-chat")
-            .when(
-                selected,
-                gpui_kit::component::button::ButtonVariants::primary,
-            )
-            .when(
-                !selected,
-                gpui_kit::component::button::ButtonVariants::ghost,
-            )
+            .primary()
             .accessibility_id("new-chat")
             .w_full()
             .h(px(36.))
             .rounded(px(10.))
-            .when(!selected, |this| {
-                this.border_1()
-                    .border_color(cx.theme().primary.opacity(0.2))
-                    .bg(cx.theme().accent.opacity(0.38))
-            })
             .icon(IconName::Plus)
             .label("New chat")
             .on_click(move |_, _window, cx| {
@@ -346,16 +333,18 @@ impl SidebarView {
                         h_flex()
                             .w_full()
                             .items_center()
-                            .gap(px(6.))
+                            .gap(px(8.))
+                            .child(Icon::empty().path("icons/conversation-pin.svg").xsmall())
+                            .child(div().flex_1().text_size(px(13.)).font_medium().child(title))
                             .child(
                                 Icon::new(if expanded {
                                     IconName::ChevronDown
                                 } else {
                                     IconName::ChevronRight
                                 })
-                                .xsmall(),
-                            )
-                            .child(div().text_size(px(11.)).font_medium().child(title)),
+                                .xsmall()
+                                .text_color(cx.theme().muted_foreground.opacity(0.58)),
+                            ),
                     )
                     .on_click(move |_, _, cx| {
                         label_view.update(cx, Self::toggle_pinned_expanded);
@@ -420,8 +409,8 @@ impl SidebarView {
             .gap(px(7.))
             .rounded(px(8.))
             .border_1()
-            .border_color(cx.theme().input.opacity(0.54))
-            .bg(cx.theme().popover.opacity(0.5))
+            .border_color(cx.theme().input.opacity(0.72))
+            .bg(cx.theme().popover.opacity(0.62))
             .text_color(cx.theme().muted_foreground)
             .hover(|this| this.bg(cx.theme().sidebar_accent.opacity(0.58)))
             .child(Icon::new(IconName::Search).xsmall())
@@ -459,11 +448,17 @@ impl SidebarView {
     pub(super) fn render_content(&self, view: Entity<Self>, cx: &App) -> AnyElement {
         let controls = v_flex()
             .w_full()
-            .gap(px(7.))
+            .gap(px(8.))
             .child(Self::brand_header(cx))
-            .child(self.new_chat_button(view.clone(), cx))
+            .child(Self::new_chat_button(view.clone()))
             .child(self.search_button(cx));
-        let mut content = v_flex().w_full().gap(px(6.)).child(controls);
+        let mut content = v_flex().w_full().gap(px(6.)).child(controls).child(
+            div()
+                .mx(px(4.))
+                .my(px(3.))
+                .h(px(1.))
+                .bg(cx.theme().sidebar_border.opacity(0.72)),
+        );
 
         content = content.child(self.render_projects(&view, cx));
 

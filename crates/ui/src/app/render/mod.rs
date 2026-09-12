@@ -121,9 +121,12 @@ impl MainView {
                             .overflow_hidden()
                             .rounded(px(18.))
                             .border_1()
-                            .border_color(cx.theme().border.opacity(0.72))
+                            .border_color(cx.theme().primary.opacity(0.18))
                             .bg(cx.theme().tokens.background.background)
-                            .shadow_sm()
+                            .shadow(vec![
+                                box_shadow(0., 18., 48., -24., cx.theme().primary.opacity(0.3)),
+                                box_shadow(0., 7., 22., -12., cx.theme().background.opacity(0.92)),
+                            ])
                             .when(narrow, |this| {
                                 this.rounded(px(0.))
                                     .border_0()

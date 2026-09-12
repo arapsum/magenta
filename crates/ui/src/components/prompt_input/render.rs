@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _, box_shadow,
     button::{Button, ButtonVariants},
     clipboard::Clipboard,
     h_flex,
@@ -433,7 +433,7 @@ impl PromptComposer {
                             } else {
                                 "Add a message before sending"
                             })
-                            .size(px(30.))
+                            .size(px(36.))
                             .p_0()
                             .rounded_full()
                             .icon(if generating {
@@ -468,7 +468,7 @@ impl Render for PromptComposer {
             145.,
             linear_color_stop(cx.theme().popover, 0.),
             linear_color_stop(
-                cx.theme().accent.opacity(if focused { 0.72 } else { 0.36 }),
+                cx.theme().accent.opacity(if focused { 0.84 } else { 0.52 }),
                 1.,
             ),
         );
@@ -488,22 +488,30 @@ impl Render for PromptComposer {
             .debug_selector(|| "prompt-composer-surface".into())
             .relative()
             .w_full()
-            .max_w(px(720.))
+            .max_w(px(800.))
             .mx_auto()
-            .min_h(px(120.))
-            .p(px(17.))
+            .min_h(px(108.))
+            .p(px(18.))
             .gap(px(12.))
             .justify_between()
-            .rounded(px(18.))
+            .rounded(px(20.))
             .border_1()
             .border_color(if focused {
                 cx.theme().ring.opacity(0.9)
             } else {
-                cx.theme().primary.opacity(0.17)
+                cx.theme().primary.opacity(0.4)
             })
             .bg(surface)
-            .shadow_sm()
-            .when(focused, gpui_kit::Styled::shadow_lg)
+            .shadow(vec![
+                box_shadow(
+                    0.,
+                    20.,
+                    46.,
+                    -20.,
+                    cx.theme().primary.opacity(if focused { 0.5 } else { 0.34 }),
+                ),
+                box_shadow(0., 8., 22., -12., cx.theme().background.opacity(0.92)),
+            ])
             .child(
                 div()
                     .absolute()

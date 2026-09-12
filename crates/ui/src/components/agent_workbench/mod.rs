@@ -1314,7 +1314,7 @@ impl AgentWorkbench {
     ) -> AnyElement {
         h_flex()
             .flex_none()
-            .h(px(40.))
+            .h(px(38.))
             .items_center()
             .gap(px(7.))
             .px(px(9.))
@@ -1345,8 +1345,8 @@ impl AgentWorkbench {
                     .items_center()
                     .justify_center()
                     .size(px(24.))
-                    .rounded(px(7.))
-                    .bg(cx.theme().accent.opacity(0.72))
+                    .rounded_full()
+                    .bg(cx.theme().primary.opacity(0.16))
                     .text_color(cx.theme().primary)
                     .child(Icon::empty().path("icons/code.svg").xsmall()),
             )
@@ -1390,8 +1390,8 @@ impl AgentWorkbench {
             h_resizable("agent-workbench")
                 .child(
                     resizable_panel()
-                        .size(px(220.))
-                        .size_range(px(160.)..px(360.))
+                        .size(px(240.))
+                        .size_range(px(180.)..px(360.))
                         .child(
                             v_flex()
                                 .size_full()

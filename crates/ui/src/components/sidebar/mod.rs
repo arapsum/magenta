@@ -16,7 +16,7 @@ use std::{
 use gpui_kit::base::{Align, Placement, PopoverState, Positioner, actions::Cancel};
 use gpui_kit::component::{
     ActiveTheme as _, Collapsible, Disableable as _, ElementExt as _, Icon, IconName,
-    Selectable as _, Sizable as _, StyledExt as _, ThemeStyled as _,
+    Selectable as _, Sizable as _, StyledExt as _, ThemeStyled as _, box_shadow,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -583,6 +583,15 @@ impl Render for SidebarView {
         let view = cx.entity();
         Sidebar::new("magenta-sidebar")
             .w(EXPANDED_WIDTH)
+            .border_r_1()
+            .border_color(cx.theme().primary.opacity(0.14))
+            .shadow(vec![box_shadow(
+                12.,
+                0.,
+                36.,
+                -18.,
+                cx.theme().primary.opacity(0.22),
+            )])
             .collapsible(SidebarCollapsible::None)
             .child(SidebarContent {
                 view: view.clone(),
