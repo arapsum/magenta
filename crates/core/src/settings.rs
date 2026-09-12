@@ -109,7 +109,7 @@ impl Default for TypographySettings {
     fn default() -> Self {
         Self {
             ui_font: FontChoice::SystemUi,
-            ui_size: 16,
+            ui_size: 15,
             monospace_font: FontChoice::SystemMonospace,
             monospace_size: 13,
             math_font: MathFontStyle::Default,
