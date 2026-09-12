@@ -46,6 +46,18 @@ impl AssetSource for MagentaAssets {
                 Some(include_bytes!("../assets/icons/generation-stop.svg").as_slice())
             }
             "icons/code.svg" => Some(include_bytes!("../assets/icons/code.svg").as_slice()),
+            "icons/surface-glow.svg" => {
+                Some(include_bytes!("../assets/icons/surface-glow.svg").as_slice())
+            }
+            "icons/language-java.svg" => {
+                Some(include_bytes!("../assets/icons/language-java.svg").as_slice())
+            }
+            "icons/language-csharp.svg" => {
+                Some(include_bytes!("../assets/icons/language-csharp.svg").as_slice())
+            }
+            "icons/language-bash.svg" => {
+                Some(include_bytes!("../assets/icons/language-bash.svg").as_slice())
+            }
             "icons/agent-terminal.svg" => {
                 Some(include_bytes!("../assets/icons/agent-terminal.svg").as_slice())
             }
@@ -103,6 +115,10 @@ impl AssetSource for MagentaAssets {
                 "icons/conversation-delete.svg".into(),
                 "icons/generation-stop.svg".into(),
                 "icons/code.svg".into(),
+                "icons/surface-glow.svg".into(),
+                "icons/language-java.svg".into(),
+                "icons/language-csharp.svg".into(),
+                "icons/language-bash.svg".into(),
                 "icons/agent-terminal.svg".into(),
                 "icons/agent-list-check.svg".into(),
                 "icons/agent-file-search.svg".into(),

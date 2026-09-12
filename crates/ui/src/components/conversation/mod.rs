@@ -42,6 +42,10 @@ use crate::components::{
     inline_code::{self, MarkdownInlineCodePlugin},
     markdown,
     math::{self, FormulaKey, MarkdownMathPlugin, MathCache},
+    premium_markdown::{
+        PremiumCodeBlockPlugin, PremiumOrderedListPlugin, PremiumStepHeadingPlugin,
+        conversation_text_style,
+    },
     prompt_input::PromptComposer,
     provider_icon,
 };
@@ -52,8 +56,9 @@ pub struct ConversationThread {
     pub messages: Vec<Message>,
 }
 
-const MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(800.);
-const USER_MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(560.);
+const MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(760.);
+const COMPOSER_MAX_WIDTH: gpui_kit::Pixels = px(800.);
+const USER_MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(520.);
 const LIST_OVERDRAW: gpui_kit::Pixels = px(640.);
 const GENERATION_CLOCK_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_RENDERED_MESSAGES: usize = 150;
@@ -172,6 +177,7 @@ enum ActivitySectionOverride {
 
 struct RenderedMessage {
     message: Message,
+    created_at: magenta_core::Timestamp,
     markdown: Option<Entity<TextViewState>>,
     markdown_source: Option<String>,
     user_segments: Vec<RenderedUserSegment>,
@@ -315,7 +321,7 @@ impl ConversationView {
                 .child(
                     div()
                         .w_full()
-                        .max_w(MESSAGE_MAX_WIDTH)
+                        .max_w(COMPOSER_MAX_WIDTH)
                         .mx_auto()
                         .child(self.composer.clone()),
                 )
@@ -328,12 +334,6 @@ impl Render for ConversationView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let view = cx.entity();
         let list_state = self.list_state.clone();
-        let ambient = linear_gradient(
-            150.,
-            linear_color_stop(cx.theme().primary.opacity(0.08), 0.),
-            linear_color_stop(cx.theme().background.opacity(0.), 0.68),
-        );
-
         v_flex()
             .relative()
             .size_full()
@@ -341,13 +341,11 @@ impl Render for ConversationView {
             .bg(cx.theme().tokens.background.background)
             .text_color(cx.theme().foreground)
             .child(
-                div()
+                img("icons/surface-glow.svg")
                     .absolute()
-                    .top(px(0.))
-                    .left(px(0.))
-                    .right(px(0.))
-                    .h(px(300.))
-                    .bg(ambient),
+                    .inset_0()
+                    .size_full()
+                    .object_fit(ObjectFit::Cover),
             )
             .when(self.has_older, |this| {
                 this.child(

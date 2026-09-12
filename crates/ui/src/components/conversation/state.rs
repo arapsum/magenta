@@ -506,6 +506,7 @@ impl ConversationView {
         };
         RenderedMessage {
             message,
+            created_at: magenta_core::Timestamp(chrono::Local::now().timestamp_millis()),
             markdown,
             markdown_source,
             user_segments,
@@ -519,9 +520,11 @@ impl ConversationView {
         cx: &mut Context<'_, Self>,
     ) -> RenderedMessage {
         let sequence = item.sequence;
+        let created_at = item.created_at;
         let omitted_context_messages = item.omitted_context_messages;
         let mut rendered = Self::rendered_message(item.message, cx);
         rendered.sequence = Some(sequence);
+        rendered.created_at = created_at;
         rendered.omitted_context_messages = omitted_context_messages;
         rendered
     }

@@ -3,6 +3,7 @@ mod agent;
 use std::fmt::Write as _;
 
 use super::*;
+use chrono::Datelike as _;
 
 use gpui_kit::component::accordion::Accordion;
 
@@ -26,7 +27,7 @@ impl ConversationView {
         div()
             .w_full()
             .px(px(24.))
-            .py(px(8.))
+            .py(px(10.))
             .child(
                 div()
                     .w_full()
@@ -320,7 +321,8 @@ impl ConversationView {
             .into_any_element()
     }
 
-    fn render_assistant_header(&self, message: &Message, cx: &App) -> AnyElement {
+    fn render_assistant_header(&self, rendered: &RenderedMessage, cx: &App) -> AnyElement {
+        let message = &rendered.message;
         let generation = self.origins.get(&message.id).or_else(|| {
             self.conversation
                 .as_ref()
@@ -328,7 +330,7 @@ impl ConversationView {
         });
         let model_label = generation.map_or_else(
             || "Model".to_owned(),
-            |generation| generation.model.0.clone(),
+            |generation| display_model_name(&generation.model.0),
         );
         let label = match message.status {
             MessageStatus::Stopped => format!("{model_label} · stopped"),
@@ -339,18 +341,20 @@ impl ConversationView {
             MessageStatus::Complete | MessageStatus::Streaming => model_label,
         };
 
+        let timestamp = relative_message_timestamp(rendered.created_at);
+
         h_flex()
-            .h(px(24.))
+            .h(px(28.))
             .items_center()
-            .gap(px(8.))
+            .gap(px(9.))
             .child(
                 div()
                     .flex()
                     .items_center()
                     .justify_center()
-                    .size(px(22.))
-                    .rounded(px(7.))
-                    .bg(cx.theme().accent.opacity(0.72))
+                    .size(px(26.))
+                    .rounded_full()
+                    .bg(cx.theme().primary.opacity(0.16))
                     .text_color(cx.theme().primary)
                     .child(
                         provider_icon(generation.map(|generation| &generation.provider)).xsmall(),
@@ -358,11 +362,26 @@ impl ConversationView {
             )
             .child(
                 div()
-                    .text_size(px(12.))
-                    .font_medium()
-                    .text_color(cx.theme().foreground.opacity(0.72))
+                    .text_size(px(13.))
+                    .font_semibold()
+                    .text_color(cx.theme().foreground.opacity(0.82))
                     .child(label),
             )
+            .when(!timestamp.is_empty(), |this| {
+                this.child(
+                    div()
+                        .size(px(3.))
+                        .rounded_full()
+                        .bg(cx.theme().muted_foreground.opacity(0.55)),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .font_medium()
+                        .text_color(cx.theme().muted_foreground.opacity(0.82))
+                        .child(timestamp),
+                )
+            })
             .into_any_element()
     }
 
@@ -383,11 +402,7 @@ impl ConversationView {
             return div().into_any_element();
         };
 
-        let style = TextViewStyle {
-            paragraph_gap: rems(0.68),
-            is_dark: cx.theme().is_dark(),
-            ..Default::default()
-        };
+        let style = conversation_text_style(cx);
         let copy = Clipboard::new(("copy-message", message.id.0))
             .value(message.content.clone())
             .tooltip("Copy response");
@@ -404,8 +419,8 @@ impl ConversationView {
 
         v_flex()
             .w_full()
-            .gap(px(8.))
-            .child(self.render_assistant_header(message, cx))
+            .gap(px(12.))
+            .child(self.render_assistant_header(rendered, cx))
             .when_some(
                 Self::render_context_notice(rendered),
                 gpui_kit::ParentElement::child,
@@ -450,11 +465,14 @@ impl ConversationView {
                     TextView::new(markdown)
                         .selectable(true)
                         .plugin(MarkdownMathPlugin::new(self.math_cache.clone()))
+                        .plugin(PremiumStepHeadingPlugin)
                         .plugin(MarkdownInlineCodePlugin)
+                        .plugin(PremiumOrderedListPlugin::new(self.math_cache.clone()))
+                        .plugin(PremiumCodeBlockPlugin)
                         .style(style)
                         .w_full()
-                        .text_size(px(15.))
-                        .line_height(px(23.))
+                        .text_size(px(16.))
+                        .line_height(px(25.))
                         .code_block_actions(move |code_block, _window, _cx| {
                             let code_id = code_block
                                 .span
@@ -794,5 +812,60 @@ impl ConversationView {
                 )
                 .into_any_element(),
         )
+    }
+}
+
+fn relative_message_timestamp(timestamp: magenta_core::Timestamp) -> String {
+    let Some(created_at) = chrono::DateTime::from_timestamp_millis(timestamp.0)
+        .map(|time| time.with_timezone(&chrono::Local))
+    else {
+        return String::new();
+    };
+    let now = chrono::Local::now();
+    let elapsed = now.signed_duration_since(created_at);
+    let minutes = elapsed.num_minutes().max(0);
+    match minutes {
+        0 => "now".to_owned(),
+        1..=59 => format!("{minutes}m ago"),
+        60..=1_439 => format!("{}h ago", minutes / 60),
+        1_440..=10_079 => format!("{}d ago", minutes / 1_440),
+        _ if created_at.year() == now.year() => created_at.format("%-d %b").to_string(),
+        _ => created_at.format("%-d %b %Y").to_string(),
+    }
+}
+
+fn display_model_name(model: &str) -> String {
+    model.get(..3).map_or_else(
+        || model.to_owned(),
+        |prefix| {
+            if prefix.eq_ignore_ascii_case("gpt") {
+                format!("GPT{}", &model[3..])
+            } else {
+                model.to_owned()
+            }
+        },
+    )
+}
+
+#[cfg(test)]
+mod timestamp_tests {
+    use chrono::Duration;
+
+    use super::{display_model_name, relative_message_timestamp};
+
+    #[test]
+    fn gpt_model_names_use_the_product_casing() {
+        assert_eq!(display_model_name("gpt-5.6-luna"), "GPT-5.6-luna");
+        assert_eq!(display_model_name("GpT-5.5"), "GPT-5.5");
+        assert_eq!(display_model_name("claude-sonnet"), "claude-sonnet");
+    }
+
+    #[test]
+    fn recent_message_timestamps_are_human_readable() {
+        let timestamp = magenta_core::Timestamp(
+            (chrono::Local::now() - Duration::minutes(2)).timestamp_millis(),
+        );
+
+        assert_eq!(relative_message_timestamp(timestamp), "2m ago");
     }
 }

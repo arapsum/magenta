@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <radialGradient id="rose" cx="0" cy="0" r="1" gradientTransform="translate(210 170) rotate(31) scale(760 520)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#D84C8B" stop-opacity=".23"/>
+      <stop offset=".48" stop-color="#A82E70" stop-opacity=".11"/>
+      <stop offset="1" stop-color="#541936" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="coral" cx="0" cy="0" r="1" gradientTransform="translate(1410 900) rotate(-151) scale(680 420)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#EF776B" stop-opacity=".14"/>
+      <stop offset=".55" stop-color="#C53F7C" stop-opacity=".065"/>
+      <stop offset="1" stop-color="#541936" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="violet" cx="0" cy="0" r="1" gradientTransform="translate(890 90) rotate(90) scale(340 600)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#A85AE0" stop-opacity=".055"/>
+      <stop offset="1" stop-color="#A85AE0" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="1000" fill="url(#rose)"/>
+  <rect width="1600" height="1000" fill="url(#coral)"/>
+  <rect width="1600" height="1000" fill="url(#violet)"/>
+</svg>
