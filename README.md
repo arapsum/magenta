@@ -4,7 +4,7 @@ Magenta is an experimental native AI chat and workspace client written in Rust
 with GPUI through [GPUI Kit](https://github.com/longbridge/gpui-kit). The workspace
 currently pins `gpui-kit` to `0.6.1`.
 
-![Magenta running agentic task](assets/magenta-agent-work.png)
+![Magenta conversation with structured Markdown and code](assets/magenta-conversation.png)
 
 It combines streaming conversations, local history, and an approval-controlled
 workspace agent in a native desktop window. Linux is the platform exercised by
@@ -57,6 +57,11 @@ a successful isolation probe; file tools remain available without it.
 The full-height sidebar remains separate from the main panel: **the titlebar
 must not extend over the sidebar**. This layout rule applies to future UI work
 as well as the current design.
+
+Agent mode pairs the conversation with a workspace-aware code workbench, keeping
+tool activity, approvals, files, and diffs in one focused view.
+
+![Magenta Agent mode beside the code workbench](assets/magenta-code-workbench.png)
 
 ## Documentation and crate ownership
 
@@ -141,7 +146,7 @@ theme = "dark"
 
 [typography]
 ui_font = "system-ui"
-ui_size = 16
+ui_size = 15
 monospace_font = "system-monospace"
 monospace_size = 13
 math_font = "default"
