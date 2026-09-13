@@ -118,6 +118,49 @@ fn chat_and_work_keep_independent_drafts(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn chat_and_work_segments_switch_in_both_directions(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
+    window
+        .update(cx, |composer, _, cx| {
+            composer.set_agent_capability(AgentCapability::Commands, cx);
+        })
+        .unwrap();
+
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    let selector = visual
+        .debug_bounds("prompt-mode-selector")
+        .expect("the mode selector should be visible");
+    visual.simulate_click(
+        gpui_kit::point(
+            selector.origin.x + selector.size.width - gpui_kit::px(4.),
+            selector.center().y,
+        ),
+        gpui_kit::Modifiers::default(),
+    );
+    window
+        .update(cx, |composer, _, _| {
+            assert_eq!(composer.mode, ConversationMode::Agent);
+        })
+        .unwrap();
+
+    let selector = visual.debug_bounds("prompt-mode-selector").unwrap();
+    visual.simulate_click(
+        gpui_kit::point(selector.origin.x + gpui_kit::px(4.), selector.center().y),
+        gpui_kit::Modifiers::default(),
+    );
+    window
+        .update(cx, |composer, _, _| {
+            assert_eq!(composer.mode, ConversationMode::Chat);
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
 fn composer_requires_content_model_and_effort(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let window = cx.open_window(
@@ -226,6 +269,37 @@ fn selecting_a_model_uses_only_its_advertised_efforts(cx: &mut TestAppContext) {
             assert_eq!(composer.effort, Some(gemini_effort));
         })
         .expect("the composer test window should remain open");
+}
+
+#[gpui_kit::test]
+fn model_and_effort_picker_opens_as_one_surface(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
+
+    window
+        .update(cx, |composer, _, cx| {
+            composer.set_models(
+                vec![
+                    model("gpt-5.5", EffortLevel::Medium),
+                    model("gpt-5.6-luna", EffortLevel::High),
+                ],
+                cx,
+            );
+        })
+        .expect("the composer test window should remain open");
+
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    let trigger = visual
+        .debug_bounds("prompt-model-selector")
+        .expect("the combined selector should be visible");
+    visual.simulate_click(trigger.center(), gpui_kit::Modifiers::default());
+    visual.run_until_parked();
+
+    assert!(visual.debug_bounds("prompt-model-picker-surface").is_some());
 }
 
 #[gpui_kit::test]

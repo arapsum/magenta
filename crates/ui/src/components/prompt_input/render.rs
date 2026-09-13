@@ -4,16 +4,16 @@ use gpui_kit::component::{
     clipboard::Clipboard,
     h_flex,
     input::Textarea,
-    menu::{DropdownMenu as _, PopupMenuItem},
+    popover::{Popover, PopoverState},
     text::{TextView, TextViewStyle},
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
+    Anchor, AnyElement, App, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
     ObjectFit, ParentElement as _, Render, SharedString, Styled as _, StyledImage as _, Window,
     div, img, linear_color_stop, linear_gradient, prelude::FluentBuilder as _, px, rems,
 };
-use magenta_core::{ConversationMode, ProviderId};
+use magenta_core::{ConversationMode, EffortLevel, ModelDescriptor, ModelId, ProviderId};
 
 use crate::components::provider_icon;
 
@@ -185,12 +185,22 @@ impl PromptComposer {
         let agent_available = self.agent_capability.available();
 
         div()
+            .debug_selector(|| "prompt-mode-selector".into())
             .rounded_full()
             .border_1()
-            .border_color(cx.theme().border.opacity(0.8))
-            .bg(cx.theme().secondary.opacity(0.72))
+            .border_color(cx.theme().foreground.opacity(0.07))
+            .bg(super::super::visual::surface(
+                super::super::visual::SurfaceLevel::Recessed,
+                cx,
+            ))
             .p(px(2.))
-            .shadow_sm()
+            .shadow(vec![box_shadow(
+                0.,
+                5.,
+                14.,
+                -10.,
+                cx.theme().background.opacity(0.9),
+            )])
             .child(
                 ToggleGroup::new("prompt-mode-selector")
                     .segmented()
@@ -198,20 +208,24 @@ impl PromptComposer {
                     .child(
                         Toggle::new("prompt-mode-chat")
                             .label("Chat")
-                            .w(px(84.))
-                            .h(px(30.))
+                            .w(px(76.))
+                            .h(px(28.))
                             .checked(mode == ConversationMode::Chat),
                     )
                     .child(
                         Toggle::new("prompt-mode-work")
                             .label("Work")
-                            .w(px(84.))
-                            .h(px(30.))
+                            .w(px(76.))
+                            .h(px(28.))
                             .checked(mode == ConversationMode::Agent)
                             .disabled(!agent_available),
                     )
                     .on_click(move |checks, window, cx| {
-                        let next = if checks.get(1).copied().unwrap_or(false) {
+                        let selects_work = super::super::select_second_segment(
+                            checks,
+                            mode == ConversationMode::Agent,
+                        );
+                        let next = if selects_work {
                             ConversationMode::Agent
                         } else {
                             ConversationMode::Chat
@@ -236,10 +250,14 @@ impl PromptComposer {
                 |name| format!("Workspace · {name}"),
             );
         let button = Button::new("prompt-workspace")
+            .ghost()
             .compact()
             .h(px(30.))
             .px(px(8.))
-            .rounded(px(7.))
+            .rounded(px(8.))
+            .border_1()
+            .border_color(cx.theme().foreground.opacity(0.07))
+            .bg(cx.theme().accent.opacity(0.34))
             .label(label)
             .tooltip(if self.agent_capability.commands() {
                 "Choose the workspace this agent can access"
@@ -335,7 +353,7 @@ impl PromptComposer {
             })
     }
 
-    fn model_selector(&self, view: Entity<Self>, _cx: &App) -> AnyElement {
+    fn model_selector(&self, view: Entity<Self>, cx: &App) -> AnyElement {
         let selected_model = self.model.clone();
         let selected_effort = self.effort.clone();
         let models = self.models.clone();
@@ -343,83 +361,257 @@ impl PromptComposer {
         let efforts = selected_model
             .as_ref()
             .map_or_else(Vec::new, |model| model.supported_efforts.clone());
-        let trigger_label: SharedString = match (selected_model.as_ref(), selected_effort.as_ref())
-        {
-            (None, None) => "Choose model".into(),
-            (Some(model), None) => format!("{}  ·  Choose effort", model.display_name).into(),
-            (None, Some(effort)) => format!("Choose model  ·  {}", effort.label()).into(),
-            (Some(model), Some(effort)) => {
-                format!("{}  ·  {}", model.display_name, effort.label()).into()
-            }
-        };
+        let model_label: SharedString = selected_model.as_ref().map_or_else(
+            || "Choose model".into(),
+            |model| model.display_name.clone().into(),
+        );
+        let effort_label: SharedString = selected_effort.as_ref().map_or_else(
+            || "Effort".into(),
+            |effort| effort.label().to_owned().into(),
+        );
         let selected_provider = selected_model.as_ref().map_or_else(
             || provider_icon(None),
             |model| provider_icon(Some(&model.provider)),
         );
-
-        option_button("prompt-model", trigger_label, selected_provider)
+        let trigger = Button::new("prompt-model")
+            .ghost()
             .accessibility_id("prompt-model-and-effort-selector")
-            .dropdown_menu(move |menu, window, cx| {
-                let mut last_provider = None;
-                let menu = models.clone().into_iter().fold(
-                    menu.min_w(px(250.)).label("Models"),
-                    |menu, model| {
-                        let mut menu = menu;
-                        if last_provider.as_ref() != Some(&model.provider) {
-                            if last_provider.is_some() {
-                                menu = menu.separator();
-                            }
-                            menu = menu.label(provider_menu_label(&model.provider));
-                            last_provider = Some(model.provider.clone());
-                        }
-                        let select_view = view.clone();
-                        let model_for_click = model.clone();
-                        menu.item(
-                            PopupMenuItem::new(model.display_name.clone())
-                                .icon(provider_icon(Some(&model.provider)))
-                                .checked(selected_model_id.as_ref() == Some(&model.id))
-                                .on_click(window.listener_for(
-                                    &select_view,
-                                    move |composer, _, _, cx| {
-                                        composer.select_model(model_for_click.clone(), cx);
-                                    },
-                                )),
-                        )
-                    },
-                );
+            .debug_selector(|| "prompt-model-selector".into())
+            .h(px(32.))
+            .max_w(px(260.))
+            .px(px(10.))
+            .gap(px(7.))
+            .rounded(px(9.))
+            .border_1()
+            .border_color(cx.theme().foreground.opacity(0.08))
+            .bg(super::super::visual::surface(
+                super::super::visual::SurfaceLevel::Raised,
+                cx,
+            ))
+            .child(selected_provider)
+            .child(
+                div()
+                    .min_w_0()
+                    .text_size(px(12.))
+                    .font_medium()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(model_label),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(px(11.))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(effort_label),
+            )
+            .child(
+                Icon::new(IconName::ChevronDown)
+                    .xsmall()
+                    .text_color(cx.theme().muted_foreground),
+            );
 
-                let effort_view = view.clone();
-                let effort_label = selected_effort.as_ref().map_or_else(
-                    || "Effort".to_owned(),
-                    |effort| format!("Effort  ·  {}", effort.label()),
-                );
-
-                menu.separator().submenu(effort_label, window, cx, {
-                    let efforts = efforts.clone();
-                    let selected_effort = selected_effort.clone();
-                    move |menu, window, _| {
-                        efforts.clone().into_iter().fold(
-                            menu.min_w(px(160.)).label("Effort level"),
-                            |menu, effort| {
-                                let select_view = effort_view.clone();
-                                let effort_for_click = effort.clone();
-                                menu.item(
-                                    PopupMenuItem::new(effort.label())
-                                        .checked(selected_effort.as_ref() == Some(&effort))
-                                        .on_click(window.listener_for(
-                                            &select_view,
-                                            move |composer, _, _, cx| {
-                                                composer
-                                                    .select_effort(effort_for_click.clone(), cx);
-                                            },
-                                        )),
-                                )
-                            },
-                        )
-                    }
-                })
+        Popover::new("prompt-model-picker")
+            .anchor(Anchor::BottomRight)
+            .trigger(trigger)
+            .appearance(false)
+            .content(move |_, window, popover_cx| {
+                Self::model_picker_surface(
+                    &models,
+                    selected_model_id.as_ref(),
+                    &efforts,
+                    selected_effort.as_ref(),
+                    &view,
+                    window,
+                    popover_cx,
+                )
             })
             .into_any_element()
+    }
+
+    fn model_picker_surface(
+        models: &[ModelDescriptor],
+        selected_model_id: Option<&ModelId>,
+        efforts: &[EffortLevel],
+        selected_effort: Option<&EffortLevel>,
+        view: &Entity<Self>,
+        window: &Window,
+        cx: &Context<'_, PopoverState>,
+    ) -> AnyElement {
+        let popover = cx.entity();
+        let model_rows = models
+            .iter()
+            .map(|model| Self::model_picker_model_row(model, selected_model_id, view, window, cx));
+        let effort_rows = efforts.iter().map(|effort| {
+            Self::model_picker_effort_row(effort, selected_effort, view, &popover, cx)
+        });
+
+        h_flex()
+            .debug_selector(|| "prompt-model-picker-surface".into())
+            .w(px(424.))
+            .max_h(px(420.))
+            .items_stretch()
+            .overflow_hidden()
+            .rounded(px(14.))
+            .border_1()
+            .border_color(cx.theme().foreground.opacity(0.09))
+            .bg(super::super::visual::surface(
+                super::super::visual::SurfaceLevel::Floating,
+                cx,
+            ))
+            .shadow(super::super::visual::floating_shadow(cx))
+            .child(
+                v_flex()
+                    .w(px(256.))
+                    .min_h(px(150.))
+                    .p(px(8.))
+                    .gap(px(3.))
+                    .child(picker_heading("Models", cx))
+                    .children(model_rows),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_h(px(150.))
+                    .border_l_1()
+                    .border_color(cx.theme().foreground.opacity(0.07))
+                    .p(px(8.))
+                    .gap(px(3.))
+                    .child(picker_heading("Effort", cx))
+                    .children(effort_rows),
+            )
+            .into_any_element()
+    }
+
+    fn model_picker_model_row(
+        model: &ModelDescriptor,
+        selected_model_id: Option<&ModelId>,
+        view: &Entity<Self>,
+        window: &Window,
+        cx: &App,
+    ) -> Button {
+        let selected = selected_model_id == Some(&model.id);
+        let model_for_click = model.clone();
+
+        Button::new(SharedString::from(format!("model-{}", model.id.0)))
+            .ghost()
+            .w_full()
+            .h(px(44.))
+            .px(px(9.))
+            .rounded(px(9.))
+            .border_1()
+            .border_color(if selected {
+                cx.theme().primary.opacity(0.28)
+            } else {
+                cx.theme().foreground.opacity(0.)
+            })
+            .bg(if selected {
+                cx.theme().accent.opacity(0.72)
+            } else {
+                cx.theme().accent.opacity(0.)
+            })
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap(px(9.))
+                    .child(provider_icon(Some(&model.provider)))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(px(2.))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .text_size(px(12.))
+                                    .font_medium()
+                                    .child(model.display_name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(10.))
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(provider_menu_label(&model.provider)),
+                            ),
+                    )
+                    .when(selected, |this| {
+                        this.child(div().size(px(5.)).rounded_full().bg(cx.theme().primary))
+                    }),
+            )
+            .on_click(window.listener_for(view, move |composer, _, _, cx| {
+                composer.select_model(model_for_click.clone(), cx);
+            }))
+    }
+
+    fn model_picker_effort_row(
+        effort: &EffortLevel,
+        selected_effort: Option<&EffortLevel>,
+        view: &Entity<Self>,
+        popover: &Entity<PopoverState>,
+        cx: &App,
+    ) -> Button {
+        let selected = selected_effort == Some(effort);
+        let effort_for_click = effort.clone();
+        let select_view = view.clone();
+        let dismiss = popover.clone();
+
+        Button::new(SharedString::from(format!(
+            "effort-{}",
+            effort.wire_value()
+        )))
+        .ghost()
+        .w_full()
+        .h(px(44.))
+        .px(px(9.))
+        .rounded(px(9.))
+        .border_1()
+        .border_color(if selected {
+            cx.theme().primary.opacity(0.28)
+        } else {
+            cx.theme().foreground.opacity(0.)
+        })
+        .bg(if selected {
+            cx.theme().accent.opacity(0.72)
+        } else {
+            cx.theme().accent.opacity(0.)
+        })
+        .child(
+            h_flex()
+                .w_full()
+                .items_center()
+                .justify_between()
+                .child(
+                    v_flex()
+                        .items_start()
+                        .gap(px(2.))
+                        .child(
+                            div()
+                                .text_size(px(12.))
+                                .font_medium()
+                                .child(effort.label().to_owned()),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(10.))
+                                .text_color(cx.theme().muted_foreground)
+                                .child(effort_description(effort)),
+                        ),
+                )
+                .when(selected, |this| {
+                    this.child(div().size(px(5.)).rounded_full().bg(cx.theme().primary))
+                }),
+        )
+        .on_click(move |_, window, cx| {
+            select_view.update(cx, |composer, cx| {
+                composer.select_effort(effort_for_click.clone(), cx);
+            });
+            dismiss.update(cx, |state, cx| state.dismiss(window, cx));
+        })
     }
 
     fn code_preview(&self, cx: &Context<'_, Self>) -> impl IntoElement {
@@ -481,6 +673,50 @@ impl PromptComposer {
             )
     }
 
+    fn workspace_controls(&self, view: Entity<Self>, cx: &Context<'_, Self>) -> AnyElement {
+        let files_view = view.clone();
+        let changes_view = view.clone();
+        let enabled = self.workspace_root.is_some();
+        let utility_button = |id: &'static str, icon, label| {
+            Button::new(id)
+                .ghost()
+                .compact()
+                .h(px(30.))
+                .px(px(8.))
+                .rounded(px(8.))
+                .border_1()
+                .border_color(cx.theme().foreground.opacity(0.07))
+                .bg(cx.theme().accent.opacity(0.34))
+                .icon(icon)
+                .label(label)
+        };
+
+        h_flex()
+            .min_w_0()
+            .items_center()
+            .gap(px(6.))
+            .child(self.workspace_button(view, cx))
+            .child(
+                utility_button("prompt-open-files", IconName::FolderOpen, "Files")
+                    .disabled(!enabled)
+                    .on_click(move |_, _, cx| {
+                        files_view.update(cx, |composer, cx| {
+                            composer.open_workspace_panel(PromptWorkspacePanel::Files, cx);
+                        });
+                    }),
+            )
+            .child(
+                utility_button("prompt-open-changes", IconName::File, "Changes")
+                    .disabled(!enabled)
+                    .on_click(move |_, _, cx| {
+                        changes_view.update(cx, |composer, cx| {
+                            composer.open_workspace_panel(PromptWorkspacePanel::Changes, cx);
+                        });
+                    }),
+            )
+            .into_any_element()
+    }
+
     fn footer(
         &self,
         submit_view: Entity<Self>,
@@ -504,46 +740,7 @@ impl PromptComposer {
                         this.child(Self::attachment_button(cx))
                     })
                     .when(self.mode == ConversationMode::Agent, |this| {
-                        let files_view = submit_view.clone();
-                        let changes_view = submit_view.clone();
-
-                        this.child(self.workspace_button(submit_view.clone(), cx))
-                            .child(
-                                Button::new("prompt-open-files")
-                                    .outline()
-                                    .compact()
-                                    .h(px(30.))
-                                    .rounded(px(7.))
-                                    .icon(IconName::FolderOpen)
-                                    .label("Files")
-                                    .disabled(self.workspace_root.is_none())
-                                    .on_click(move |_, _, cx| {
-                                        files_view.update(cx, |composer, cx| {
-                                            composer.open_workspace_panel(
-                                                PromptWorkspacePanel::Files,
-                                                cx,
-                                            );
-                                        });
-                                    }),
-                            )
-                            .child(
-                                Button::new("prompt-open-changes")
-                                    .outline()
-                                    .compact()
-                                    .h(px(30.))
-                                    .rounded(px(7.))
-                                    .icon(IconName::File)
-                                    .label("Changes")
-                                    .disabled(self.workspace_root.is_none())
-                                    .on_click(move |_, _, cx| {
-                                        changes_view.update(cx, |composer, cx| {
-                                            composer.open_workspace_panel(
-                                                PromptWorkspacePanel::Changes,
-                                                cx,
-                                            );
-                                        });
-                                    }),
-                            )
+                        this.child(self.workspace_controls(submit_view.clone(), cx))
                     }),
             )
             .child(
@@ -603,14 +800,6 @@ impl Render for PromptComposer {
         let generating = self.generating;
         let is_work = self.mode == ConversationMode::Agent;
         let can_add_attachment = !is_work && self.attachments.len() < MAX_ATTACHMENTS;
-        let surface = linear_gradient(
-            145.,
-            linear_color_stop(cx.theme().popover, 0.),
-            linear_color_stop(
-                cx.theme().accent.opacity(if focused { 0.84 } else { 0.52 }),
-                1.,
-            ),
-        );
         let highlight = linear_gradient(
             90.,
             linear_color_stop(cx.theme().primary.opacity(0.), 0.),
@@ -635,28 +824,19 @@ impl Render for PromptComposer {
                     .debug_selector(|| "prompt-composer-surface".into())
                     .relative()
                     .w_full()
-                    .min_h(if is_work { px(128.) } else { px(60.) })
-                    .p(if is_work { px(18.) } else { px(8.) })
-                    .gap(if is_work { px(12.) } else { px(0.) })
-                    .justify_between()
-                    .rounded(if is_work { px(20.) } else { px(18.) })
+                    .p(px(2.))
+                    .rounded(if is_work { px(22.) } else { px(19.) })
                     .border_1()
                     .border_color(if focused {
-                        cx.theme().ring.opacity(0.9)
+                        cx.theme().ring.opacity(0.78)
                     } else {
-                        cx.theme().primary.opacity(0.4)
+                        cx.theme().foreground.opacity(0.08)
                     })
-                    .bg(surface)
-                    .shadow(vec![
-                        box_shadow(
-                            0.,
-                            if is_work { 20. } else { 8. },
-                            if is_work { 46. } else { 20. },
-                            -20.,
-                            cx.theme().primary.opacity(if focused { 0.5 } else { 0.34 }),
-                        ),
-                        box_shadow(0., 8., 22., -12., cx.theme().background.opacity(0.92)),
-                    ])
+                    .bg(super::super::visual::surface(
+                        super::super::visual::SurfaceLevel::Floating,
+                        cx,
+                    ))
+                    .shadow(super::super::visual::floating_shadow(cx))
                     .child(
                         div()
                             .absolute()
@@ -666,24 +846,40 @@ impl Render for PromptComposer {
                             .h(px(1.))
                             .bg(highlight),
                     )
-                    .when(is_work, |this| {
-                        this.child(self.render_input_content(cx)).child(self.footer(
-                            submit_view.clone(),
-                            generating,
-                            ready,
-                            false,
-                            cx,
-                        ))
-                    })
-                    .when(!is_work, |this| {
-                        this.child(self.render_chat_content(
-                            submit_view,
-                            generating,
-                            ready,
-                            can_add_attachment,
-                            cx,
-                        ))
-                    }),
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .min_h(if is_work { px(124.) } else { px(56.) })
+                            .p(if is_work { px(16.) } else { px(8.) })
+                            .gap(if is_work { px(12.) } else { px(0.) })
+                            .justify_between()
+                            .rounded(if is_work { px(19.) } else { px(16.) })
+                            .border_1()
+                            .border_color(cx.theme().foreground.opacity(0.045))
+                            .bg(super::super::visual::surface(
+                                super::super::visual::SurfaceLevel::Raised,
+                                cx,
+                            ))
+                            .shadow(super::super::visual::raised_shadow(cx))
+                            .when(is_work, |this| {
+                                this.child(self.render_input_content(cx)).child(self.footer(
+                                    submit_view.clone(),
+                                    generating,
+                                    ready,
+                                    false,
+                                    cx,
+                                ))
+                            })
+                            .when(!is_work, |this| {
+                                this.child(self.render_chat_content(
+                                    submit_view,
+                                    generating,
+                                    ready,
+                                    can_add_attachment,
+                                    cx,
+                                ))
+                            }),
+                    ),
             )
     }
 }
@@ -701,19 +897,26 @@ fn provider_menu_label(provider: &ProviderId) -> String {
     }
 }
 
-fn option_button(
-    id: &'static str,
-    label: impl Into<SharedString>,
-    icon: impl Into<Icon>,
-) -> Button {
-    Button::new(id)
-        .compact()
-        .dropdown_caret(true)
-        .h(px(30.))
-        .px(px(8.))
-        .rounded(px(7.))
-        .border_1()
-        .text_size(px(12.))
-        .icon(icon)
-        .label(label)
+fn picker_heading(label: &'static str, cx: &App) -> AnyElement {
+    div()
+        .h(px(28.))
+        .px(px(9.))
+        .flex()
+        .items_center()
+        .text_size(px(10.))
+        .font_semibold()
+        .text_color(cx.theme().muted_foreground)
+        .child(label)
+        .into_any_element()
+}
+
+const fn effort_description(effort: &EffortLevel) -> &'static str {
+    match effort {
+        EffortLevel::None | EffortLevel::Minimal => "Fastest",
+        EffortLevel::Low => "Quick",
+        EffortLevel::Medium => "Balanced",
+        EffortLevel::High => "Deeper",
+        EffortLevel::XHigh | EffortLevel::Max => "Deepest",
+        EffortLevel::Custom { .. } => "Custom",
+    }
 }
