@@ -9,6 +9,8 @@ mod command;
 mod operations;
 mod patch;
 mod path;
+mod repository;
 
 pub use command::BubblewrapCommandRunner;
 pub use operations::LocalWorkspace;
+pub use repository::LocalRepository;

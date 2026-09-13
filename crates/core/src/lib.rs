@@ -17,6 +17,7 @@ mod identifiers;
 mod message;
 mod models;
 mod project;
+mod repository;
 mod settings;
 mod storage;
 mod workspace;
@@ -53,6 +54,10 @@ pub use message::{
 pub use models::{ModelCatalog, ModelCatalogFuture, ModelDescriptor};
 pub use project::{
     Project, ProjectStore, WorkspaceBrowser, WorkspaceDocument, WorkspaceEntry, WorkspaceEntryKind,
+};
+pub use repository::{
+    RepositoryAccess, RepositoryChange, RepositoryChangeKind, RepositoryCommit, RepositoryDiff,
+    RepositoryDiffArea, RepositoryError, RepositoryErrorKind, RepositoryFuture, RepositoryStatus,
 };
 pub use settings::{
     AppSettings, AppearanceMode, FontChoice, MathFontStyle, SETTINGS_VERSION, SettingsError,
