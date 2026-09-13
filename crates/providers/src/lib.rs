@@ -6,9 +6,9 @@
 //! stay here; conversation persistence and tool execution belong to callers.
 
 #[cfg(test)]
+#[path = "../test/contract.rs"]
 mod contract;
 mod demo;
-mod demo_response;
 mod openai;
 
 pub use demo::DemoProvider;

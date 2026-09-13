@@ -1,8 +1,5 @@
-mod commands;
 mod stream;
-#[cfg(test)]
-mod tool_tests;
-mod tools;
+mod tool;
 
 use std::sync::Arc;
 
@@ -129,7 +126,7 @@ impl RunWorkspaceAgent {
         }
 
         let instructions = agent_instructions(&input.workspace_root);
-        let tools = tools::tool_definitions(self.command_runner.is_some());
+        let tools = tool::tool_definitions(self.command_runner.is_some());
         let request_overhead_tokens = estimate_agent_overhead(&instructions, &tools);
         let prepared = self
             .store
@@ -208,7 +205,7 @@ impl RunWorkspaceAgent {
         }
 
         let instructions = agent_instructions(&workspace_root);
-        let tools = tools::tool_definitions(self.command_runner.is_some());
+        let tools = tool::tool_definitions(self.command_runner.is_some());
         let request_overhead_tokens = estimate_agent_overhead(&instructions, &tools);
         let prepared = self
             .store

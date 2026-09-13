@@ -1,3 +1,4 @@
+mod conversation_operations;
 mod operations;
 
 use gpui_kit::component::WindowExt as _;

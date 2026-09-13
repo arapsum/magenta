@@ -1,0 +1,87 @@
+use magenta_core::{Message, MessageRole};
+
+pub fn latest_user_prompt(messages: &[Message]) -> Option<String> {
+    messages
+        .iter()
+        .rev()
+        .find(|message| message.role == MessageRole::User)
+        .map(|message| message.content.clone())
+}
+
+pub fn fake_response(prompt: &str) -> String {
+    let fingerprint = prompt
+        .bytes()
+        .fold(0usize, |sum, byte| sum.wrapping_add(usize::from(byte)));
+
+    match fingerprint % 3 {
+        0 => format!(
+            concat!(
+                "## A focused direction\n\n",
+                "I would turn **{}** into a small, observable workflow. ",
+                "Start with the user-visible state, keep the boundary narrow, ",
+                "and let the implementation grow from a real interaction.\n\n",
+                "- Name the state the user can see.\n",
+                "- Keep the first action reversible.\n",
+                "- Measure the result before adding another layer.\n\n",
+                "That gives the next decision a clear place to land."
+            ),
+            prompt
+        ),
+        1 => format!(
+            concat!(
+                "Here is a practical shape for **{}**:\n\n",
+                "1. Capture the intent in one value.\n",
+                "2. Render the current state immediately.\n",
+                "3. Move slow work behind a cancellable task.\n",
+                "4. Persist only after the result is complete.\n\n",
+                "The important part is the seam between the UI and the work behind it."
+            ),
+            prompt
+        ),
+        _ => format!(
+            concat!(
+                "I would keep **{}** deliberately small at first. ",
+                "The UI can model the workflow with a typed operation, ",
+                "then a provider or storage adapter can replace the local fixture later.\n\n",
+                "```rust\n",
+                "struct Operation {{\n",
+                "    input: String,\n",
+                "    state: OperationState,\n",
+                "}}\n",
+                "```\n\n",
+                "That shape keeps the interface testable while the remote ",
+                "boundary is still evolving."
+            ),
+            prompt
+        ),
+    }
+}
+
+pub fn response_chunks(response: &str) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    let mut last_boundary = 0;
+
+    for (index, character) in response.char_indices() {
+        let end = index + character.len_utf8();
+        if character.is_whitespace() {
+            last_boundary = end;
+        }
+        if end.saturating_sub(start) >= 20 && last_boundary > start {
+            let boundary = last_boundary;
+            chunks.push(response[start..boundary].to_owned());
+            start = boundary;
+            last_boundary = boundary;
+        }
+    }
+
+    if start < response.len() {
+        chunks.push(response[start..].to_owned());
+    }
+
+    chunks
+}
+
+#[cfg(test)]
+#[path = "../../test/demo/response.rs"]
+mod tests;

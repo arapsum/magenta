@@ -6,7 +6,7 @@
 //! Connections, migrations, and filesystem work are confined to blocking workers.
 
 mod attachments;
-mod managed_attachments;
+mod database;
 mod migrations;
 mod records;
 mod search;
@@ -15,20 +15,23 @@ mod turns;
 
 pub use settings::TomlSettingsStore;
 
+pub(crate) use database::{
+    activity_kind, agent_run_status, attachment_directory, connect, database_error, decode_mode,
+    failure, invalid, now, unavailable,
+};
+
 use std::{
     path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use magenta_core::{
-    AgentActivityKind, AgentActivityRecord, BeginTurn, ConversationId, ConversationPage,
-    ConversationSearchResult, ConversationStore, ConversationSummary, Message, MessageId,
-    MessagePage, MessageSequence, PreparedTurn, Project, ProjectStore, StorageError,
-    StorageErrorKind, StorageFuture, Timestamp,
+    AgentActivityRecord, BeginTurn, ConversationId, ConversationPage, ConversationSearchResult,
+    ConversationStore, ConversationSummary, Message, MessageId, MessagePage, MessageSequence,
+    PreparedTurn, Project, ProjectStore, StorageError, StorageErrorKind, StorageFuture, Timestamp,
 };
 use rusqlite::{Connection, TransactionBehavior, params};
 
@@ -344,7 +347,7 @@ impl ConversationStore for SqliteConversationStore {
             let transaction = connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(database_error)?;
-            let managed_attachments = managed_attachments::for_conversation(&transaction, id)?;
+            let managed_attachments = attachments::managed::for_conversation(&transaction, id)?;
             let changed = transaction
                 .execute("DELETE FROM conversations WHERE id = ?1", [id.0])
                 .map_err(database_error)?;
@@ -514,97 +517,4 @@ impl ProjectStore for SqliteConversationStore {
             Ok(())
         })
     }
-}
-
-fn decode_mode(mode: &str) -> rusqlite::Result<magenta_core::ConversationMode> {
-    match mode {
-        "chat" => Ok(magenta_core::ConversationMode::Chat),
-        "agent" => Ok(magenta_core::ConversationMode::Agent),
-        other => Err(rusqlite::Error::FromSqlConversionFailure(
-            4,
-            rusqlite::types::Type::Text,
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("unknown conversation mode {other}"),
-            )),
-        )),
-    }
-}
-
-fn attachment_directory(database_path: &std::path::Path) -> PathBuf {
-    database_path
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .join("attachments")
-}
-
-const fn activity_kind(kind: &AgentActivityKind) -> &'static str {
-    match kind {
-        AgentActivityKind::ToolCall => "tool-call",
-        AgentActivityKind::ApprovalRequested => "approval-requested",
-        AgentActivityKind::ToolResult => "tool-result",
-    }
-}
-
-const fn agent_run_status(status: magenta_core::MessageStatus) -> &'static str {
-    match status {
-        magenta_core::MessageStatus::Complete => "completed",
-        magenta_core::MessageStatus::Streaming => "running",
-        magenta_core::MessageStatus::Stopped => "stopped",
-        magenta_core::MessageStatus::Failed => "failed",
-    }
-}
-
-fn connect(path: &std::path::Path) -> Result<Connection> {
-    let connection = Connection::open(path).map_err(database_error)?;
-    connection
-        .busy_timeout(Duration::from_secs(5))
-        .map_err(database_error)?;
-    connection
-        .pragma_update(None, "foreign_keys", true)
-        .map_err(database_error)?;
-    connection
-        .pragma_update(None, "synchronous", "NORMAL")
-        .map_err(database_error)?;
-    Ok(connection)
-}
-
-fn now() -> Result<i64> {
-    i64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(invalid)?
-            .as_millis(),
-    )
-    .map_err(invalid)
-}
-
-fn unavailable(source: impl std::error::Error + Send + Sync + 'static) -> StorageError {
-    StorageError::new(StorageErrorKind::Unavailable, source)
-}
-
-fn invalid(source: impl std::error::Error + Send + Sync + 'static) -> StorageError {
-    StorageError::new(StorageErrorKind::InvalidData, source)
-}
-
-fn failure(kind: StorageErrorKind, message: &'static str) -> StorageError {
-    StorageError::new(kind, std::io::Error::other(message))
-}
-
-fn database_error(source: rusqlite::Error) -> StorageError {
-    let kind = match &source {
-        rusqlite::Error::QueryReturnedNoRows => StorageErrorKind::NotFound,
-        rusqlite::Error::FromSqlConversionFailure(..)
-        | rusqlite::Error::IntegralValueOutOfRange(..)
-        | rusqlite::Error::InvalidColumnType(..) => StorageErrorKind::InvalidData,
-        rusqlite::Error::SqliteFailure(error, _) => match error.code {
-            rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase => {
-                StorageErrorKind::InvalidData
-            }
-            rusqlite::ErrorCode::ConstraintViolation => StorageErrorKind::Conflict,
-            _ => StorageErrorKind::Unavailable,
-        },
-        _ => StorageErrorKind::Unavailable,
-    };
-    StorageError::new(kind, source)
 }

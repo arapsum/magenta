@@ -17,3 +17,15 @@ tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[[test]]
+name = "attachments"
+path = "test/attachments.rs"
+
+[[test]]
+name = "context_and_paging"
+path = "test/context_and_paging.rs"
+
+[[test]]
+name = "persistence"
+path = "test/persistence.rs"

@@ -27,6 +27,7 @@ use url::Url;
 use super::http;
 mod claims;
 #[cfg(test)]
+#[path = "../../../test/openai/auth/mod.rs"]
 mod tests;
 use claims::{
     auth_error, authorization_url, form_body, now_ms, oauth_error_message, random_urlsafe,

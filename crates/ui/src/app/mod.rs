@@ -6,6 +6,7 @@ mod projects;
 mod render;
 mod settings_window;
 #[cfg(test)]
+#[path = "../../test/app/mod.rs"]
 mod tests;
 
 use std::{sync::Arc, time::Duration};

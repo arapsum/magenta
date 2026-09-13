@@ -1,10 +1,12 @@
 mod account_dropdown;
 mod account_menu;
 mod model;
+mod profile;
 mod projects;
 mod rendering;
 mod state;
 #[cfg(test)]
+#[path = "../../../test/components/sidebar/mod.rs"]
 mod tests;
 use state::{ConversationActionData, HistoryActionState, RenameState};
 
@@ -13,6 +15,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::{
+    app::OpenConversationFinder,
+    components::{provider_icon, sidebar::state::DisclosureState},
+};
 use gpui_kit::base::{Align, Placement, PopoverState, Positioner, actions::Cancel};
 use gpui_kit::component::{
     ActiveTheme as _, Collapsible, Disableable as _, ElementExt as _, Icon, IconName,
@@ -32,12 +38,8 @@ use gpui_kit::{
 };
 use magenta_core::ProviderAccount;
 
-use crate::{
-    app::OpenConversationFinder,
-    components::{provider_icon, sidebar::state::DisclosureState},
-};
-
 pub use model::{ConversationId, ConversationPeriod, ConversationSummary, SidebarEvent};
+pub(super) use profile::{ProfileDetails, profile_details};
 
 use self::model::title_matches;
 
@@ -455,89 +457,6 @@ impl SidebarView {
         self.recency_limit = self.recency_limit.saturating_add(RECENCY_PAGE_SIZE);
         cx.notify();
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ProfileDetails {
-    name: String,
-    detail: String,
-    initial: String,
-    tooltip: String,
-    email: Option<String>,
-    plan: Option<String>,
-}
-
-fn profile_details(account: Option<&ProviderAccount>) -> ProfileDetails {
-    let Some(account) = account else {
-        return ProfileDetails {
-            name: "Adleio".to_owned(),
-            detail: "Local profile".to_owned(),
-            initial: "A".to_owned(),
-            tooltip: "Local profile and settings".to_owned(),
-            email: None,
-            plan: None,
-        };
-    };
-
-    let name = account
-        .name
-        .clone()
-        .map(|name| name.trim().to_owned())
-        .filter(|name| !name.is_empty())
-        .or_else(|| account.email.as_deref().and_then(email_display_name))
-        .or_else(|| account.email.clone())
-        .unwrap_or_else(|| "ChatGPT account".to_owned());
-    let email = account.email.clone();
-    let plan = account.plan.as_deref().and_then(display_plan);
-    let detail = match (plan.as_deref(), email.as_deref()) {
-        (Some(plan), Some(email)) => format!("{plan} · {email}"),
-        (Some(plan), None) => plan.to_owned(),
-        (None, Some(email)) => email.to_owned(),
-        (None, None) => "OpenAI account".to_owned(),
-    };
-    let initial = name.chars().next().map_or_else(
-        || "O".to_owned(),
-        |character| character.to_uppercase().collect(),
-    );
-    let tooltip = account.email.clone().map_or_else(
-        || "OpenAI account and settings".to_owned(),
-        |email| format!("{name} · {email}"),
-    );
-
-    ProfileDetails {
-        name,
-        detail,
-        initial,
-        tooltip,
-        email,
-        plan,
-    }
-}
-
-fn display_plan(value: &str) -> Option<String> {
-    let value = value.trim();
-    (!value.is_empty()).then(|| capitalize(value))
-}
-
-fn email_display_name(email: &str) -> Option<String> {
-    let local_part = email.split('@').next()?.trim();
-    let parts = local_part
-        .split(['.', '_', '-'])
-        .filter(|part| !part.is_empty())
-        .map(capitalize)
-        .collect::<Vec<_>>();
-    (!parts.is_empty()).then(|| parts.join(" "))
-}
-
-fn capitalize(value: &str) -> String {
-    let mut characters = value.chars();
-    let Some(first) = characters.next() else {
-        return String::new();
-    };
-
-    let mut capitalized = first.to_uppercase().collect::<String>();
-    capitalized.push_str(characters.as_str());
-    capitalized
 }
 
 impl EventEmitter<SidebarEvent> for SidebarView {}

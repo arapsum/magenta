@@ -3,6 +3,7 @@ mod generation;
 mod rendering;
 mod state;
 #[cfg(test)]
+#[path = "../../../test/components/conversation/mod.rs"]
 mod tests;
 
 use std::{
@@ -41,7 +42,7 @@ use crate::components::{
     code_fence::{self, ContentSegment},
     inline_code::{self, MarkdownInlineCodePlugin},
     markdown,
-    math::{self, FormulaKey, MarkdownMathPlugin, MathCache},
+    math::{FormulaKey, MarkdownMathPlugin, MathCache},
     premium_markdown::{
         PremiumCodeBlockPlugin, PremiumOrderedListPlugin, PremiumStepHeadingPlugin,
         conversation_text_style,
