@@ -1,6 +1,6 @@
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _, box_shadow,
-    button::{Button, ButtonVariants},
+    button::{Button, ButtonVariants, Toggle, ToggleGroup},
     clipboard::Clipboard,
     h_flex,
     input::Textarea,
@@ -17,9 +17,101 @@ use magenta_core::{ConversationMode, ProviderId};
 
 use crate::components::provider_icon;
 
-use super::{MAX_ATTACHMENTS, PromptComposer};
+use super::{MAX_ATTACHMENTS, PromptComposer, PromptWorkspacePanel};
 
 impl PromptComposer {
+    fn render_chat_content(
+        &self,
+        submit_view: Entity<Self>,
+        generating: bool,
+        ready: bool,
+        can_add_attachment: bool,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let submit = submit_view.clone();
+
+        v_flex()
+            .w_full()
+            .gap(px(8.))
+            .when_some(self.inline_error(), |this, error| {
+                this.child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(cx.theme().danger)
+                        .child(format!("{} {}", error.title, error.message)),
+                )
+            })
+            .when_some(self.blocking_error(), |this, error| {
+                this.child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(cx.theme().warning)
+                        .child(format!("{} {}", error.title, error.message)),
+                )
+            })
+            .when(!self.attachments.is_empty(), |this| {
+                this.child(self.attachment_strip(cx))
+            })
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap(px(8.))
+                    .when(can_add_attachment, |this| {
+                        this.child(Self::attachment_button(cx))
+                    })
+                    .child(
+                        Textarea::new(&self.input)
+                            .appearance(false)
+                            .bordered(false)
+                            .aria_label("Chat message composer")
+                            .flex_1()
+                            .min_w_0()
+                            .min_h(px(32.))
+                            .p_0()
+                            .text_size(px(15.))
+                            .line_height(px(22.)),
+                    )
+                    .child(self.model_selector(submit_view, cx))
+                    .child(
+                        Button::new("prompt-submit")
+                            .when(generating, ButtonVariants::secondary)
+                            .when(!generating, ButtonVariants::primary)
+                            .disabled(!ready && !generating)
+                            .accessibility_id(if generating {
+                                "prompt-stop-response"
+                            } else {
+                                "prompt-submit"
+                            })
+                            .tooltip(if generating {
+                                "Stop response"
+                            } else if ready {
+                                "Send message"
+                            } else {
+                                "Add a message before sending"
+                            })
+                            .size(px(36.))
+                            .p_0()
+                            .rounded_full()
+                            .icon(if generating {
+                                Icon::empty().path("icons/generation-stop.svg")
+                            } else {
+                                Icon::new(IconName::ChevronUp)
+                            })
+                            .on_click(move |_, _, cx| {
+                                submit.update(cx, |composer, cx| {
+                                    if generating {
+                                        composer.cancel(cx);
+                                    } else {
+                                        composer.submit(cx);
+                                    }
+                                });
+                            }),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn render_input_content(&self, cx: &Context<'_, Self>) -> AnyElement {
         v_flex()
             .flex_1()
@@ -88,42 +180,48 @@ impl PromptComposer {
             .into_any_element()
     }
 
-    fn mode_selector(&self, view: Entity<Self>) -> AnyElement {
+    fn mode_selector(&self, view: Entity<Self>, cx: &Context<'_, Self>) -> AnyElement {
         let mode = self.mode.clone();
         let agent_available = self.agent_capability.available();
-        let agent_label = if self.agent_capability.commands() {
-            "Agent"
-        } else {
-            "Agent · files only"
-        };
-        let label = match mode {
-            ConversationMode::Chat => "Chat",
-            ConversationMode::Agent => "Agent",
-        };
 
-        option_button("prompt-mode", label, IconName::Bot)
-            .accessibility_id("prompt-mode-selector")
-            .dropdown_menu(move |menu, window, _cx| {
-                let chat_view = view.clone();
-                let agent_view = view.clone();
-                menu.min_w(px(170.))
-                    .label("Run mode")
-                    .item(
-                        PopupMenuItem::new("Chat")
-                            .checked(mode == ConversationMode::Chat)
-                            .on_click(window.listener_for(&chat_view, |composer, _, _, cx| {
-                                composer.select_mode(ConversationMode::Chat, cx);
-                            })),
+        div()
+            .rounded_full()
+            .border_1()
+            .border_color(cx.theme().border.opacity(0.8))
+            .bg(cx.theme().secondary.opacity(0.72))
+            .p(px(2.))
+            .shadow_sm()
+            .child(
+                ToggleGroup::new("prompt-mode-selector")
+                    .segmented()
+                    .with_size(gpui_kit::component::Size::Small)
+                    .child(
+                        Toggle::new("prompt-mode-chat")
+                            .label("Chat")
+                            .w(px(84.))
+                            .h(px(30.))
+                            .checked(mode == ConversationMode::Chat),
                     )
-                    .item(
-                        PopupMenuItem::new(agent_label)
+                    .child(
+                        Toggle::new("prompt-mode-work")
+                            .label("Work")
+                            .w(px(84.))
+                            .h(px(30.))
                             .checked(mode == ConversationMode::Agent)
-                            .disabled(!agent_available)
-                            .on_click(window.listener_for(&agent_view, |composer, _, _, cx| {
-                                composer.select_mode(ConversationMode::Agent, cx);
-                            })),
+                            .disabled(!agent_available),
                     )
-            })
+                    .on_click(move |checks, window, cx| {
+                        let next = if checks.get(1).copied().unwrap_or(false) {
+                            ConversationMode::Agent
+                        } else {
+                            ConversationMode::Chat
+                        };
+
+                        view.update(cx, |composer, cx| {
+                            composer.select_mode(next, window, cx);
+                        });
+                    }),
+            )
             .into_any_element()
     }
 
@@ -405,9 +503,47 @@ impl PromptComposer {
                     .when(can_add_attachment, |this| {
                         this.child(Self::attachment_button(cx))
                     })
-                    .child(self.mode_selector(submit_view.clone()))
                     .when(self.mode == ConversationMode::Agent, |this| {
+                        let files_view = submit_view.clone();
+                        let changes_view = submit_view.clone();
+
                         this.child(self.workspace_button(submit_view.clone(), cx))
+                            .child(
+                                Button::new("prompt-open-files")
+                                    .outline()
+                                    .compact()
+                                    .h(px(30.))
+                                    .rounded(px(7.))
+                                    .icon(IconName::FolderOpen)
+                                    .label("Files")
+                                    .disabled(self.workspace_root.is_none())
+                                    .on_click(move |_, _, cx| {
+                                        files_view.update(cx, |composer, cx| {
+                                            composer.open_workspace_panel(
+                                                PromptWorkspacePanel::Files,
+                                                cx,
+                                            );
+                                        });
+                                    }),
+                            )
+                            .child(
+                                Button::new("prompt-open-changes")
+                                    .outline()
+                                    .compact()
+                                    .h(px(30.))
+                                    .rounded(px(7.))
+                                    .icon(IconName::File)
+                                    .label("Changes")
+                                    .disabled(self.workspace_root.is_none())
+                                    .on_click(move |_, _, cx| {
+                                        changes_view.update(cx, |composer, cx| {
+                                            composer.open_workspace_panel(
+                                                PromptWorkspacePanel::Changes,
+                                                cx,
+                                            );
+                                        });
+                                    }),
+                            )
                     }),
             )
             .child(
@@ -459,11 +595,14 @@ impl PromptComposer {
 impl Render for PromptComposer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let _ = &self.subscriptions;
+        self.synchronize_input_mode(window, cx);
+
         let focused = self.input.read(cx).focus_handle(cx).is_focused(window);
         let ready = self.is_ready(cx) && !self.generating;
         let submit_view = cx.entity();
         let generating = self.generating;
-        let can_add_attachment = self.attachments.len() < MAX_ATTACHMENTS;
+        let is_work = self.mode == ConversationMode::Agent;
+        let can_add_attachment = !is_work && self.attachments.len() < MAX_ATTACHMENTS;
         let surface = linear_gradient(
             145.,
             linear_color_stop(cx.theme().popover, 0.),
@@ -484,45 +623,68 @@ impl Render for PromptComposer {
         );
 
         v_flex()
-            .id("prompt-composer-surface")
-            .debug_selector(|| "prompt-composer-surface".into())
-            .relative()
             .w_full()
             .max_w(px(800.))
             .mx_auto()
-            .min_h(px(108.))
-            .p(px(18.))
-            .gap(px(12.))
-            .justify_between()
-            .rounded(px(20.))
-            .border_1()
-            .border_color(if focused {
-                cx.theme().ring.opacity(0.9)
-            } else {
-                cx.theme().primary.opacity(0.4)
-            })
-            .bg(surface)
-            .shadow(vec![
-                box_shadow(
-                    0.,
-                    20.,
-                    46.,
-                    -20.,
-                    cx.theme().primary.opacity(if focused { 0.5 } else { 0.34 }),
-                ),
-                box_shadow(0., 8., 22., -12., cx.theme().background.opacity(0.92)),
-            ])
+            .items_center()
+            .gap(px(14.))
+            .child(self.mode_selector(cx.entity(), cx))
             .child(
-                div()
-                    .absolute()
-                    .top(px(0.))
-                    .left(px(24.))
-                    .right(px(24.))
-                    .h(px(1.))
-                    .bg(highlight),
+                v_flex()
+                    .id("prompt-composer-surface")
+                    .debug_selector(|| "prompt-composer-surface".into())
+                    .relative()
+                    .w_full()
+                    .min_h(if is_work { px(128.) } else { px(60.) })
+                    .p(if is_work { px(18.) } else { px(8.) })
+                    .gap(if is_work { px(12.) } else { px(0.) })
+                    .justify_between()
+                    .rounded(if is_work { px(20.) } else { px(18.) })
+                    .border_1()
+                    .border_color(if focused {
+                        cx.theme().ring.opacity(0.9)
+                    } else {
+                        cx.theme().primary.opacity(0.4)
+                    })
+                    .bg(surface)
+                    .shadow(vec![
+                        box_shadow(
+                            0.,
+                            if is_work { 20. } else { 8. },
+                            if is_work { 46. } else { 20. },
+                            -20.,
+                            cx.theme().primary.opacity(if focused { 0.5 } else { 0.34 }),
+                        ),
+                        box_shadow(0., 8., 22., -12., cx.theme().background.opacity(0.92)),
+                    ])
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(0.))
+                            .left(px(24.))
+                            .right(px(24.))
+                            .h(px(1.))
+                            .bg(highlight),
+                    )
+                    .when(is_work, |this| {
+                        this.child(self.render_input_content(cx)).child(self.footer(
+                            submit_view.clone(),
+                            generating,
+                            ready,
+                            false,
+                            cx,
+                        ))
+                    })
+                    .when(!is_work, |this| {
+                        this.child(self.render_chat_content(
+                            submit_view,
+                            generating,
+                            ready,
+                            can_add_attachment,
+                            cx,
+                        ))
+                    }),
             )
-            .child(self.render_input_content(cx))
-            .child(self.footer(submit_view, generating, ready, can_add_attachment, cx))
     }
 }
 

@@ -6,7 +6,7 @@ mod state;
 mod tests;
 
 pub use state::AgentCapability;
-pub use state::{PromptComposer, PromptComposerEvent, PromptRequest};
+pub use state::{PromptComposer, PromptComposerEvent, PromptRequest, PromptWorkspacePanel};
 
 const MAX_ATTACHMENTS: usize = 4;
 const MAX_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;

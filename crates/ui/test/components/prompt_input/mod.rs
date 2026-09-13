@@ -1,9 +1,11 @@
 use std::{cell::RefCell, rc::Rc};
 
 use gpui_kit::{TestAppContext, size};
-use magenta_core::{EffortLevel, GenerationConfig, GenerationLimits, ModelDescriptor};
+use magenta_core::{
+    ConversationMode, EffortLevel, GenerationConfig, GenerationLimits, ModelDescriptor,
+};
 
-use super::{PromptComposer, PromptComposerEvent, is_supported_image};
+use super::{AgentCapability, PromptComposer, PromptComposerEvent, is_supported_image};
 
 fn model(id: &str, default_effort: EffortLevel) -> ModelDescriptor {
     ModelDescriptor {
@@ -83,6 +85,36 @@ fn supported_image_extensions_are_case_insensitive() {
     assert!(is_supported_image(std::path::Path::new("reference.WebP")));
     assert!(!is_supported_image(std::path::Path::new("reference.gif")));
     assert!(!is_supported_image(std::path::Path::new("reference")));
+}
+
+#[gpui_kit::test]
+fn chat_and_work_keep_independent_drafts(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
+
+    window
+        .update(cx, |composer, window, cx| {
+            composer.set_agent_capability(AgentCapability::Commands, cx);
+            composer.input.update(cx, |input, cx| {
+                input.set_value("Chat draft", window, cx);
+            });
+
+            composer.select_mode(ConversationMode::Agent, window, cx);
+            assert!(composer.input.read(cx).value().is_empty());
+
+            composer.input.update(cx, |input, cx| {
+                input.set_value("Work draft", window, cx);
+            });
+            composer.select_mode(ConversationMode::Chat, window, cx);
+            assert_eq!(composer.input.read(cx).value().as_ref(), "Chat draft");
+
+            composer.select_mode(ConversationMode::Agent, window, cx);
+            assert_eq!(composer.input.read(cx).value().as_ref(), "Work draft");
+        })
+        .expect("the composer test window should remain open");
 }
 
 #[gpui_kit::test]

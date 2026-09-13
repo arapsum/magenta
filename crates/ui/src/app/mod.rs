@@ -35,9 +35,9 @@ use magenta_core::{
 
 use self::settings_window::{AccountSettingsState, SettingsWindow, SettingsWindowEvent};
 use crate::components::{
-    agent_workbench::{AgentWorkbench, AgentWorkbenchEvent},
+    agent_workbench::{AgentWorkbench, AgentWorkbenchEvent, WorkbenchSection},
     conversation::{ConversationView, ConversationViewEvent},
-    prompt_input::{AgentCapability, PromptComposer, PromptComposerEvent},
+    prompt_input::{AgentCapability, PromptComposer, PromptComposerEvent, PromptWorkspacePanel},
     sidebar::{SidebarEvent, SidebarView},
     titlebar, workspace,
 };
@@ -354,6 +354,21 @@ impl MainView {
                     PromptComposerEvent::Cancel => main.cancel_generation(cx),
                     PromptComposerEvent::WorkspaceSelected(root) => {
                         main.register_project(root.clone(), window, cx);
+                    }
+                    PromptComposerEvent::OpenWorkspacePanel(panel) => {
+                        let section = match panel {
+                            PromptWorkspacePanel::Files => WorkbenchSection::Files,
+                            PromptWorkspacePanel::Changes => WorkbenchSection::Changes,
+                        };
+
+                        if let Some(workbench) = &main.workbench {
+                            main.workbench_open = true;
+                            workbench.update(cx, |workbench, cx| {
+                                workbench.show_section(section, window, cx);
+                                workbench.prepare_to_show(window, cx);
+                            });
+                            cx.notify();
+                        }
                     }
                 },
             ),

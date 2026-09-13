@@ -54,6 +54,19 @@ pub enum PromptComposerEvent {
     Submit(PromptRequest),
     Cancel,
     WorkspaceSelected(PathBuf),
+    OpenWorkspacePanel(PromptWorkspacePanel),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PromptWorkspacePanel {
+    Files,
+    Changes,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ModeDraft {
+    prompt: String,
+    attachments: Vec<ReferenceImage>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -83,11 +96,14 @@ pub struct PromptComposer {
     pub(super) model: Option<ModelDescriptor>,
     pub(super) effort: Option<EffortLevel>,
     pub(super) mode: ConversationMode,
+    input_mode: ConversationMode,
     pub(super) workspace_root: Option<PathBuf>,
     pub(super) agent_capability: AgentCapability,
     pub(super) generating: bool,
     storage_ready: bool,
     pub(super) attachments: Vec<ReferenceImage>,
+    chat_draft: ModeDraft,
+    work_draft: ModeDraft,
     retry_target: Option<MessageId>,
     pub(super) inline_error: Option<ErrorPresentation>,
     blocking_error: Option<ErrorPresentation>,
@@ -103,7 +119,7 @@ impl PromptComposer {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Ask Magenta anything…")
-                .auto_grow(2, 5)
+                .auto_grow(1, 5)
                 .submit_on_enter(true)
         });
         let preview = cx.new(|cx| TextViewState::markdown("", cx));
@@ -133,11 +149,14 @@ impl PromptComposer {
             model: None,
             effort: None,
             mode: ConversationMode::Chat,
+            input_mode: ConversationMode::Chat,
             workspace_root: None,
             agent_capability: AgentCapability::Unavailable,
             generating: false,
             storage_ready: true,
             attachments: Vec::new(),
+            chat_draft: ModeDraft::default(),
+            work_draft: ModeDraft::default(),
             retry_target: None,
             inline_error: None,
             blocking_error: None,
@@ -437,13 +456,75 @@ impl PromptComposer {
             && workspace_ready
     }
 
-    pub(super) fn select_mode(&mut self, mode: ConversationMode, cx: &mut Context<'_, Self>) {
+    pub(super) fn select_mode(
+        &mut self,
+        mode: ConversationMode,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         if mode == ConversationMode::Agent && !self.agent_capability.available() {
             return;
         }
-        if self.mode != mode {
-            self.mode = mode;
-            cx.notify();
+
+        if self.mode == mode && self.input_mode == mode {
+            return;
+        }
+
+        self.mode = mode;
+        self.synchronize_input_mode(window, cx);
+    }
+
+    pub(super) fn synchronize_input_mode(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.input_mode == self.mode {
+            return;
+        }
+
+        let current = ModeDraft {
+            prompt: self.input.read(cx).value().to_string(),
+            attachments: std::mem::take(&mut self.attachments),
+        };
+
+        match self.input_mode {
+            ConversationMode::Chat => self.chat_draft = current,
+            ConversationMode::Agent => self.work_draft = current,
+        }
+
+        let mode = self.mode.clone();
+        let next = match &mode {
+            ConversationMode::Chat => &mut self.chat_draft,
+            ConversationMode::Agent => &mut self.work_draft,
+        };
+
+        self.input.update(cx, |input, cx| {
+            input.set_value(&next.prompt, window, cx);
+            input.set_placeholder(
+                if mode == ConversationMode::Chat {
+                    "Ask Magenta anything…"
+                } else {
+                    "What should we work on?"
+                },
+                window,
+                cx,
+            );
+        });
+
+        self.attachments = std::mem::take(&mut next.attachments);
+        self.input_mode = mode;
+        self.schedule_code_preview(window, cx);
+        cx.notify();
+    }
+
+    pub(super) fn open_workspace_panel(
+        &self,
+        panel: PromptWorkspacePanel,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.mode == ConversationMode::Agent && self.workspace_root.is_some() {
+            cx.emit(PromptComposerEvent::OpenWorkspacePanel(panel));
         }
     }
 
@@ -514,11 +595,14 @@ impl PromptComposer {
             prompt: self.input.read(cx).value().trim().to_owned().into(),
             generation: GenerationConfig::new(model.provider.clone(), model.id.clone(), effort)
                 .with_limits(model.limits),
-            attachments: self
-                .attachments
-                .iter()
-                .map(|attachment| attachment.path.clone())
-                .collect(),
+            attachments: if self.mode == ConversationMode::Chat {
+                self.attachments
+                    .iter()
+                    .map(|attachment| attachment.path.clone())
+                    .collect()
+            } else {
+                Vec::new()
+            },
             mode: self.mode.clone(),
             workspace_root: self.workspace_root.clone(),
         })
