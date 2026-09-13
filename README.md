@@ -4,12 +4,13 @@ Magenta is an experimental native AI chat and workspace client written in Rust
 with GPUI through [GPUI Kit](https://github.com/longbridge/gpui-kit). The workspace
 currently pins `gpui-kit` to `0.6.1`.
 
-![Magenta conversation with structured Markdown and code](assets/magenta-conversation.png)
+![Magenta conversation with structured Markdown, code, and the Chat composer](assets/magenta-conversation.png)
 
-It combines streaming conversations, local history, and an approval-controlled
-workspace agent in a native desktop window. Linux is the platform exercised by
-this repository. The production provider is OpenAI through ChatGPT browser
-sign-in; provider icons in the UI do not imply additional integrations.
+It combines streaming conversations, local history, a Git-aware Changes panel,
+and an approval-controlled workspace agent in a native desktop window. Linux is
+the platform exercised by this repository. The production provider is OpenAI
+through ChatGPT browser sign-in; provider icons in the UI do not imply
+additional integrations.
 
 ## Start here
 
@@ -22,9 +23,11 @@ cargo run --locked
 ```
 
 Connect your ChatGPT account from the sidebar account menu or Settings. Choose a
-model and its supported effort level in the composer. For Agent mode, add a
-project or choose a workspace directory first. Commands require Bubblewrap and
-a successful isolation probe; file tools remain available without it.
+model and its supported effort level in the composer. **Chat** provides a compact
+conversation input; **Work** expands the composer with workspace, Files, and
+Changes controls while preserving a separate draft. For Work mode, add a project
+or choose a workspace directory first. Commands require Bubblewrap and a
+successful isolation probe; file tools remain available without it.
 
 ## Current features
 
@@ -37,12 +40,16 @@ a successful isolation probe; file tools remain available without it.
   50 messages; the conversation view retains at most 150 rendered messages.
 - Model-aware context budgeting that selects recent whole turns independently
   of the visible page and indicates when older context was omitted.
+- Distinct Chat and Work composers with independent drafts, a unified model and
+  effort picker, and workspace controls that appear only for agentic work.
 - Registered projects, project conversations, and a read-only code workbench
   with a collapsible explorer, independent file tabs, breadcrumbs, search, and
   folding. Switching conversations closes and clears the workbench session.
 - File and unified-diff view modes for agent changes, change status, hunk
   navigation, and a per-tab view selection. Diff review is read-only; approvals
   remain in the conversation.
+- A Git-aware Changes panel with repository status, staged and unstaged groups,
+  file diffs, per-file and bulk stage/unstage actions, and confirmed commits.
 - Workspace listing, literal text search, bounded reads, file creation, and
   patch previews. Ordinary file edits can be approved individually or for the
   current run; protected reads and commands still need individual approval.
@@ -51,8 +58,9 @@ a successful isolation probe; file tools remain available without it.
   and otherwise collapse automatically unless manually overridden.
 - Persistent, categorized response failures with relevant recovery actions,
   preserved partial output, and copyable, allowlisted diagnostic details.
-- Warm light/dark themes, an accent-colored sidebar and composer, and separate
-  UI, code, and math typography preferences in a TOML-backed settings window.
+- Warm light/dark themes, a layered dark surface system, a subtle animated fluid
+  field, and separate UI, code, and math typography preferences in a TOML-backed
+  settings window.
 
 The full-height sidebar remains separate from the main panel: **the titlebar
 must not extend over the sidebar**. This layout rule applies to future UI work
@@ -75,8 +83,8 @@ verification commands. The package names below are also the names accepted by
 | [magenta-application](crates/application/README.md) | Sending, regeneration, retry, agent orchestration, history and project workflows | core |
 | [magenta-providers](crates/providers/README.md) | OpenAI authentication, model discovery, streaming; deterministic demo provider | core |
 | [magenta-storage](crates/storage/README.md) | SQLite history/projects, migrations, attachments, TOML settings | core |
-| [magenta-workspace](crates/workspace/README.md) | Workspace file access, patch commits, Bubblewrap command execution | core |
-| [magenta-ui](crates/ui/README.md) | GPUI views, stream lifecycle, recovery presentation, themes and settings | application, core |
+| [magenta-workspace](crates/workspace/README.md) | Workspace file access, repository status/diffs/staging/commits, Bubblewrap commands | core |
+| [magenta-ui](crates/ui/README.md) | GPUI conversations, Chat/Work composers, workbench, Changes panel, themes and settings | application, core |
 | [magenta-desktop](crates/desktop/README.md) | `magenta` executable, adapter wiring, assets, windows and diagnostics | All six library crates |
 
 See also the [development guide](docs/development.md) and
@@ -217,9 +225,10 @@ documentation builds, and the manual review checklist.
 
 Additional providers, non-image attachments, remote image URLs, clipboard image
 capture, and rich reasoning/citation events are not implemented. The workbench
-does not provide direct editing/saving, Git staging, branch comparison, or
-side-by-side diffs. Agent diff state is session-local, and tab sessions are not
-restored after switching conversations or restarting.
+does not provide direct editing/saving, branch operations or comparison, or
+side-by-side diffs. Repository operations are limited to status, diffs,
+staging/unstaging, and commits. Agent diff state is session-local, and tab
+sessions are not restored after switching conversations or restarting.
 
 Context selection uses conservative estimates, not an exact provider tokenizer
 or conversation summarization. Budgeting is applied when preparing a turn or
