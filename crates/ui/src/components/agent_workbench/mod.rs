@@ -1,5 +1,6 @@
 //! Read-only, tabbed project tree and code preview for agent workspace changes.
 
+mod changes;
 mod content;
 mod navigation;
 mod state;
@@ -12,6 +13,8 @@ mod tree;
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
+    sync::Arc,
+    time::Duration,
 };
 
 use gpui_kit::component::{
@@ -19,9 +22,10 @@ use gpui_kit::component::{
     breadcrumb::{Breadcrumb, BreadcrumbItem},
     button::{Button, ButtonVariants as _, Toggle, ToggleGroup},
     h_flex,
-    input::{Editor, EditorState, Position, TabSize},
+    input::{Editor, EditorState, Input, InputState, Position, TabSize},
     list::ListItem,
     resizable::{h_resizable, resizable_panel},
+    scroll::ScrollableElement as _,
     tab::{Tab, TabBar},
     tree::{TreeEvent, TreeItem, TreeState, tree},
     v_flex,
@@ -33,8 +37,9 @@ use gpui_kit::{
 };
 use magenta_application::ProjectCatalog;
 use magenta_core::{
-    AgentWorkspaceChange, Project, WorkspaceChangeKind, WorkspaceChangeState, WorkspaceDocument,
-    WorkspaceEntry, WorkspaceEntryKind, WorkspaceError,
+    AgentWorkspaceChange, Project, RepositoryAccess, RepositoryDiffArea, RepositoryStatus,
+    WorkspaceChangeKind, WorkspaceChangeState, WorkspaceDocument, WorkspaceEntry,
+    WorkspaceEntryKind, WorkspaceError,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
@@ -73,6 +78,13 @@ const TOGGLE_VIEW_MODE_KEY: &str = "ctrl-shift-d";
 #[derive(Clone, Debug)]
 pub enum AgentWorkbenchEvent {
     Closed,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum WorkbenchSection {
+    #[default]
+    Files,
+    Changes,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -154,6 +166,7 @@ struct WorkbenchDiff {
     error: Option<String>,
     hunk_lines: Vec<usize>,
     selected_hunk: usize,
+    repository_area: Option<RepositoryDiffArea>,
 }
 
 impl WorkbenchDiff {
@@ -209,6 +222,7 @@ struct WorkbenchTab {
 
 pub struct AgentWorkbench {
     catalog: ProjectCatalog,
+    repository: Arc<dyn RepositoryAccess>,
     project: Option<Project>,
     tree_state: Entity<TreeState>,
     directories: HashMap<String, Vec<WorkspaceEntry>>,
@@ -221,6 +235,20 @@ pub struct AgentWorkbench {
     session_generation: u64,
     next_load_generation: u64,
     refresh_pending: bool,
+    section: WorkbenchSection,
+    repository_status: Option<RepositoryStatus>,
+    repository_error: Option<String>,
+    repository_loading: bool,
+    repository_generation: u64,
+    repository_task: Option<Task<()>>,
+    repository_poll_task: Option<Task<()>>,
+    repository_operation: Option<Task<()>>,
+    commit_input: Entity<InputState>,
+    pending_commit: Option<String>,
+    commit_error: Option<String>,
+    last_commit: Option<String>,
+    run_baseline: HashSet<String>,
+    run_changes: HashMap<String, WorkspaceChangeKind>,
     _subscriptions: Vec<Subscription>,
 }
 

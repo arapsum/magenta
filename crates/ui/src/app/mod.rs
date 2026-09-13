@@ -30,7 +30,7 @@ use magenta_application::{
 };
 use magenta_core::{
     ConversationId, ConversationSearchResult, MessageId, ModelCatalog, ProviderAccount,
-    ProviderAuthenticator, SettingsStore,
+    ProviderAuthenticator, RepositoryAccess, SettingsStore,
 };
 
 use self::settings_window::{AccountSettingsState, SettingsWindow, SettingsWindowEvent};
@@ -135,6 +135,7 @@ pub struct MainServices {
     pub settings_store: Arc<dyn SettingsStore>,
     pub agent: Option<RunWorkspaceAgent>,
     pub projects: Option<ProjectCatalog>,
+    pub repository: Option<Arc<dyn RepositoryAccess>>,
 }
 
 fn configure_agent_composer(
@@ -227,7 +228,10 @@ impl MainView {
         let workbench = services
             .projects
             .clone()
-            .map(|catalog| cx.new(|cx| AgentWorkbench::new(catalog, window, cx)));
+            .zip(services.repository.clone())
+            .map(|(catalog, repository)| {
+                cx.new(|cx| AgentWorkbench::new(catalog, repository, window, cx))
+            });
         let finder_input = cx.new(|cx| InputState::new(window, cx).placeholder("Search chats…"));
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);

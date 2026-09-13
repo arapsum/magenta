@@ -8,7 +8,10 @@ use magenta_core::{ConversationId, GenerationConfig, Message, MessageId};
 use super::{AccountState, CloseState, MainView, Operation};
 use crate::{
     MagentaError,
-    components::{conversation::ConversationThread, prompt_input::PromptComposer},
+    components::{
+        agent_workbench::AgentWorkbench, conversation::ConversationThread,
+        prompt_input::PromptComposer,
+    },
 };
 
 impl MainView {
@@ -47,6 +50,11 @@ impl MainView {
             workspace_root,
         };
         let submitted = request.clone();
+
+        if let Some(workbench) = &self.workbench {
+            workbench.update(cx, AgentWorkbench::begin_agent_run);
+        }
+
         self.operation = Operation::Preparing;
         self.update_composer_availability(cx);
         self.operation_task = Some(cx.spawn_in(window, async move |view, window| {

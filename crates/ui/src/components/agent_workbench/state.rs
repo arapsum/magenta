@@ -1,7 +1,12 @@
 use super::*;
 
 impl AgentWorkbench {
-    pub fn new(catalog: ProjectCatalog, window: &Window, cx: &mut Context<'_, Self>) -> Self {
+    pub fn new(
+        catalog: ProjectCatalog,
+        repository: Arc<dyn RepositoryAccess>,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> Self {
         cx.bind_keys([
             gpui_kit::KeyBinding::new("ctrl-tab", SelectNextWorkbenchTab, Some("AgentWorkbench")),
             gpui_kit::KeyBinding::new(
@@ -23,6 +28,7 @@ impl AgentWorkbench {
             gpui_kit::KeyBinding::new("shift-f7", PreviousWorkbenchHunk, Some("AgentWorkbench")),
         ]);
         let tree_state = cx.new(|cx| TreeState::new(cx));
+        let commit_input = cx.new(|cx| InputState::new(window, cx).placeholder("Commit message"));
         let tree_subscription = cx.subscribe(&tree_state, move |view, _, event: &TreeEvent, cx| {
             if let TreeEvent::Expanded(path) = event {
                 view.expanded.insert(path.to_string());
@@ -33,6 +39,7 @@ impl AgentWorkbench {
         });
         Self {
             catalog,
+            repository,
             project: None,
             tree_state,
             directories: HashMap::new(),
@@ -45,6 +52,20 @@ impl AgentWorkbench {
             session_generation: 0,
             next_load_generation: 0,
             refresh_pending: false,
+            section: WorkbenchSection::Files,
+            repository_status: None,
+            repository_error: None,
+            repository_loading: false,
+            repository_generation: 0,
+            repository_task: None,
+            repository_poll_task: None,
+            repository_operation: None,
+            commit_input,
+            pending_commit: None,
+            commit_error: None,
+            last_commit: None,
+            run_baseline: HashSet::new(),
+            run_changes: HashMap::new(),
             _subscriptions: vec![tree_subscription],
         }
     }
@@ -65,6 +86,7 @@ impl AgentWorkbench {
         self.reset_tree(cx);
         if self.project.is_some() {
             self.load_directory(String::new(), cx);
+            self.refresh_repository(cx);
         }
         cx.notify();
     }
@@ -83,6 +105,9 @@ impl AgentWorkbench {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if change.state == WorkspaceChangeState::Committed {
+            self.run_changes.insert(change.path.clone(), change.kind);
+        }
         let (path, has_diff) = self.upsert_change(change, window, cx);
         if has_diff {
             self.position_active_diff(&path, window, cx);
@@ -155,6 +180,7 @@ impl AgentWorkbench {
                 } else {
                     0
                 },
+                repository_area: None,
             });
             tab.mode = if has_diff && same_call && previous_has_diff {
                 previous_mode
@@ -181,6 +207,7 @@ impl AgentWorkbench {
                     error,
                     hunk_lines,
                     selected_hunk: 0,
+                    repository_area: None,
                 }),
                 mode: if has_diff {
                     WorkbenchViewMode::Diff
@@ -204,6 +231,7 @@ impl AgentWorkbench {
         self.tree_error = None;
         self.reset_tree(cx);
         self.load_directory(String::new(), cx);
+        self.refresh_repository(cx);
         let paths = self
             .tabs
             .iter()
@@ -243,6 +271,18 @@ impl AgentWorkbench {
         self.active_path = None;
         self.tree_error = None;
         self.refresh_pending = false;
+        self.repository_generation = self.repository_generation.wrapping_add(1);
+        self.repository_task.take();
+        self.repository_poll_task.take();
+        self.repository_operation.take();
+        self.repository_status = None;
+        self.repository_error = None;
+        self.repository_loading = false;
+        self.pending_commit = None;
+        self.commit_error = None;
+        self.last_commit = None;
+        self.run_baseline.clear();
+        self.run_changes.clear();
     }
 
     fn reset_tree(&self, cx: &mut Context<'_, Self>) {
@@ -250,7 +290,7 @@ impl AgentWorkbench {
             .update(cx, |state, cx| state.set_items(Vec::<TreeItem>::new(), cx));
     }
 
-    fn new_editor(
+    pub(super) fn new_editor(
         window: &mut Window,
         cx: &mut Context<'_, Self>,
         language: &str,

@@ -230,6 +230,52 @@ impl WorkspaceBrowser for TestPorts {
     }
 }
 
+impl RepositoryAccess for TestPorts {
+    fn status(&self, _: std::path::PathBuf) -> RepositoryFuture<RepositoryStatus> {
+        Box::pin(async {
+            Ok(RepositoryStatus {
+                branch: Some("main".to_owned()),
+                detached: false,
+                unborn: false,
+                changes: Vec::new(),
+            })
+        })
+    }
+
+    fn diff(
+        &self,
+        _: std::path::PathBuf,
+        path: String,
+        area: RepositoryDiffArea,
+    ) -> RepositoryFuture<RepositoryDiff> {
+        Box::pin(async move {
+            Ok(RepositoryDiff {
+                path,
+                area,
+                unified_diff: String::new(),
+                binary: false,
+            })
+        })
+    }
+
+    fn stage(&self, _: std::path::PathBuf, _: Vec<String>) -> RepositoryFuture<()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn unstage(&self, _: std::path::PathBuf, _: Vec<String>) -> RepositoryFuture<()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn commit(&self, _: std::path::PathBuf, summary: String) -> RepositoryFuture<RepositoryCommit> {
+        Box::pin(async move {
+            Ok(RepositoryCommit {
+                oid: "0123456".to_owned(),
+                summary,
+            })
+        })
+    }
+}
+
 fn page(id: u64) -> ConversationPage {
     ConversationPage {
         conversation: Conversation {
@@ -301,6 +347,7 @@ fn setup_with_projects_at(
                     settings_store: ports.clone(),
                     agent: None,
                     projects: Some(project_catalog),
+                    repository: Some(ports.clone()),
                 },
                 window,
                 cx,
@@ -336,6 +383,7 @@ fn setup_at(
                     settings_store: ports.clone(),
                     agent: None,
                     projects: None,
+                    repository: None,
                 },
                 window,
                 cx,

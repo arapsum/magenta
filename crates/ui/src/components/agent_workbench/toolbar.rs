@@ -14,6 +14,21 @@ impl AgentWorkbench {
             );
         }
         if let Some(diff) = &tab.diff {
+            if let Some(area) = diff.repository_area {
+                let status = match area {
+                    RepositoryDiffArea::Staged => "Staged change",
+                    RepositoryDiffArea::Unstaged => "Working tree change",
+                };
+                return Some(
+                    div()
+                        .flex_none()
+                        .text_size(px(10.))
+                        .font_medium()
+                        .text_color(cx.theme().primary)
+                        .child(status)
+                        .into_any_element(),
+                );
+            }
             let status = diff.status_label();
             return Some(
                 Button::new("workbench-change-status")

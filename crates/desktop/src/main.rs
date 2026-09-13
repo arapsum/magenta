@@ -21,10 +21,10 @@ use magenta_application::{
 };
 use magenta_core::{
     AgentProvider, ChatProvider, ConversationStore, ModelCatalog, ProviderAuthenticator,
-    SettingsStore, WorkspaceAccess, WorkspaceCommandRunner,
+    RepositoryAccess, SettingsStore, WorkspaceAccess, WorkspaceCommandRunner,
 };
 use magenta_providers::OpenAiProvider;
-use magenta_workspace::{BubblewrapCommandRunner, LocalWorkspace};
+use magenta_workspace::{BubblewrapCommandRunner, LocalRepository, LocalWorkspace};
 
 use magenta_ui::{notification_for_error, MagentaError, MainServices, MainView, Result};
 
@@ -309,6 +309,7 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     let local_workspace = Arc::new(LocalWorkspace);
     let workspace: Arc<dyn WorkspaceAccess> = local_workspace.clone();
     let workspace_browser: Arc<dyn magenta_core::WorkspaceBrowser> = local_workspace;
+    let repository: Arc<dyn RepositoryAccess> = Arc::new(LocalRepository);
     let command_runner: Option<Arc<dyn WorkspaceCommandRunner>> =
         match BubblewrapCommandRunner::new() {
             Ok(runner) => Some(Arc::new(runner)),
@@ -337,6 +338,7 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
                     settings_store: Arc::clone(&settings_store),
                     agent: Some(agent),
                     projects: Some(projects),
+                    repository: Some(repository),
                 },
                 window,
                 cx,

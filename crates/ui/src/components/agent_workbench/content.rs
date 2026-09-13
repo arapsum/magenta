@@ -267,7 +267,7 @@ impl Render for AgentWorkbench {
             .map_or_else(|| "Code".to_owned(), |project| project.name.clone());
         let narrow = window.viewport_size().width < px(696.);
         let show_explorer = self.explorer_open;
-        let tree = self.render_tree(view.clone(), cx);
+        let tree = self.render_explorer(view.clone(), cx);
         let editor = self.render_editor_pane(view, window, cx);
         let header = Self::render_header(project_name, show_explorer, cx);
         let content = Self::render_content_layout(tree, editor, narrow, show_explorer, cx);

@@ -6,8 +6,9 @@ use std::{
 use gpui_kit::{TestAppContext, px, size};
 use magenta_application::ProjectCatalog;
 use magenta_core::{
-    AgentWorkspaceChange, Project, ProjectStore, StorageFuture, Timestamp, WorkspaceBrowser,
-    WorkspaceDocument, WorkspaceEntry, WorkspaceFuture,
+    AgentWorkspaceChange, Project, ProjectStore, RepositoryAccess, RepositoryCommit,
+    RepositoryDiff, RepositoryDiffArea, RepositoryFuture, RepositoryStatus, StorageFuture,
+    Timestamp, WorkspaceBrowser, WorkspaceDocument, WorkspaceEntry, WorkspaceFuture,
 };
 
 use super::{
@@ -45,6 +46,55 @@ impl WorkspaceBrowser for TestProjects {
 
     fn read_document(&self, _: PathBuf, _: String) -> WorkspaceFuture<WorkspaceDocument> {
         self.documents.lock().unwrap().remove(0)
+    }
+}
+
+#[derive(Default)]
+struct TestRepository;
+
+impl RepositoryAccess for TestRepository {
+    fn status(&self, _: PathBuf) -> RepositoryFuture<RepositoryStatus> {
+        Box::pin(async {
+            Ok(RepositoryStatus {
+                branch: Some("main".to_owned()),
+                detached: false,
+                unborn: false,
+                changes: Vec::new(),
+            })
+        })
+    }
+
+    fn diff(
+        &self,
+        _: PathBuf,
+        path: String,
+        area: RepositoryDiffArea,
+    ) -> RepositoryFuture<RepositoryDiff> {
+        Box::pin(async move {
+            Ok(RepositoryDiff {
+                path,
+                area,
+                unified_diff: String::new(),
+                binary: false,
+            })
+        })
+    }
+
+    fn stage(&self, _: PathBuf, _: Vec<String>) -> RepositoryFuture<()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn unstage(&self, _: PathBuf, _: Vec<String>) -> RepositoryFuture<()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn commit(&self, _: PathBuf, summary: String) -> RepositoryFuture<RepositoryCommit> {
+        Box::pin(async move {
+            Ok(RepositoryCommit {
+                oid: "0123456".to_owned(),
+                summary,
+            })
+        })
     }
 }
 
@@ -99,7 +149,12 @@ fn setup_with_size(
 ) -> gpui_kit::WindowHandle<AgentWorkbench> {
     cx.update(gpui_kit::init);
     cx.open_window(window_size, move |window, cx| {
-        AgentWorkbench::new(ProjectCatalog::new(projects.clone(), projects), window, cx)
+        AgentWorkbench::new(
+            ProjectCatalog::new(projects.clone(), projects),
+            Arc::new(TestRepository),
+            window,
+            cx,
+        )
     })
 }
 
