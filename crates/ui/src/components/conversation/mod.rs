@@ -15,7 +15,7 @@ use std::{
 
 use futures_util::StreamExt as _;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _, box_shadow,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     h_flex,
@@ -57,7 +57,7 @@ pub struct ConversationThread {
     pub messages: Vec<Message>,
 }
 
-const MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(760.);
+const MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(780.);
 const COMPOSER_MAX_WIDTH: gpui_kit::Pixels = px(800.);
 const USER_MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(520.);
 const LIST_OVERDRAW: gpui_kit::Pixels = px(640.);
@@ -341,13 +341,7 @@ impl Render for ConversationView {
             .min_w_0()
             .bg(cx.theme().tokens.background.background)
             .text_color(cx.theme().foreground)
-            .child(
-                img("icons/surface-glow.svg")
-                    .absolute()
-                    .inset_0()
-                    .size_full()
-                    .object_fit(ObjectFit::Cover),
-            )
+            .child(super::visual::ambient_field(cx))
             .when(self.has_older, |this| {
                 this.child(
                     Button::new("load-earlier-messages")

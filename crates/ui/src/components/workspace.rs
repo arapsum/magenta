@@ -235,12 +235,6 @@ fn render_landing_content(
 }
 
 fn render_landing_shell(content: AnyElement, cx: &Context<'_, MainView>) -> AnyElement {
-    let ambient = linear_gradient(
-        145.,
-        linear_color_stop(cx.theme().primary.opacity(0.23), 0.),
-        linear_color_stop(cx.theme().background.opacity(0.), 0.78),
-    );
-
     div()
         .relative()
         .flex()
@@ -251,15 +245,7 @@ fn render_landing_shell(content: AnyElement, cx: &Context<'_, MainView>) -> AnyE
         .overflow_y_scrollbar()
         .bg(cx.theme().tokens.background.background)
         .text_color(cx.theme().foreground)
-        .child(
-            div()
-                .absolute()
-                .top(px(0.))
-                .left(px(0.))
-                .right(px(0.))
-                .h(px(520.))
-                .bg(ambient),
-        )
+        .child(super::visual::ambient_field(cx))
         .child(
             div()
                 .relative()

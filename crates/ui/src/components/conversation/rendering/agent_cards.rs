@@ -102,10 +102,14 @@ pub(super) fn render_command_card(
         .w_full()
         .gap(px(8.))
         .p(px(10.))
-        .rounded(cx.theme().radius_lg)
+        .rounded(px(12.))
         .border_1()
-        .border_color(status_color.opacity(0.38))
-        .bg(cx.theme().secondary.opacity(0.28))
+        .border_color(status_color.opacity(0.24))
+        .bg(crate::components::visual::surface(
+            crate::components::visual::SurfaceLevel::Raised,
+            cx,
+        ))
+        .shadow(crate::components::visual::raised_shadow(cx))
         .child(
             h_flex()
                 .items_center()
@@ -168,8 +172,13 @@ pub(super) fn render_command_card(
                             .max_h(px(220.))
                             .overflow_y_scrollbar()
                             .p(px(8.))
-                            .rounded(cx.theme().radius)
-                            .bg(cx.theme().background.opacity(0.65))
+                            .rounded(px(9.))
+                            .border_1()
+                            .border_color(cx.theme().foreground.opacity(0.05))
+                            .bg(crate::components::visual::surface(
+                                crate::components::visual::SurfaceLevel::Recessed,
+                                cx,
+                            ))
                             .font_family(cx.theme().mono_font_family.clone())
                             .text_size(cx.theme().mono_font_size)
                             .child(output),

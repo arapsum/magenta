@@ -246,8 +246,13 @@ fn activity_detail_block(label: &'static str, value: &str, cx: &App) -> AnyEleme
                 .max_h(px(180.))
                 .overflow_y_scrollbar()
                 .p(px(8.))
-                .rounded(cx.theme().radius)
-                .bg(cx.theme().background.opacity(0.65))
+                .rounded(px(9.))
+                .border_1()
+                .border_color(cx.theme().foreground.opacity(0.05))
+                .bg(crate::components::visual::surface(
+                    crate::components::visual::SurfaceLevel::Recessed,
+                    cx,
+                ))
                 .font_family(cx.theme().mono_font_family.clone())
                 .text_size(px(11.))
                 .text_color(cx.theme().foreground)

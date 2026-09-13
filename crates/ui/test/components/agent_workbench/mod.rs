@@ -13,7 +13,7 @@ use magenta_core::{
 
 use super::{
     AgentWorkbench, NextWorkbenchHunk, PreviousWorkbenchHunk, TOGGLE_VIEW_MODE_KEY, TabLoadState,
-    WorkbenchViewMode, parse_hunk_lines, shortest_unique_suffix,
+    WorkbenchSection, WorkbenchViewMode, parse_hunk_lines, shortest_unique_suffix,
 };
 
 #[derive(Default)]
@@ -183,6 +183,40 @@ fn hunk_detection_handles_crlf_empty_and_malformed_diffs() {
     assert!(parse_hunk_lines("").is_empty());
     assert!(parse_hunk_lines("not a unified diff\n+still content").is_empty());
     assert_eq!(parse_hunk_lines("@@ malformed\ncontent"), vec![0]);
+}
+
+#[gpui_kit::test]
+fn files_and_changes_segments_switch_in_both_directions(cx: &mut TestAppContext) {
+    let window = setup(cx, Arc::new(TestProjects::default()));
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+
+    let selector = visual
+        .debug_bounds("workbench-section-selector")
+        .expect("the workbench section selector should be visible");
+    visual.simulate_click(
+        gpui_kit::point(
+            selector.origin.x + selector.size.width - px(4.),
+            selector.center().y,
+        ),
+        gpui_kit::Modifiers::default(),
+    );
+    window
+        .update(cx, |workbench, _, _| {
+            assert_eq!(workbench.section, WorkbenchSection::Changes);
+        })
+        .unwrap();
+
+    let selector = visual.debug_bounds("workbench-section-selector").unwrap();
+    visual.simulate_click(
+        gpui_kit::point(selector.origin.x + px(4.), selector.center().y),
+        gpui_kit::Modifiers::default(),
+    );
+    window
+        .update(cx, |workbench, _, _| {
+            assert_eq!(workbench.section, WorkbenchSection::Files);
+        })
+        .unwrap();
 }
 
 #[gpui_kit::test]

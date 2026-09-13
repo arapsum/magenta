@@ -265,15 +265,19 @@ impl AgentWorkbench {
             .child(
                 h_flex()
                     .w_full()
-                    .p(px(6.))
+                    .p(px(7.))
                     .border_b_1()
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().foreground.opacity(0.06))
                     .child(
                         div()
+                            .debug_selector(|| "workbench-section-selector".into())
                             .rounded_full()
                             .border_1()
-                            .border_color(cx.theme().border.opacity(0.8))
-                            .bg(cx.theme().secondary.opacity(0.72))
+                            .border_color(cx.theme().foreground.opacity(0.07))
+                            .bg(crate::components::visual::surface(
+                                crate::components::visual::SurfaceLevel::Recessed,
+                                cx,
+                            ))
                             .p(px(2.))
                             .child(
                                 ToggleGroup::new("workbench-section")
@@ -292,7 +296,12 @@ impl AgentWorkbench {
                                             .checked(section == WorkbenchSection::Changes),
                                     )
                                     .on_click(move |checks, window, cx| {
-                                        let next = if checks.get(1).copied().unwrap_or(false) {
+                                        let selects_changes =
+                                            crate::components::select_second_segment(
+                                                checks,
+                                                section == WorkbenchSection::Changes,
+                                            );
+                                        let next = if selects_changes {
                                             WorkbenchSection::Changes
                                         } else {
                                             WorkbenchSection::Files

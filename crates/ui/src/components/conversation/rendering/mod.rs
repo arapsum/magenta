@@ -98,18 +98,28 @@ impl ConversationView {
                 this.child(
                     div()
                         .max_w(USER_MESSAGE_MAX_WIDTH)
-                        .px(px(14.))
-                        .py(px(10.))
-                        .rounded(px(14.))
+                        .px(px(15.))
+                        .py(px(9.))
+                        .rounded(px(12.))
                         .border_1()
-                        .border_color(cx.theme().primary.opacity(0.26))
+                        .border_color(cx.theme().primary.opacity(0.34))
                         .bg(linear_gradient(
-                            135.,
-                            linear_color_stop(cx.theme().secondary, 0.),
-                            linear_color_stop(cx.theme().accent.opacity(0.82), 1.),
+                            152.,
+                            linear_color_stop(
+                                super::super::visual::surface(
+                                    super::super::visual::SurfaceLevel::Raised,
+                                    cx,
+                                ),
+                                0.,
+                            ),
+                            linear_color_stop(cx.theme().accent.opacity(0.72), 1.),
                         ))
+                        .shadow(vec![
+                            box_shadow(0., 14., 34., -22., cx.theme().primary.opacity(0.38)),
+                            box_shadow(0., 7., 18., -12., cx.theme().background.opacity(0.96)),
+                        ])
                         .text_size(px(14.5))
-                        .line_height(px(22.))
+                        .line_height(px(23.))
                         .text_color(cx.theme().foreground)
                         .child(v_flex().w_full().gap(px(8.)).children(segments)),
                 )

@@ -503,14 +503,11 @@ impl Render for SidebarView {
         Sidebar::new("magenta-sidebar")
             .w(EXPANDED_WIDTH)
             .border_r_1()
-            .border_color(cx.theme().primary.opacity(0.14))
-            .shadow(vec![box_shadow(
-                12.,
-                0.,
-                36.,
-                -18.,
-                cx.theme().primary.opacity(0.22),
-            )])
+            .border_color(cx.theme().foreground.opacity(0.055))
+            .shadow(vec![
+                box_shadow(16., 0., 44., -20., cx.theme().background.opacity(0.98)),
+                box_shadow(9., 0., 30., -18., cx.theme().primary.opacity(0.18)),
+            ])
             .collapsible(SidebarCollapsible::None)
             .child(SidebarContent {
                 view: view.clone(),

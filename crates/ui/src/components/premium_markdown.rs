@@ -415,11 +415,11 @@ fn render_code_header(block: &CodeBlockData, id: u64, cx: &App) -> AnyElement {
 
 pub(super) fn conversation_text_style(cx: &App) -> TextViewStyle {
     TextViewStyle {
-        paragraph_gap: rems(0.9),
+        paragraph_gap: rems(1.05),
         heading_base_font_size: px(16.),
         heading_font_size: Some(Arc::new(|level, _| match level {
             1 => px(30.),
-            2 => px(24.),
+            2 => px(23.),
             3 => px(19.),
             4 => px(17.),
             _ => px(16.),

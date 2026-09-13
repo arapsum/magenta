@@ -104,7 +104,7 @@ impl ConversationView {
 
         v_flex()
             .w_full()
-            .gap(px(12.))
+            .gap(px(15.))
             .child(self.render_assistant_header(rendered, cx))
             .when_some(
                 Self::render_context_notice(rendered),

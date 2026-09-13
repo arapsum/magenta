@@ -167,8 +167,11 @@ impl AgentWorkbench {
             .gap(px(7.))
             .px(px(9.))
             .border_b_1()
-            .border_color(cx.theme().primary.opacity(0.18))
-            .bg(cx.theme().tokens.tab_bar)
+            .border_color(cx.theme().foreground.opacity(0.07))
+            .bg(crate::components::visual::surface(
+                crate::components::visual::SurfaceLevel::Raised,
+                cx,
+            ))
             .child(
                 Button::new("toggle-workbench-explorer")
                     .ghost()
@@ -231,7 +234,10 @@ impl AgentWorkbench {
             v_flex()
                 .size_full()
                 .p(px(4.))
-                .bg(cx.theme().sidebar.opacity(0.72))
+                .bg(crate::components::visual::surface(
+                    crate::components::visual::SurfaceLevel::Raised,
+                    cx,
+                ))
                 .child(tree)
                 .into_any_element()
         } else if show_explorer {
@@ -245,8 +251,11 @@ impl AgentWorkbench {
                                 .size_full()
                                 .p(px(4.))
                                 .border_r_1()
-                                .border_color(cx.theme().border.opacity(0.72))
-                                .bg(cx.theme().sidebar.opacity(0.72))
+                                .border_color(cx.theme().foreground.opacity(0.06))
+                                .bg(crate::components::visual::surface(
+                                    crate::components::visual::SurfaceLevel::Raised,
+                                    cx,
+                                ))
                                 .child(tree),
                         ),
                 )
@@ -303,7 +312,10 @@ impl Render for AgentWorkbench {
             )
             .size_full()
             .min_w_0()
-            .bg(cx.theme().tokens.background.background)
+            .bg(crate::components::visual::surface(
+                crate::components::visual::SurfaceLevel::Recessed,
+                cx,
+            ))
             .child(header)
             .child(content)
     }

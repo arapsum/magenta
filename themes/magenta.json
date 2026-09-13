@@ -120,25 +120,25 @@
       "radius.lg": 18,
       "shadow": true,
       "colors": {
-        "background": "#0D0A0F",
+        "background": "#0B080D",
         "foreground": "#F5F0F3",
 
-        "border": "#332532",
-        "input.border": "#463044",
+        "border": "#30232F",
+        "input.border": "#493047",
         "ring": "#D84C8B",
 
-        "accent.background": "#2A1823",
+        "accent.background": "#281720",
         "accent.foreground": "#F8EAF1",
 
-        "muted.background": "#1A141B",
+        "muted.background": "#151017",
         "muted.foreground": "#AA9CA5",
 
-        "popover.background": "#19131A",
+        "popover.background": "#1B141C",
         "popover.foreground": "#F5F0F3",
 
-        "primary.background": "linear-gradient(135deg, #D84C8B, #EF776B)",
-        "primary.hover.background": "linear-gradient(135deg, #E45B99, #F48679)",
-        "primary.active.background": "linear-gradient(135deg, #C53F7C, #DD685F)",
+        "primary.background": "linear-gradient(135deg, #A9326A, #C64F78)",
+        "primary.hover.background": "linear-gradient(135deg, #BC3D79, #D45C84)",
+        "primary.active.background": "linear-gradient(135deg, #92275C, #B6416C)",
         "primary.foreground": "#FFF9FC",
 
         "secondary.background": "#1D171F",
@@ -153,14 +153,14 @@
 
         "selection.background": "#D84C8B3D",
 
-        "sidebar.background": "#151017",
+        "sidebar.background": "#120E14",
         "sidebar.foreground": "#DDD5DA",
         "sidebar.border": "#332532",
 
-        "sidebar.accent.background": "#2A1823",
+        "sidebar.accent.background": "#291720",
         "sidebar.accent.foreground": "#F6EDF1",
 
-        "sidebar.primary.background": "linear-gradient(135deg, #D84C8B, #EF776B)",
+        "sidebar.primary.background": "linear-gradient(135deg, #5E1F43, #8F2D5E)",
         "sidebar.primary.foreground": "#FFF9FC",
 
         "tab.background": "#00000000",
@@ -171,7 +171,7 @@
         "tab_bar.background": "#151017",
         "tab_bar.segmented.background": "#201720",
 
-        "title_bar.background": "#0D0A0F",
+        "title_bar.background": "#0B080D",
         "title_bar.border": "#332532",
 
         "scrollbar.background": "#00000000",

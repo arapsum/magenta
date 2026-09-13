@@ -39,11 +39,18 @@ impl SidebarView {
                     .bg(linear_gradient(
                         135.,
                         linear_color_stop(cx.theme().primary, 0.),
-                        linear_color_stop(cx.theme().yellow, 1.),
+                        linear_color_stop(cx.theme().red.opacity(0.82), 1.),
                     ))
                     .text_color(cx.theme().primary_foreground)
                     .border_1()
-                    .border_color(cx.theme().primary.opacity(0.36))
+                    .border_color(cx.theme().primary.opacity(0.46))
+                    .shadow(vec![box_shadow(
+                        0.,
+                        6.,
+                        16.,
+                        -8.,
+                        cx.theme().primary.opacity(0.5),
+                    )])
                     .text_size(px(12.))
                     .font_medium()
                     .child(initial),

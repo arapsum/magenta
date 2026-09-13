@@ -166,8 +166,11 @@ impl AgentWorkbench {
             .gap(px(5.))
             .px(px(10.))
             .border_b_1()
-            .border_color(cx.theme().border.opacity(0.72))
-            .bg(cx.theme().popover.opacity(0.62))
+            .border_color(cx.theme().foreground.opacity(0.055))
+            .bg(crate::components::visual::surface(
+                crate::components::visual::SurfaceLevel::Raised,
+                cx,
+            ))
             .child(
                 div().flex_1().min_w_0().overflow_hidden().child(
                     Breadcrumb::new()
