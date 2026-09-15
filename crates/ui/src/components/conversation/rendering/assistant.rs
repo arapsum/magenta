@@ -110,16 +110,7 @@ impl ConversationView {
                 Self::render_context_notice(rendered),
                 gpui_kit::ParentElement::child,
             )
-            .when(streaming, |this| {
-                this.when_some(
-                    self.render_generation_progress(message.id, cx, view),
-                    gpui_kit::ParentElement::child,
-                )
-            })
-            .when_some(
-                self.render_agent_activities(message, cx, view),
-                gpui_kit::ParentElement::child,
-            )
+            .child(self.render_assistant_trace(message, cx, view))
             .when_some(
                 self.render_agent_approval(message.id, cx, view),
                 gpui_kit::ParentElement::child,
@@ -230,14 +221,12 @@ impl ConversationView {
         cx: &App,
         view: &Entity<Self>,
     ) -> AnyElement {
-        let has_side_effects = message.agent_activities.iter().any(|activity| {
-            matches!(
-                activity.kind,
-                AgentActivityKind::ToolCall | AgentActivityKind::ToolResult
-            ) && matches!(
-                activity.tool_name.as_str(),
-                "create_file" | "apply_patch" | "run_command"
-            )
+        let has_side_effects = message.assistant_trace.entries.iter().any(|entry| {
+            entry.kind == AssistantTraceKind::Tool
+                && matches!(
+                    entry.tool_name.as_deref(),
+                    Some("create_file" | "apply_patch" | "run_command")
+                )
         });
         let (title, explanation, primary_label, secondary_label) = match failure.category {
             magenta_core::MessageFailureCategory::Authentication => (
@@ -455,52 +444,6 @@ impl ConversationView {
                 )
                 .into_any_element()
         })
-    }
-
-    fn render_generation_progress(
-        &self,
-        message_id: MessageId,
-        cx: &App,
-        view: &Entity<Self>,
-    ) -> Option<AnyElement> {
-        let progress = self
-            .generation_progress
-            .as_ref()
-            .filter(|progress| progress.message_id == message_id)?;
-        let label = format!(
-            "{} · {}",
-            progress.phase.label(),
-            format_elapsed(progress.elapsed())
-        );
-
-        let view = view.clone();
-        Some(
-            h_flex()
-                .h(px(26.))
-                .items_center()
-                .gap(px(8.))
-                .text_size(px(12.))
-                .text_color(cx.theme().muted_foreground)
-                .child(Icon::new(IconName::LoaderCircle).xsmall())
-                .child(label)
-                .child(
-                    Button::new(("stop-response", message_id.0))
-                        .ghost()
-                        .xsmall()
-                        .h(px(24.))
-                        .px(px(6.))
-                        .icon(Icon::empty().path("icons/generation-stop.svg"))
-                        .label("Stop")
-                        .tooltip("Stop response")
-                        .accessibility_id(format!("stop-response-{}", message_id.0))
-                        .on_click(move |_, _, cx| {
-                            view.update(cx, |view, cx| {
-                                view.cancel_generation(cx);
-                            });
-                        }),
-                )
-                .into_any_element(),
-        )
     }
 }
 

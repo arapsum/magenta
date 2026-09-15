@@ -21,39 +21,24 @@ impl ConversationView {
         self.generation_task = Some(cx.spawn_in(window, async move |view, window| {
             let mut completed = None;
             let mut stream = stream;
-
             while let Some(event) = stream.next().await {
-                match event {
-                    Ok(GenerationEvent::Started) => {
-                        if view
-                            .update_in(window, |view, _, cx| {
-                                view.mark_provider_started(generation, assistant_id, cx);
-                            })
-                            .is_err()
-                        {
-                            return;
-                        }
-                    }
-                    Ok(GenerationEvent::TextDelta(chunk)) => {
-                        if view
-                            .update_in(window, |view, _, cx| {
-                                view.push_stream_chunk(generation, assistant_id, &chunk, cx);
-                            })
-                            .is_err()
-                        {
-                            return;
-                        }
-                    }
-                    Ok(GenerationEvent::Completed(outcome)) => {
-                        completed = Some(outcome);
-                        break;
-                    }
+                let event = match event {
+                    Ok(event) => event,
                     Err(error) => {
                         _ = view.update_in(window, |view, window, cx| {
                             view.fail_stream(generation, assistant_id, &error, window, cx);
                         });
                         return;
                     }
+                };
+                let Ok(outcome) = view.update_in(window, |view, _, cx| {
+                    view.apply_generation_event(generation, assistant_id, event, cx)
+                }) else {
+                    return;
+                };
+                if outcome.is_some() {
+                    completed = outcome;
+                    break;
                 }
             }
 
@@ -73,6 +58,46 @@ impl ConversationView {
             }
         }));
         cx.emit(ConversationViewEvent::GenerationStarted);
+    }
+
+    fn apply_generation_event(
+        &mut self,
+        generation: u64,
+        assistant_id: MessageId,
+        event: GenerationEvent,
+        cx: &mut Context<'_, Self>,
+    ) -> Option<GenerationOutcome> {
+        match event {
+            GenerationEvent::Started => self.mark_provider_started(generation, assistant_id, cx),
+            GenerationEvent::TextDelta(chunk) => self.push_stream_chunk_phase(
+                generation,
+                assistant_id,
+                &chunk,
+                Some(AssistantTextPhase::FinalAnswer),
+                cx,
+            ),
+            GenerationEvent::TextDeltaWithPhase { delta, phase } => {
+                self.push_stream_chunk_phase(generation, assistant_id, &delta, Some(phase), cx);
+            }
+            GenerationEvent::ReasoningSummaryStarted { key, title } => {
+                self.update_reasoning_trace(generation, assistant_id, key, title, None, cx);
+            }
+            GenerationEvent::ReasoningSummaryDelta { key, delta } => {
+                self.update_reasoning_trace(
+                    generation,
+                    assistant_id,
+                    key,
+                    "Thinking",
+                    Some(delta),
+                    cx,
+                );
+            }
+            GenerationEvent::ReasoningSummaryCompleted { key, text } => {
+                self.complete_reasoning_trace(generation, assistant_id, key, text, cx);
+            }
+            GenerationEvent::Completed(outcome) => return Some(outcome),
+        }
+        None
     }
 
     pub(super) fn start_generation_clock(
@@ -139,11 +164,29 @@ impl ConversationView {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn push_stream_chunk(
         &mut self,
         generation: u64,
         assistant_id: MessageId,
         chunk: &str,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.push_stream_chunk_phase(
+            generation,
+            assistant_id,
+            chunk,
+            Some(AssistantTextPhase::FinalAnswer),
+            cx,
+        );
+    }
+
+    pub(super) fn push_stream_chunk_phase(
+        &mut self,
+        generation: u64,
+        assistant_id: MessageId,
+        chunk: &str,
+        phase: Option<AssistantTextPhase>,
         cx: &mut Context<'_, Self>,
     ) {
         if self.generation != generation || self.streaming_message != Some(assistant_id) {
@@ -154,10 +197,14 @@ impl ConversationView {
             .generation_progress
             .as_mut()
             .filter(|progress| progress.message_id == assistant_id)
-            && progress.first_text_at.is_none()
         {
-            progress.first_text_at = Some(Instant::now());
-            progress.phase = GenerationPhase::Responding;
+            if progress.first_text_at.is_none() {
+                progress.first_text_at = Some(Instant::now());
+            }
+            if matches!(phase, Some(AssistantTextPhase::FinalAnswer)) {
+                progress.final_answer_started = true;
+                progress.phase = GenerationPhase::Responding;
+            }
         }
 
         let Some(index) = self
@@ -200,6 +247,11 @@ impl ConversationView {
 
         let progress = self.clear_generation_progress();
         self.clear_agent_state();
+        self.mark_trace_terminal(
+            assistant_id,
+            AssistantTraceStatus::Completed,
+            progress.as_ref().map(GenerationProgress::elapsed),
+        );
         if let Some(progress) = progress.as_ref() {
             trace_generation_terminal(progress, "completed");
         }
@@ -240,6 +292,11 @@ impl ConversationView {
         let provider = error.provider.clone();
         let progress = self.clear_generation_progress();
         self.clear_agent_state();
+        self.mark_trace_terminal(
+            assistant_id,
+            AssistantTraceStatus::Failed,
+            progress.as_ref().map(GenerationProgress::elapsed),
+        );
         let model = progress
             .as_ref()
             .and_then(|progress| progress.configuration.as_ref())
@@ -293,7 +350,13 @@ impl ConversationView {
         self.generation = self.generation.wrapping_add(1);
         self.generation_task.take();
         self.clear_agent_state();
-        if let Some(progress) = self.clear_generation_progress().as_ref() {
+        let progress = self.clear_generation_progress();
+        self.mark_trace_terminal(
+            assistant_id,
+            AssistantTraceStatus::Stopped,
+            progress.as_ref().map(GenerationProgress::elapsed),
+        );
+        if let Some(progress) = progress.as_ref() {
             trace_generation_terminal(progress, "stopped");
         }
         if let Some(message) = self
@@ -318,6 +381,37 @@ impl ConversationView {
     pub(super) fn clear_generation_progress(&mut self) -> Option<GenerationProgress> {
         self.generation_clock_task.take();
         self.generation_progress.take()
+    }
+
+    pub(super) fn mark_trace_terminal(
+        &mut self,
+        assistant_id: MessageId,
+        status: AssistantTraceStatus,
+        elapsed: Option<Duration>,
+    ) {
+        let Some(message) = self
+            .messages
+            .iter_mut()
+            .find(|message| message.message.id == assistant_id)
+        else {
+            return;
+        };
+        if let Some(elapsed) = elapsed {
+            message.message.assistant_trace.thinking_duration_ms = Some(duration_millis(elapsed));
+        }
+        let finished_at = Timestamp(chrono::Local::now().timestamp_millis());
+        for entry in &mut message.message.assistant_trace.entries {
+            if matches!(
+                entry.status,
+                AssistantTraceStatus::Streaming
+                    | AssistantTraceStatus::Requested
+                    | AssistantTraceStatus::Running
+                    | AssistantTraceStatus::AwaitingApproval
+            ) {
+                entry.status = status;
+                entry.finished_at = Some(finished_at);
+            }
+        }
     }
 
     pub(super) fn clear_agent_state(&mut self) {

@@ -142,7 +142,7 @@ impl ConversationStore for TestPorts {
     fn set_pinned(&self, _: ConversationId, _: bool) -> StorageFuture<()> {
         failure()
     }
-    fn append_agent_activity(&self, _: AgentActivityRecord) -> StorageFuture<()> {
+    fn upsert_assistant_trace(&self, _: MessageId, _: AssistantTrace) -> StorageFuture<()> {
         failure()
     }
 }

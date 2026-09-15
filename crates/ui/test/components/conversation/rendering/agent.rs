@@ -1,38 +1,32 @@
-use std::collections::HashMap;
-
 use magenta_core::{
-    ConversationId, WorkspaceCommand, WorkspaceCommandResult, WorkspaceCommandStatus,
+    AssistantTrace, AssistantTraceEntry, AssistantTraceKind, AssistantTraceStatus, ConversationId,
 };
 
 use super::*;
 
-fn activity(
-    kind: AgentActivityKind,
-    call_id: &str,
-    tool_name: &str,
-    status: &str,
-) -> AgentActivity {
-    let detail = if kind == AgentActivityKind::ToolCall {
-        match tool_name {
-            "run_command" => {
-                r#"{"program":"cargo","args":[],"cwd":".","timeout_seconds":30}"#.to_owned()
-            }
-            _ => r#"{"path":"src/lib.rs"}"#.to_owned(),
-        }
-    } else {
-        String::new()
-    };
-    AgentActivity {
+fn trace_entry(
+    key: &str,
+    sequence: u64,
+    kind: AssistantTraceKind,
+    status: AssistantTraceStatus,
+    title: &str,
+    tool_name: Option<&str>,
+) -> AssistantTraceEntry {
+    AssistantTraceEntry {
+        key: key.to_owned(),
+        sequence,
         kind,
-        call_id: call_id.to_owned(),
-        tool_name: tool_name.to_owned(),
-        status: status.to_owned(),
-        summary: String::new(),
-        detail,
+        status,
+        title: title.to_owned(),
+        tool_name: tool_name.map(str::to_owned),
+        input: String::new(),
+        output: String::new(),
+        started_at: None,
+        finished_at: None,
     }
 }
 
-fn message(activities: Vec<AgentActivity>) -> Message {
+fn message(trace: AssistantTrace) -> Message {
     Message {
         id: MessageId::new(1),
         conversation_id: ConversationId::new(1),
@@ -42,108 +36,63 @@ fn message(activities: Vec<AgentActivity>) -> Message {
         attachments: Vec::new(),
         generation_outcome: None,
         failure: None,
-        agent_activities: activities,
+        assistant_trace: trace,
     }
 }
 
 #[test]
-fn settled_sections_default_to_closed_and_new_activity_reopens_them() {
-    let live_commands = HashMap::new();
-    let mut message = message(vec![
-        activity(
-            AgentActivityKind::ToolCall,
-            "tool-1",
-            "read_file",
-            "requested",
-        ),
-        activity(
-            AgentActivityKind::ToolResult,
-            "tool-1",
-            "read_file",
-            "completed",
-        ),
-        activity(
-            AgentActivityKind::ToolCall,
-            "command-1",
-            "run_command",
-            "requested",
-        ),
-        activity(
-            AgentActivityKind::ToolResult,
-            "command-1",
-            "run_command",
-            "completed",
-        ),
-    ]);
-    assert!(!tool_call_section_is_active(&message));
-    assert!(!command_section_is_active(&message, &live_commands));
-
-    message.agent_activities.push(activity(
-        AgentActivityKind::ToolCall,
-        "tool-2",
-        "list_files",
-        "requested",
-    ));
-    assert!(tool_call_section_is_active(&message));
-    assert!(!command_section_is_active(&message, &live_commands));
+fn trace_entries_are_rendered_in_sequence_order() {
+    let trace = AssistantTrace {
+        entries: vec![
+            trace_entry(
+                "tool:command-1",
+                1,
+                AssistantTraceKind::Tool,
+                AssistantTraceStatus::Completed,
+                "run_command",
+                Some("run_command"),
+            ),
+            trace_entry(
+                "reasoning:item-1:0",
+                0,
+                AssistantTraceKind::ReasoningSummary,
+                AssistantTraceStatus::Completed,
+                "Thinking",
+                None,
+            ),
+        ],
+        thinking_duration_ms: Some(1200),
+    };
+    let message = message(trace);
+    let mut entries = message.assistant_trace.entries.clone();
+    entries.sort_by_key(|entry| entry.sequence);
+    assert_eq!(entries[0].key, "reasoning:item-1:0");
+    assert_eq!(entries[1].key, "tool:command-1");
 }
 
 #[test]
-fn commands_and_tool_calls_settle_independently() {
-    let live_commands = HashMap::new();
-    let message = message(vec![
-        activity(
-            AgentActivityKind::ToolCall,
-            "tool-1",
-            "read_file",
-            "requested",
-        ),
-        activity(
-            AgentActivityKind::ToolResult,
-            "tool-1",
-            "read_file",
-            "failed",
-        ),
-        activity(
-            AgentActivityKind::ToolCall,
-            "command-1",
-            "run_command",
-            "requested",
-        ),
-    ]);
-    assert!(!tool_call_section_is_active(&message));
-    assert!(command_section_is_active(&message, &live_commands));
-}
-
-#[test]
-fn cancelled_live_commands_are_settled() {
-    let message = message(vec![activity(
-        AgentActivityKind::ToolCall,
-        "command-1",
-        "run_command",
-        "requested",
-    )]);
-    let mut live_commands = HashMap::new();
-    live_commands.insert(
-        (message.id, "command-1".to_owned()),
-        LiveCommand {
-            command: WorkspaceCommand {
-                program: "cargo".to_owned(),
-                args: Vec::new(),
-                cwd: ".".to_owned(),
-                timeout_seconds: 30,
-            },
-            stdout: String::new(),
-            stderr: String::new(),
-            result: Some(WorkspaceCommandResult {
-                status: WorkspaceCommandStatus::Cancelled,
-                exit_code: None,
-                duration_ms: 0,
-                stdout: String::new(),
-                stderr: String::new(),
-                truncated: false,
-            }),
+fn active_trace_entries_keep_the_timeline_open_by_default() {
+    let message = Message {
+        status: MessageStatus::Streaming,
+        assistant_trace: AssistantTrace {
+            entries: vec![trace_entry(
+                "tool:command-1",
+                0,
+                AssistantTraceKind::Tool,
+                AssistantTraceStatus::Running,
+                "run_command",
+                Some("run_command"),
+            )],
+            thinking_duration_ms: None,
         },
+        ..message(AssistantTrace::default())
+    };
+    assert!(message.status == MessageStatus::Streaming);
+    assert!(
+        message
+            .assistant_trace
+            .entries
+            .iter()
+            .any(|entry| matches!(entry.status, AssistantTraceStatus::Running))
     );
-    assert!(!command_section_is_active(&message, &live_commands));
 }

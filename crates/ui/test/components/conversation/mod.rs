@@ -42,7 +42,6 @@ fn stored_page(range: std::ops::Range<u64>) -> magenta_core::MessagePage {
             sequence: magenta_core::MessageSequence(i64::try_from(id).unwrap()),
             created_at: magenta_core::Timestamp(0),
             generation: conversation().generation,
-            agent_activities: Vec::new(),
             omitted_context_messages: 0,
         })
         .collect::<Vec<_>>();
@@ -287,7 +286,7 @@ fn message(id: u64, role: MessageRole, status: MessageStatus) -> Message {
         attachments: Vec::new(),
         generation_outcome: None,
         failure: None,
-        agent_activities: Vec::new(),
+        assistant_trace: Default::default(),
     }
 }
 
@@ -351,7 +350,7 @@ fn user_messages_keep_prose_literal_and_isolate_fenced_code(cx: &mut TestAppCont
                 attachments: Vec::new(),
                 generation_outcome: None,
                 failure: None,
-                agent_activities: Vec::new(),
+                assistant_trace: Default::default(),
             };
             let rendered = ConversationView::rendered_message(message, cx);
 

@@ -1,15 +1,8 @@
-use gpui_kit::component::accordion::Accordion;
+use gpui_kit::component::{accordion::Accordion, shimmer::ShimmerText};
 
 use super::super::*;
 
-use super::agent_activity::{
-    ActivityRow, activity_title_element, agent_tool_icon, build_activity_rows,
-    render_activity_detail, section_title,
-};
-use super::agent_cards::{
-    command_section_is_active, command_status_icon, render_approval_actions, render_command_card,
-    tool_call_section_is_active,
-};
+use super::agent_cards::render_approval_actions;
 
 #[cfg(test)]
 #[path = "../../../../test/components/conversation/rendering/agent.rs"]
@@ -78,324 +71,233 @@ impl ConversationView {
         )
     }
 
-    fn activity_section_is_active(&self, message: &Message, section: ActivitySection) -> bool {
-        match section {
-            ActivitySection::Commands => command_section_is_active(message, &self.live_commands),
-            ActivitySection::ToolCalls => tool_call_section_is_active(message),
-        }
+    fn trace_is_active(message: &Message) -> bool {
+        message.status == MessageStatus::Streaming
+            || message.assistant_trace.entries.iter().any(|entry| {
+                matches!(
+                    entry.status,
+                    AssistantTraceStatus::Streaming
+                        | AssistantTraceStatus::Requested
+                        | AssistantTraceStatus::Running
+                        | AssistantTraceStatus::AwaitingApproval
+                )
+            })
     }
 
-    fn activity_section_is_open(&self, message: &Message, section: ActivitySection) -> bool {
-        self.activity_section_overrides
-            .get(&(message.id, section))
+    fn trace_is_final_answer_started(&self, message_id: MessageId) -> bool {
+        self.streaming_message == Some(message_id)
+            && self
+                .generation_progress
+                .as_ref()
+                .is_some_and(|progress| progress.final_answer_started)
+    }
+
+    fn trace_is_open(&self, message: &Message) -> bool {
+        self.trace_disclosure_overrides
+            .get(&message.id)
             .map_or_else(
-                || self.activity_section_is_active(message, section),
-                |override_state| *override_state == ActivitySectionOverride::Open,
+                || {
+                    Self::trace_is_active(message)
+                        && !self.trace_is_final_answer_started(message.id)
+                },
+                |override_state| *override_state == TraceDisclosureOverride::Open,
             )
     }
 
-    fn set_activity_section_override(
+    fn set_trace_disclosure_override(
         &mut self,
         message_id: MessageId,
-        section: ActivitySection,
         open: bool,
         cx: &mut Context<'_, Self>,
     ) {
-        self.activity_section_overrides.insert(
-            (message_id, section),
+        self.trace_disclosure_overrides.insert(
+            message_id,
             if open {
-                ActivitySectionOverride::Open
+                TraceDisclosureOverride::Open
             } else {
-                ActivitySectionOverride::Closed
+                TraceDisclosureOverride::Closed
             },
         );
         cx.notify();
     }
 
-    pub(super) fn render_agent_activities(
-        &self,
-        message: &Message,
-        cx: &App,
-        view: &Entity<Self>,
-    ) -> Option<AnyElement> {
-        if message.agent_activities.is_empty() {
-            return None;
-        }
-
-        let commands = message
-            .agent_activities
-            .iter()
-            .filter(|activity| {
-                activity.kind == AgentActivityKind::ToolCall && activity.tool_name == "run_command"
+    fn trace_elapsed(&self, message: &Message) -> Option<Duration> {
+        message
+            .assistant_trace
+            .thinking_duration_ms
+            .map(Duration::from_millis)
+            .or_else(|| {
+                self.generation_progress
+                    .as_ref()
+                    .filter(|progress| progress.message_id == message.id)
+                    .map(GenerationProgress::elapsed)
             })
-            .filter_map(|activity| self.render_command_activity(message, activity, cx))
-            .collect::<Vec<_>>();
-
-        let rows = build_activity_rows(message);
-        let mut content = v_flex().w_full().gap(px(8.));
-
-        if let Some(command_section) = self.render_command_section(message, commands, cx, view) {
-            content = content.child(command_section);
-        }
-        if let Some(tool_call_section) = self.render_tool_call_section(message, rows, cx, view) {
-            content = content.child(tool_call_section);
-        }
-
-        Some(content.into_any_element())
     }
 
-    fn render_command_section(
+    pub(super) fn render_assistant_trace(
         &self,
         message: &Message,
-        commands: Vec<AnyElement>,
         cx: &App,
         view: &Entity<Self>,
-    ) -> Option<AnyElement> {
-        if commands.is_empty() {
-            return None;
-        }
-
+    ) -> AnyElement {
         let message_id = message.id;
-        let command_count = commands.len();
+        let mut entries = message.assistant_trace.entries.clone();
+        entries.sort_by_key(|entry| entry.sequence);
 
-        let command_view = view.clone();
-        let command_open = self.activity_section_is_open(message, ActivitySection::Commands);
-        let command_label = if command_count == 1 {
-            "command"
-        } else {
-            "commands"
-        };
-        let mut accordion = Accordion::new(("agent-commands", message_id.0))
-            .multiple(false)
-            .bordered(false)
-            .small()
-            .on_toggle_click(move |open_indices, _, cx| {
-                command_view.update(cx, |view, cx| {
-                    view.set_activity_section_override(
-                        message_id,
-                        ActivitySection::Commands,
-                        open_indices.contains(&0),
-                        cx,
-                    );
-                });
-            });
-        accordion = accordion.item(|item| {
-            item.open(command_open)
-                .icon(
-                    Icon::empty()
-                        .path("icons/agent-terminal.svg")
-                        .small()
-                        .text_color(cx.theme().muted_foreground),
-                )
-                .title(section_title("Commands", command_count, command_label, cx))
-                .hover(|this| this.bg(cx.theme().accent.opacity(0.45)))
-                .child(v_flex().w_full().gap(px(8.)).children(commands))
-        });
-        Some(accordion.into_any_element())
-    }
-
-    fn render_tool_call_section(
-        &self,
-        message: &Message,
-        rows: Vec<ActivityRow>,
-        cx: &App,
-        view: &Entity<Self>,
-    ) -> Option<AnyElement> {
-        if rows.is_empty() {
-            return None;
-        }
-
-        let message_id = message.id;
-        let tool_call_count = rows.len();
-
-        let activity_accordion = self.render_activity_accordion(message_id, rows, cx, view);
-        let tool_view = view.clone();
-        let tool_open = self.activity_section_is_open(message, ActivitySection::ToolCalls);
-        let tool_label = if tool_call_count == 1 {
-            "tool call"
-        } else {
-            "tool calls"
-        };
-        let mut accordion = Accordion::new(("agent-tool-calls", message_id.0))
-            .multiple(false)
-            .bordered(false)
-            .small()
-            .on_toggle_click(move |open_indices, _, cx| {
-                tool_view.update(cx, |view, cx| {
-                    view.set_activity_section_override(
-                        message_id,
-                        ActivitySection::ToolCalls,
-                        open_indices.contains(&0),
-                        cx,
-                    );
-                });
-            });
-        accordion = accordion.item(|item| {
-            item.open(tool_open)
-                .icon(
-                    Icon::empty()
-                        .path("icons/agent-wrench.svg")
-                        .small()
-                        .text_color(cx.theme().muted_foreground),
-                )
-                .title(section_title("Tool calls", tool_call_count, tool_label, cx))
-                .hover(|this| this.bg(cx.theme().accent.opacity(0.45)))
-                .child(activity_accordion)
-        });
-        Some(accordion.into_any_element())
-    }
-
-    fn render_activity_accordion(
-        &self,
-        message_id: MessageId,
-        rows: Vec<ActivityRow>,
-        cx: &App,
-        view: &Entity<Self>,
-    ) -> Accordion {
-        let call_ids = rows
+        let entry_keys = entries
             .iter()
-            .map(|row| row.call_id.clone())
+            .map(|entry| entry.key.clone())
             .collect::<Vec<_>>();
-
-        let activity_view = view.clone();
-        let mut accordion = Accordion::new(("agent-activity", message_id.0))
+        let entry_view = view.clone();
+        let mut rows = Accordion::new(("assistant-trace-entries", message_id.0))
             .multiple(true)
             .bordered(false)
             .small()
             .on_toggle_click(move |open_indices, _, cx| {
-                activity_view.update(cx, |view, cx| {
-                    for (index, call_id) in call_ids.iter().enumerate() {
-                        let key = (message_id, call_id.clone());
-                        if open_indices.contains(&index) {
-                            view.expanded_agent_activity_calls.insert(key);
-                        } else {
-                            view.expanded_agent_activity_calls.remove(&key);
-                        }
+                entry_view.update(cx, |view, cx| {
+                    for (index, key) in entry_keys.iter().enumerate() {
+                        view.trace_entry_overrides
+                            .insert((message_id, key.clone()), open_indices.contains(&index));
                     }
                     cx.notify();
                 });
             });
 
-        for row in rows {
+        for entry in entries {
+            let default_open = entry.kind == AssistantTraceKind::ReasoningSummary;
             let open = self
-                .expanded_agent_activity_calls
-                .contains(&(message_id, row.call_id.clone()));
-            let status = row.status;
-            let tool_name = row.tool_name.clone();
-            let title = row.title.clone();
-            let detail = render_activity_detail(&row, cx);
-            accordion = accordion.item(|item| {
+                .trace_entry_overrides
+                .get(&(message_id, entry.key.clone()))
+                .copied()
+                .unwrap_or(default_open);
+            let title = Self::render_trace_entry_title(&entry, cx);
+            let detail = Self::render_trace_entry_detail(&entry, cx);
+            rows = rows.item(|item| {
                 item.open(open)
-                    .icon(agent_tool_icon(&tool_name, cx))
-                    .title(activity_title_element(&title, status, cx))
-                    .hover(|this| this.bg(cx.theme().accent.opacity(0.45)))
+                    .title(title)
+                    .hover(|this| this.bg(cx.theme().accent.opacity(0.35)))
                     .child(detail)
             });
         }
-        accordion
+
+        let trace_view = view.clone();
+        let trace_open = self.trace_is_open(message);
+        let mut accordion = Accordion::new(("assistant-trace", message_id.0))
+            .multiple(false)
+            .bordered(false)
+            .small()
+            .on_toggle_click(move |open_indices, _, cx| {
+                trace_view.update(cx, |view, cx| {
+                    view.set_trace_disclosure_override(message_id, open_indices.contains(&0), cx);
+                });
+            });
+        accordion = accordion.item(|item| {
+            item.open(trace_open)
+                .icon(
+                    Icon::new(IconName::LoaderCircle)
+                        .small()
+                        .text_color(cx.theme().muted_foreground),
+                )
+                .title(self.render_trace_header(message, cx, view))
+                .hover(|this| this.bg(cx.theme().accent.opacity(0.45)))
+                .child(v_flex().w_full().gap(px(4.)).child(rows))
+        });
+
+        accordion.into_any_element()
     }
 
-    fn render_command_activity(
-        &self,
-        message: &Message,
-        activity: &AgentActivity,
-        cx: &App,
-    ) -> Option<AnyElement> {
-        let live = self
-            .live_commands
-            .get(&(message.id, activity.call_id.clone()));
-
-        let pending_command = self
-            .pending_agent_approval
-            .as_ref()
-            .and_then(|(_, request)| {
-                if request.tool_call_id != activity.call_id {
-                    return None;
-                }
-                match &request.subject {
-                    AgentApprovalSubject::Command(command) => Some(command.clone()),
-                    AgentApprovalSubject::Workspace { .. } => None,
-                }
-            });
-        let command = live
-            .map(|live| live.command.clone())
-            .or(pending_command)
-            .or_else(|| serde_json::from_str::<WorkspaceCommand>(&activity.detail).ok())?;
-
-        let result_activity = message.agent_activities.iter().rev().find(|candidate| {
-            candidate.call_id == activity.call_id && candidate.kind == AgentActivityKind::ToolResult
-        });
-        let persisted_result = result_activity
-            .and_then(|result| serde_json::from_str::<WorkspaceCommandResult>(&result.detail).ok());
-
-        let result = live
-            .and_then(|live| live.result.as_ref())
-            .or(persisted_result.as_ref());
-        let stdout = live.map_or_else(
-            || result.map_or("", |result| result.stdout.as_str()),
-            |live| live.stdout.as_str(),
-        );
-        let stderr = live.map_or_else(
-            || result.map_or("", |result| result.stderr.as_str()),
-            |live| live.stderr.as_str(),
-        );
-
-        let pending = self
-            .pending_agent_approval
-            .as_ref()
-            .is_some_and(|(_, request)| request.tool_call_id == activity.call_id);
-        let (status, status_color) = result.map_or_else(
-            || {
-                result_activity.map_or_else(
-                    || {
-                        if live.is_some() {
-                            ("Running", cx.theme().warning)
-                        } else if pending {
-                            ("Awaiting approval", cx.theme().warning)
-                        } else {
-                            ("Requested", cx.theme().muted_foreground)
-                        }
-                    },
-                    |result| {
-                        if result.detail.contains("rejected") {
-                            ("Rejected", cx.theme().muted_foreground)
-                        } else {
-                            ("Failed", cx.theme().danger)
-                        }
-                    },
-                )
-            },
-            |result| match result.status {
-                WorkspaceCommandStatus::Exited if result.exit_code == Some(0) => {
-                    ("Completed", cx.theme().success)
-                }
-                WorkspaceCommandStatus::Exited => ("Exited", cx.theme().warning),
-                WorkspaceCommandStatus::TimedOut => ("Timed out", cx.theme().danger),
-                WorkspaceCommandStatus::Cancelled => ("Cancelled", cx.theme().muted_foreground),
-                WorkspaceCommandStatus::Failed => ("Failed", cx.theme().danger),
-            },
-        );
-
-        let mut output = match (stdout.is_empty(), stderr.is_empty()) {
-            (false, false) => format!("{stdout}\n{stderr}"),
-            (false, true) => stdout.to_owned(),
-            (true, false) => stderr.to_owned(),
-            (true, true) => String::new(),
+    fn render_trace_header(&self, message: &Message, cx: &App, view: &Entity<Self>) -> AnyElement {
+        let active = Self::trace_is_active(message);
+        let final_answer_started = self.trace_is_final_answer_started(message.id);
+        let label = if active && !final_answer_started {
+            ShimmerText::new("Thinking")
+                .duration(Duration::from_millis(2200))
+                .into_any_element()
+        } else {
+            let text = match message.status {
+                MessageStatus::Stopped => "Thinking stopped",
+                MessageStatus::Failed => "Thinking failed",
+                _ => "Thought",
+            };
+            div().child(text).into_any_element()
         };
-        if output.is_empty()
-            && let Some(result) = result_activity
-        {
-            output.clone_from(&result.detail);
-        }
+        let elapsed = self.trace_elapsed(message);
+        let stop_view = view.clone();
 
-        Some(render_command_card(
-            &command,
-            status,
-            status_color,
-            command_status_icon(status, cx),
-            output,
-            cx,
-        ))
+        h_flex()
+            .items_center()
+            .gap(px(8.))
+            .child(label)
+            .when_some(elapsed, |this, elapsed| {
+                this.child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format_elapsed(elapsed)),
+                )
+            })
+            .when(active, |this| {
+                this.child(
+                    Button::new(("stop-assistant-trace", message.id.0))
+                        .ghost()
+                        .xsmall()
+                        .label("Stop")
+                        .on_click(move |_, _, cx| {
+                            stop_view.update(cx, Self::cancel_generation);
+                        }),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn render_trace_entry_title(entry: &AssistantTraceEntry, cx: &App) -> AnyElement {
+        let status = trace_status_label(entry.status);
+        let icon = match entry.kind {
+            AssistantTraceKind::ReasoningSummary => Icon::new(IconName::LoaderCircle),
+            AssistantTraceKind::Tool => Icon::empty().path("icons/agent-wrench.svg"),
+        };
+        h_flex()
+            .items_center()
+            .gap(px(7.))
+            .child(
+                icon.xsmall()
+                    .text_color(trace_status_color(entry.status, cx)),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .text_size(px(12.))
+                    .child(entry.title.clone()),
+            )
+            .child(
+                div()
+                    .text_size(px(11.))
+                    .text_color(trace_status_color(entry.status, cx))
+                    .child(status),
+            )
+            .into_any_element()
+    }
+
+    fn render_trace_entry_detail(entry: &AssistantTraceEntry, cx: &App) -> AnyElement {
+        v_flex()
+            .w_full()
+            .gap(px(6.))
+            .when(!entry.input.is_empty(), |this| {
+                this.child(trace_detail_block("Input", &entry.input, cx))
+            })
+            .when(!entry.output.is_empty(), |this| {
+                this.child(trace_detail_block("Output", &entry.output, cx))
+            })
+            .when(entry.input.is_empty() && entry.output.is_empty(), |this| {
+                this.child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child("No details available yet."),
+                )
+            })
+            .into_any_element()
     }
 
     pub(super) fn render_agent_approval(
@@ -478,4 +380,59 @@ impl ConversationView {
                 .into_any_element(),
         )
     }
+}
+
+const fn trace_status_label(status: AssistantTraceStatus) -> &'static str {
+    match status {
+        AssistantTraceStatus::Streaming => "Streaming",
+        AssistantTraceStatus::Requested => "Requested",
+        AssistantTraceStatus::Running => "Running",
+        AssistantTraceStatus::AwaitingApproval => "Awaiting approval",
+        AssistantTraceStatus::Completed => "Completed",
+        AssistantTraceStatus::Rejected => "Rejected",
+        AssistantTraceStatus::Failed => "Failed",
+        AssistantTraceStatus::Stopped => "Stopped",
+    }
+}
+
+fn trace_status_color(status: AssistantTraceStatus, cx: &App) -> gpui_kit::Hsla {
+    match status {
+        AssistantTraceStatus::Streaming
+        | AssistantTraceStatus::Running
+        | AssistantTraceStatus::AwaitingApproval => cx.theme().warning,
+        AssistantTraceStatus::Completed => cx.theme().success,
+        AssistantTraceStatus::Rejected | AssistantTraceStatus::Stopped => {
+            cx.theme().muted_foreground
+        }
+        AssistantTraceStatus::Failed => cx.theme().danger,
+        AssistantTraceStatus::Requested => cx.theme().muted_foreground,
+    }
+}
+
+fn trace_detail_block(label: &str, value: &str, cx: &App) -> AnyElement {
+    v_flex()
+        .w_full()
+        .gap(px(3.))
+        .child(
+            div()
+                .text_size(px(10.))
+                .text_color(cx.theme().muted_foreground)
+                .child(label.to_owned()),
+        )
+        .child(
+            div()
+                .w_full()
+                .max_h(px(220.))
+                .overflow_y_scrollbar()
+                .p(px(8.))
+                .rounded(px(8.))
+                .bg(crate::components::visual::surface(
+                    crate::components::visual::SurfaceLevel::Recessed,
+                    cx,
+                ))
+                .font_family(cx.theme().mono_font_family.clone())
+                .text_size(cx.theme().mono_font_size)
+                .child(value.to_owned()),
+        )
+        .into_any_element()
 }

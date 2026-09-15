@@ -10,6 +10,8 @@ impl ConversationView {
     ) {
         self.cancel_generation(cx);
         self.live_commands.clear();
+        self.trace_disclosure_overrides.clear();
+        self.trace_entry_overrides.clear();
         self.conversation = Some(loaded.conversation);
         self.origins = loaded
             .page
@@ -188,8 +190,8 @@ impl ConversationView {
             agent_controller: None,
             pending_agent_approval: None,
             live_commands: HashMap::new(),
-            activity_section_overrides: HashMap::new(),
-            expanded_agent_activity_calls: HashSet::new(),
+            trace_disclosure_overrides: HashMap::new(),
+            trace_entry_overrides: HashMap::new(),
             older_cursor: None,
             has_older: false,
             page_load: PageLoadState::Idle,
@@ -205,8 +207,8 @@ impl ConversationView {
     pub(crate) fn load(&mut self, thread: ConversationThread, cx: &mut Context<'_, Self>) {
         self.cancel_generation(cx);
         self.live_commands.clear();
-        self.activity_section_overrides.clear();
-        self.expanded_agent_activity_calls.clear();
+        self.trace_disclosure_overrides.clear();
+        self.trace_entry_overrides.clear();
         self.older_cursor = None;
         self.has_older = false;
         self.page_load = PageLoadState::Idle;
@@ -230,8 +232,8 @@ impl ConversationView {
     pub(crate) fn clear(&mut self, cx: &mut Context<'_, Self>) {
         self.cancel_generation(cx);
         self.live_commands.clear();
-        self.activity_section_overrides.clear();
-        self.expanded_agent_activity_calls.clear();
+        self.trace_disclosure_overrides.clear();
+        self.trace_entry_overrides.clear();
         self.conversation = None;
         self.messages.clear();
         self.origins.clear();
@@ -403,7 +405,13 @@ impl ConversationView {
         self.generation = self.generation.wrapping_add(1);
         self.generation_task.take();
         self.clear_agent_state();
-        if let Some(progress) = self.clear_generation_progress().as_ref() {
+        let progress = self.clear_generation_progress();
+        self.mark_trace_terminal(
+            id,
+            AssistantTraceStatus::Stopped,
+            progress.as_ref().map(GenerationProgress::elapsed),
+        );
+        if let Some(progress) = progress.as_ref() {
             trace_generation_terminal(progress, "interrupted");
         }
         let message = self
@@ -430,14 +438,12 @@ impl ConversationView {
                 return;
             };
             let failed = message.message.status == MessageStatus::Failed;
-            let has_side_effects = message.message.agent_activities.iter().any(|activity| {
-                matches!(
-                    activity.kind,
-                    AgentActivityKind::ToolCall | AgentActivityKind::ToolResult
-                ) && matches!(
-                    activity.tool_name.as_str(),
-                    "create_file" | "apply_patch" | "run_command"
-                )
+            let has_side_effects = message.message.assistant_trace.entries.iter().any(|entry| {
+                entry.kind == AssistantTraceKind::Tool
+                    && matches!(
+                        entry.tool_name.as_deref(),
+                        Some("create_file" | "apply_patch" | "run_command")
+                    )
             });
             cx.emit(if has_side_effects && failed {
                 ConversationViewEvent::PrepareContinue(message_id)
@@ -558,18 +564,16 @@ impl ConversationView {
                 .iter()
                 .any(|message| message.message.id == *id)
         });
-        self.expanded_agent_activity_calls
-            .retain(|(message_id, _)| {
-                self.messages
-                    .iter()
-                    .any(|message| message.message.id == *message_id)
-            });
-        self.activity_section_overrides
-            .retain(|(message_id, _), _| {
-                self.messages
-                    .iter()
-                    .any(|message| message.message.id == *message_id)
-            });
+        self.trace_entry_overrides.retain(|(message_id, _), _| {
+            self.messages
+                .iter()
+                .any(|message| message.message.id == *message_id)
+        });
+        self.trace_disclosure_overrides.retain(|message_id, _| {
+            self.messages
+                .iter()
+                .any(|message| message.message.id == *message_id)
+        });
         self.reset_math(cx);
     }
 

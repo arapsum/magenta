@@ -7,7 +7,7 @@ mod state;
 mod tests;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -32,10 +32,11 @@ use gpui_kit::{
 };
 use magenta_application::AgentApprovalController;
 use magenta_core::{
-    AgentActivity, AgentActivityKind, AgentApprovalRequest, AgentApprovalSubject,
-    AgentWorkspaceChange, Conversation, GenerationConfig, GenerationEvent, GenerationOutcome,
-    GenerationStream, Message, MessageId, MessageRole, MessageStatus, ProviderError, ProviderId,
-    WorkspaceCommand, WorkspaceCommandResult, WorkspaceCommandStatus,
+    AgentApprovalRequest, AgentApprovalSubject, AgentWorkspaceChange, AssistantTextPhase,
+    AssistantTraceEntry, AssistantTraceKind, AssistantTraceStatus, Conversation, GenerationConfig,
+    GenerationEvent, GenerationOutcome, GenerationStream, Message, MessageId, MessageRole,
+    MessageStatus, ProviderError, ProviderId, Timestamp, WorkspaceCommandResult,
+    WorkspaceCommandStatus,
 };
 
 use crate::components::{
@@ -105,6 +106,7 @@ struct GenerationProgress {
     started_at: Instant,
     provider_started_at: Option<Instant>,
     first_text_at: Option<Instant>,
+    final_answer_started: bool,
 }
 
 impl GenerationProgress {
@@ -121,6 +123,7 @@ impl GenerationProgress {
             started_at: Instant::now(),
             provider_started_at: None,
             first_text_at: None,
+            final_answer_started: false,
         }
     }
 
@@ -158,20 +161,13 @@ pub enum ConversationViewEvent {
 
 #[derive(Clone, Debug)]
 struct LiveCommand {
-    command: WorkspaceCommand,
     stdout: String,
     stderr: String,
     result: Option<WorkspaceCommandResult>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum ActivitySection {
-    Commands,
-    ToolCalls,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ActivitySectionOverride {
+enum TraceDisclosureOverride {
     Open,
     Closed,
 }
@@ -213,8 +209,8 @@ pub struct ConversationView {
     agent_controller: Option<AgentApprovalController>,
     pending_agent_approval: Option<(MessageId, AgentApprovalRequest)>,
     live_commands: HashMap<(MessageId, String), LiveCommand>,
-    activity_section_overrides: HashMap<(MessageId, ActivitySection), ActivitySectionOverride>,
-    expanded_agent_activity_calls: HashSet<(MessageId, String)>,
+    trace_disclosure_overrides: HashMap<MessageId, TraceDisclosureOverride>,
+    trace_entry_overrides: HashMap<(MessageId, String), bool>,
     older_cursor: Option<magenta_core::MessageSequence>,
     has_older: bool,
     page_load: PageLoadState,

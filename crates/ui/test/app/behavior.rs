@@ -220,7 +220,7 @@ fn failed_finalization_retains_response_until_retry_before_navigation(cx: &mut T
         attachments: Vec::new(),
         generation_outcome: None,
         failure: None,
-        agent_activities: Vec::new(),
+        assistant_trace: Default::default(),
     };
     window
         .update(cx, |_, window, cx| {

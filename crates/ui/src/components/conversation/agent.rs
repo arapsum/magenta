@@ -1,9 +1,9 @@
 use futures_util::StreamExt as _;
 use magenta_application::PendingAgentGeneration;
 use magenta_core::{
-    AgentActivity, AgentActivityKind, AgentApprovalDecision, AgentApprovalSubject, AgentRunEvent,
-    AgentRunStream, AgentToolOutput, MessageId, ProviderError, ProviderId,
-    WorkspaceCommandOutputStream, WorkspaceCommandResult,
+    AgentApprovalDecision, AgentApprovalSubject, AgentRunEvent, AgentRunStream, AgentToolOutput,
+    AssistantTrace, AssistantTraceEntry, AssistantTraceKind, AssistantTraceStatus, MessageId,
+    ProviderError, ProviderId, Timestamp, WorkspaceCommandOutputStream, WorkspaceCommandResult,
 };
 
 use super::*;
@@ -11,6 +11,14 @@ use super::*;
 enum AgentStreamControl {
     Continue,
     Completed(GenerationOutcome),
+}
+
+struct ToolTraceUpdate {
+    call_id: String,
+    tool_name: String,
+    status: AssistantTraceStatus,
+    input: Option<String>,
+    output: Option<String>,
 }
 
 impl ConversationView {
@@ -231,39 +239,70 @@ impl ConversationView {
         match event {
             AgentRunEvent::Started => self.mark_provider_started(generation, assistant_id, cx),
             AgentRunEvent::TextDelta(chunk) => {
-                self.push_stream_chunk(generation, assistant_id, &chunk, cx);
+                self.push_stream_chunk_phase(generation, assistant_id, &chunk, None, cx);
             }
-            AgentRunEvent::ToolCall(call) => self.push_agent_activity(
-                generation,
-                assistant_id,
-                AgentActivity {
-                    kind: AgentActivityKind::ToolCall,
-                    call_id: call.id,
-                    tool_name: call.name.clone(),
-                    status: "requested".to_owned(),
-                    summary: call.name,
-                    detail: call.arguments,
-                },
-                cx,
-            ),
+            AgentRunEvent::TextDeltaWithPhase { delta, phase } => {
+                self.push_stream_chunk_phase(generation, assistant_id, &delta, Some(phase), cx);
+            }
+            AgentRunEvent::ReasoningSummaryStarted { key, title } => {
+                self.update_reasoning_trace(generation, assistant_id, key, title, None, cx);
+            }
+            AgentRunEvent::ReasoningSummaryDelta { key, delta } => {
+                self.update_reasoning_trace(
+                    generation,
+                    assistant_id,
+                    key,
+                    "Thinking",
+                    Some(delta),
+                    cx,
+                );
+            }
+            AgentRunEvent::ReasoningSummaryCompleted { key, text } => {
+                self.complete_reasoning_trace(generation, assistant_id, key, text, cx);
+            }
+            AgentRunEvent::ToolCall(call) => {
+                self.update_tool_trace(
+                    generation,
+                    assistant_id,
+                    ToolTraceUpdate {
+                        call_id: call.id,
+                        tool_name: call.name,
+                        status: AssistantTraceStatus::Requested,
+                        input: Some(call.arguments),
+                        output: None,
+                    },
+                    cx,
+                );
+            }
             AgentRunEvent::ApprovalRequired(approval) => {
                 self.apply_approval_event(generation, assistant_id, approval, cx);
             }
             AgentRunEvent::ToolResult(result) => {
-                self.apply_tool_result_event(generation, assistant_id, result, cx);
+                self.apply_tool_result_event(generation, assistant_id, &result, cx);
             }
             AgentRunEvent::WorkspaceChange(change) => {
                 cx.emit(ConversationViewEvent::WorkspaceChange(change));
             }
             AgentRunEvent::CommandStarted { call_id, command } => {
                 self.live_commands.insert(
-                    (assistant_id, call_id),
+                    (assistant_id, call_id.clone()),
                     LiveCommand {
-                        command,
                         stdout: String::new(),
                         stderr: String::new(),
                         result: None,
                     },
+                );
+                self.update_tool_trace(
+                    generation,
+                    assistant_id,
+                    ToolTraceUpdate {
+                        call_id,
+                        tool_name: "run_command".to_owned(),
+                        status: AssistantTraceStatus::Running,
+                        input: Some(command.display()),
+                        output: None,
+                    },
+                    cx,
                 );
                 self.list_state.remeasure_items(0..self.messages.len());
                 cx.notify();
@@ -273,12 +312,20 @@ impl ConversationView {
                 stream,
                 chunk,
             } => {
-                if let Some(command) = self.live_commands.get_mut(&(assistant_id, call_id)) {
+                let updated = if let Some(command) =
+                    self.live_commands.get_mut(&(assistant_id, call_id.clone()))
+                {
                     let output = match stream {
                         WorkspaceCommandOutputStream::Stdout => &mut command.stdout,
                         WorkspaceCommandOutputStream::Stderr => &mut command.stderr,
                     };
                     append_bounded(output, &chunk);
+                    true
+                } else {
+                    false
+                };
+                if updated {
+                    self.append_tool_trace_output(generation, assistant_id, &call_id, &chunk, cx);
                     self.list_state.remeasure_items(0..self.messages.len());
                     cx.notify();
                 }
@@ -304,16 +351,15 @@ impl ConversationView {
             AgentApprovalSubject::Workspace { diff, .. } => diff.clone().unwrap_or_default(),
             AgentApprovalSubject::Command(command) => command.display(),
         };
-        self.push_agent_activity(
+        self.update_tool_trace(
             generation,
             assistant_id,
-            AgentActivity {
-                kind: AgentActivityKind::ApprovalRequested,
+            ToolTraceUpdate {
                 call_id: approval.tool_call_id,
                 tool_name: approval.tool_name,
-                status: "awaiting-approval".to_owned(),
-                summary: approval.reason,
-                detail,
+                status: AssistantTraceStatus::AwaitingApproval,
+                input: Some(detail),
+                output: Some(approval.reason),
             },
             cx,
         );
@@ -323,7 +369,7 @@ impl ConversationView {
         &mut self,
         generation: u64,
         assistant_id: MessageId,
-        result: AgentToolOutput,
+        result: &AgentToolOutput,
         cx: &mut Context<'_, Self>,
     ) {
         let tool_name = self.tool_name_for_result(assistant_id, &result.call_id);
@@ -341,20 +387,39 @@ impl ConversationView {
         }
 
         self.pending_agent_approval = None;
-        self.push_agent_activity(
+        let output = if tool_name == "run_command" {
+            self.live_commands
+                .get(&(assistant_id, result.call_id.clone()))
+                .map_or_else(
+                    || result.output.clone(),
+                    |command| match (command.stdout.is_empty(), command.stderr.is_empty()) {
+                        (false, false) => format!("{}\n{}", command.stdout, command.stderr),
+                        (false, true) => command.stdout.clone(),
+                        (true, false) => command.stderr.clone(),
+                        (true, true) => result.output.clone(),
+                    },
+                )
+        } else {
+            result.output.clone()
+        };
+        let status = if result.is_error {
+            if result.output.to_ascii_lowercase().contains("reject") {
+                AssistantTraceStatus::Rejected
+            } else {
+                AssistantTraceStatus::Failed
+            }
+        } else {
+            AssistantTraceStatus::Completed
+        };
+        self.update_tool_trace(
             generation,
             assistant_id,
-            AgentActivity {
-                kind: AgentActivityKind::ToolResult,
-                call_id: result.call_id,
+            ToolTraceUpdate {
+                call_id: result.call_id.clone(),
                 tool_name,
-                status: if result.is_error {
-                    "failed".to_owned()
-                } else {
-                    "completed".to_owned()
-                },
-                summary: "Tool result".to_owned(),
-                detail: result.output,
+                status,
+                input: Some(output),
+                output: None,
             },
             cx,
         );
@@ -367,24 +432,35 @@ impl ConversationView {
             .and_then(|message| {
                 message
                     .message
-                    .agent_activities
+                    .assistant_trace
+                    .entries
                     .iter()
                     .rev()
-                    .find(|activity| activity.call_id == call_id)
+                    .find(|entry| {
+                        entry.kind == AssistantTraceKind::Tool
+                            && entry.key == format!("tool:{call_id}")
+                    })
             })
             .map_or_else(
                 || "workspace tool".to_owned(),
-                |activity| activity.tool_name.clone(),
+                |entry| {
+                    entry
+                        .tool_name
+                        .clone()
+                        .unwrap_or_else(|| "workspace tool".to_owned())
+                },
             )
     }
 
-    pub(super) fn push_agent_activity(
+    fn update_trace<F>(
         &mut self,
         generation: u64,
         assistant_id: MessageId,
-        activity: AgentActivity,
+        update: F,
         cx: &mut Context<'_, Self>,
-    ) {
+    ) where
+        F: FnOnce(&mut AssistantTrace),
+    {
         if self.generation != generation || self.streaming_message != Some(assistant_id) {
             return;
         }
@@ -395,9 +471,146 @@ impl ConversationView {
         else {
             return;
         };
-        message.message.agent_activities.push(activity);
+        update(&mut message.message.assistant_trace);
         self.list_state.remeasure_items(0..self.messages.len());
         cx.notify();
+    }
+
+    pub(super) fn update_reasoning_trace(
+        &mut self,
+        generation: u64,
+        assistant_id: MessageId,
+        key: String,
+        title: impl Into<String>,
+        delta: Option<String>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.update_trace(
+            generation,
+            assistant_id,
+            move |trace| {
+                let entry = ensure_trace_entry(
+                    trace,
+                    key,
+                    AssistantTraceKind::ReasoningSummary,
+                    title.into(),
+                    None,
+                    AssistantTraceStatus::Streaming,
+                );
+                if let Some(delta) = delta {
+                    append_bounded(&mut entry.output, &delta);
+                }
+            },
+            cx,
+        );
+    }
+
+    pub(super) fn complete_reasoning_trace(
+        &mut self,
+        generation: u64,
+        assistant_id: MessageId,
+        key: String,
+        text: String,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.update_trace(
+            generation,
+            assistant_id,
+            move |trace| {
+                let entry = ensure_trace_entry(
+                    trace,
+                    key,
+                    AssistantTraceKind::ReasoningSummary,
+                    "Thinking".to_owned(),
+                    None,
+                    AssistantTraceStatus::Completed,
+                );
+                if !text.is_empty() {
+                    entry.output = text;
+                }
+                entry.status = AssistantTraceStatus::Completed;
+                entry.finished_at = Some(trace_now());
+            },
+            cx,
+        );
+    }
+
+    fn update_tool_trace(
+        &mut self,
+        generation: u64,
+        assistant_id: MessageId,
+        update: ToolTraceUpdate,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let ToolTraceUpdate {
+            call_id,
+            tool_name,
+            status,
+            input,
+            output,
+        } = update;
+        let key = format!("tool:{call_id}");
+        self.update_trace(
+            generation,
+            assistant_id,
+            move |trace| {
+                let entry = ensure_trace_entry(
+                    trace,
+                    key,
+                    AssistantTraceKind::Tool,
+                    tool_name.clone(),
+                    Some(tool_name.clone()),
+                    status,
+                );
+                if let Some(input) = input
+                    && (entry.input.is_empty() || status == AssistantTraceStatus::Requested)
+                {
+                    entry.input = input;
+                }
+                if let Some(output) = output {
+                    entry.output = bounded_text(&output);
+                }
+                entry.status = status;
+                if matches!(
+                    status,
+                    AssistantTraceStatus::Completed
+                        | AssistantTraceStatus::Rejected
+                        | AssistantTraceStatus::Failed
+                        | AssistantTraceStatus::Stopped
+                ) {
+                    entry.finished_at = Some(trace_now());
+                }
+            },
+            cx,
+        );
+    }
+
+    fn append_tool_trace_output(
+        &mut self,
+        generation: u64,
+        assistant_id: MessageId,
+        call_id: &str,
+        chunk: &str,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let key = format!("tool:{call_id}");
+        self.update_trace(
+            generation,
+            assistant_id,
+            move |trace| {
+                let entry = ensure_trace_entry(
+                    trace,
+                    key,
+                    AssistantTraceKind::Tool,
+                    "run_command".to_owned(),
+                    Some("run_command".to_owned()),
+                    AssistantTraceStatus::Running,
+                );
+                append_bounded(&mut entry.output, chunk);
+                entry.status = AssistantTraceStatus::Running;
+            },
+            cx,
+        );
     }
 
     pub(crate) fn decide_agent_approval(
@@ -428,4 +641,57 @@ fn append_bounded(output: &mut String, chunk: &str) {
         start += 1;
     }
     output.drain(..start);
+}
+
+fn trace_now() -> Timestamp {
+    Timestamp(chrono::Local::now().timestamp_millis())
+}
+
+fn bounded_text(value: &str) -> String {
+    let mut bounded = String::new();
+    append_bounded(&mut bounded, value);
+    bounded
+}
+
+fn ensure_trace_entry(
+    trace: &mut AssistantTrace,
+    key: String,
+    kind: AssistantTraceKind,
+    title: String,
+    tool_name: Option<String>,
+    status: AssistantTraceStatus,
+) -> &mut AssistantTraceEntry {
+    if let Some(index) = trace.entries.iter().position(|entry| entry.key == key) {
+        let entry = &mut trace.entries[index];
+        if entry.title.is_empty() {
+            entry.title = title;
+        }
+        if entry.tool_name.is_none() {
+            entry.tool_name = tool_name;
+        }
+        if entry.started_at.is_none() {
+            entry.started_at = Some(trace_now());
+        }
+        return entry;
+    }
+
+    let sequence = trace
+        .entries
+        .iter()
+        .map(|entry| entry.sequence)
+        .max()
+        .map_or(0, |sequence| sequence.saturating_add(1));
+    trace.entries.push(AssistantTraceEntry {
+        key,
+        sequence,
+        kind,
+        status,
+        title,
+        tool_name,
+        input: String::new(),
+        output: String::new(),
+        started_at: Some(trace_now()),
+        finished_at: None,
+    });
+    trace.entries.last_mut().expect("trace entry was inserted")
 }
