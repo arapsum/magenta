@@ -23,15 +23,16 @@ mod storage;
 mod workspace;
 
 pub use agent::{
-    AgentActivity, AgentActivityKind, AgentActivityRecord, AgentApprovalDecision,
-    AgentApprovalRequest, AgentApprovalSubject, AgentContentCache, AgentContinuation,
-    AgentDataFuture, AgentMemory, AgentMemoryStore, AgentProvider, AgentProviderEvent,
-    AgentProviderStream, AgentRequest, AgentResumeRequest, AgentRunEvent, AgentRunStream,
-    AgentSession, AgentSessionState, AgentSessionStore, AgentToolCall, AgentToolDefinition,
-    AgentToolOutput, AgentWorkspaceChange, CachedContent, CodeChunk, CodeIndex,
-    CodeIndexMaintainer, CodeIndexReport, CodeMatch, ConversationMode, EmbeddingProvider,
-    MemoryKind, MemoryMatch, MemoryState, NewAgentMemory, RetrievedContextBlock,
-    RetrievedContextKind, WorkspaceChangeKind, WorkspaceChangeState,
+    AgentApprovalDecision, AgentApprovalRequest, AgentApprovalSubject, AgentContentCache,
+    AgentContinuation, AgentDataFuture, AgentMemory, AgentMemoryStore, AgentProvider,
+    AgentProviderEvent, AgentProviderStream, AgentRequest, AgentResumeRequest, AgentRunEvent,
+    AgentRunStream, AgentSession, AgentSessionState, AgentSessionStore, AgentToolCall,
+    AgentToolDefinition, AgentToolOutput, AgentWorkspaceChange, AssistantTextPhase, AssistantTrace,
+    AssistantTraceEntry, AssistantTraceEntryKind, AssistantTraceEntryStatus, AssistantTraceKind,
+    AssistantTraceStatus, CachedContent, CodeChunk, CodeIndex, CodeIndexMaintainer,
+    CodeIndexReport, CodeMatch, ConversationMode, EmbeddingProvider, MemoryKind, MemoryMatch,
+    MemoryState, NewAgentMemory, RetrievedContextBlock, RetrievedContextKind, WorkspaceChangeKind,
+    WorkspaceChangeState,
 };
 pub use auth::{
     AuthenticationFuture, AuthorizationSession, ProviderAccount, ProviderAuthenticator,

@@ -17,7 +17,7 @@ fn message_values_preserve_role_status_and_attachments() {
         }],
         generation_outcome: None,
         failure: None,
-        agent_activities: Vec::new(),
+        assistant_trace: Default::default(),
     };
 
     assert_eq!(message.role, MessageRole::User);

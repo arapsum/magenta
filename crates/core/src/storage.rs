@@ -3,8 +3,8 @@
 use std::{error::Error, future::Future, ops::Range, pin::Pin};
 
 use crate::{
-    AgentActivity, AgentActivityRecord, AgentRunId, AttachmentDraft, Conversation, ConversationId,
-    ConversationMode, GenerationConfig, Message, MessageId, ProviderId,
+    AgentRunId, AssistantTrace, AttachmentDraft, Conversation, ConversationId, ConversationMode,
+    GenerationConfig, Message, MessageId, ProviderId,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -44,7 +44,6 @@ pub struct StoredMessage {
     pub sequence: MessageSequence,
     pub created_at: Timestamp,
     pub generation: GenerationConfig,
-    pub agent_activities: Vec<AgentActivity>,
     pub omitted_context_messages: usize,
 }
 
@@ -158,5 +157,9 @@ pub trait ConversationStore: Send + Sync {
         title: String,
     ) -> StorageFuture<bool>;
     fn set_pinned(&self, id: ConversationId, pinned: bool) -> StorageFuture<()>;
-    fn append_agent_activity(&self, activity: AgentActivityRecord) -> StorageFuture<()>;
+    fn upsert_assistant_trace(
+        &self,
+        message_id: MessageId,
+        trace: AssistantTrace,
+    ) -> StorageFuture<()>;
 }

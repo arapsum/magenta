@@ -4,6 +4,7 @@ use futures_core::Stream;
 use serde::{Deserialize, Serialize};
 
 use super::{
+    AssistantTextPhase,
     error::ProviderError,
     identifiers::{ModelId, ProviderId},
     message::Message,
@@ -144,6 +145,22 @@ pub struct GenerationRequest {
 pub enum GenerationEvent {
     Started,
     TextDelta(String),
+    TextDeltaWithPhase {
+        delta: String,
+        phase: AssistantTextPhase,
+    },
+    ReasoningSummaryStarted {
+        key: String,
+        title: String,
+    },
+    ReasoningSummaryDelta {
+        key: String,
+        delta: String,
+    },
+    ReasoningSummaryCompleted {
+        key: String,
+        text: String,
+    },
     Completed(GenerationOutcome),
 }
 

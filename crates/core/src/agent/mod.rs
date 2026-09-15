@@ -13,9 +13,59 @@ use futures_core::Stream;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AgentRunId, ConversationId, EffortLevel, GenerationConfig, GenerationOutcome, Message,
-    MessageId, ModelId, ProviderError, ProviderId, WorkspaceCommand, WorkspaceCommandOutputStream,
+    EffortLevel, GenerationConfig, GenerationOutcome, Message, ModelId, ProviderError, ProviderId,
+    Timestamp, WorkspaceCommand, WorkspaceCommandOutputStream,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AssistantTextPhase {
+    Commentary,
+    FinalAnswer,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssistantTraceKind {
+    ReasoningSummary,
+    Tool,
+}
+
+pub type AssistantTraceEntryKind = AssistantTraceKind;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssistantTraceStatus {
+    Streaming,
+    Requested,
+    Running,
+    AwaitingApproval,
+    Completed,
+    Rejected,
+    Failed,
+    Stopped,
+}
+
+pub type AssistantTraceEntryStatus = AssistantTraceStatus;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AssistantTrace {
+    pub entries: Vec<AssistantTraceEntry>,
+    pub thinking_duration_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AssistantTraceEntry {
+    pub key: String,
+    pub sequence: u64,
+    pub kind: AssistantTraceKind,
+    pub status: AssistantTraceStatus,
+    pub title: String,
+    pub tool_name: Option<String>,
+    pub input: String,
+    pub output: String,
+    pub started_at: Option<Timestamp>,
+    pub finished_at: Option<Timestamp>,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AgentRequest {
@@ -70,6 +120,22 @@ pub struct AgentToolOutput {
 pub enum AgentProviderEvent {
     Started,
     TextDelta(String),
+    TextDeltaWithPhase {
+        delta: String,
+        phase: AssistantTextPhase,
+    },
+    ReasoningSummaryStarted {
+        key: String,
+        title: String,
+    },
+    ReasoningSummaryDelta {
+        key: String,
+        delta: String,
+    },
+    ReasoningSummaryCompleted {
+        key: String,
+        text: String,
+    },
     ToolCall {
         call: AgentToolCall,
         continuation: AgentContinuation,
@@ -125,6 +191,22 @@ pub enum AgentApprovalDecision {
 pub enum AgentRunEvent {
     Started,
     TextDelta(String),
+    TextDeltaWithPhase {
+        delta: String,
+        phase: AssistantTextPhase,
+    },
+    ReasoningSummaryStarted {
+        key: String,
+        title: String,
+    },
+    ReasoningSummaryDelta {
+        key: String,
+        delta: String,
+    },
+    ReasoningSummaryCompleted {
+        key: String,
+        text: String,
+    },
     ToolCall(AgentToolCall),
     ToolResult(AgentToolOutput),
     WorkspaceChange(AgentWorkspaceChange),
@@ -170,29 +252,3 @@ pub struct AgentWorkspaceChange {
 
 pub type AgentRunStream =
     Pin<Box<dyn Stream<Item = Result<AgentRunEvent, ProviderError>> + Send + 'static>>;
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum AgentActivityKind {
-    ToolCall,
-    ApprovalRequested,
-    ToolResult,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AgentActivity {
-    pub kind: AgentActivityKind,
-    pub call_id: String,
-    pub tool_name: String,
-    pub status: String,
-    pub summary: String,
-    pub detail: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AgentActivityRecord {
-    pub run_id: AgentRunId,
-    pub assistant_message_id: MessageId,
-    pub conversation_id: ConversationId,
-    pub activity: AgentActivity,
-}

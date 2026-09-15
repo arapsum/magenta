@@ -11,7 +11,7 @@ fn message(id: u64, role: MessageRole, content: &str) -> Message {
         attachments: Vec::new(),
         generation_outcome: None,
         failure: None,
-        agent_activities: Vec::new(),
+        assistant_trace: Default::default(),
     }
 }
 

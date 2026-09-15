@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AgentActivity, ConversationId, GenerationOutcome, MessageId, ProviderError,
+    AssistantTrace, ConversationId, GenerationOutcome, MessageId, ProviderError,
     ProviderErrorDiagnostic, ProviderErrorKind, ProviderId,
 };
 
@@ -139,7 +139,7 @@ pub struct Message {
     pub attachments: Vec<Attachment>,
     pub generation_outcome: Option<GenerationOutcome>,
     pub failure: Option<MessageFailure>,
-    pub agent_activities: Vec<AgentActivity>,
+    pub assistant_trace: AssistantTrace,
 }
 
 #[cfg(test)]
