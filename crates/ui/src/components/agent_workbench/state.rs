@@ -105,10 +105,15 @@ impl AgentWorkbench {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if change.state == WorkspaceChangeState::Committed {
+        if matches!(
+            change.state,
+            WorkspaceChangeState::Staged | WorkspaceChangeState::Committed
+        ) {
             self.run_changes.insert(change.path.clone(), change.kind);
         }
+
         let (path, has_diff) = self.upsert_change(change, window, cx);
+
         if has_diff {
             self.position_active_diff(&path, window, cx);
         }

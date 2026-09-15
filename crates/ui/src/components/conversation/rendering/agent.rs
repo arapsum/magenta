@@ -16,6 +16,68 @@ use super::agent_cards::{
 mod tests;
 
 impl ConversationView {
+    pub(super) fn render_workspace_review(
+        &self,
+        message_id: MessageId,
+        cx: &App,
+        view: &Entity<Self>,
+    ) -> Option<AnyElement> {
+        let controller = self.agent_controller.as_ref()?;
+        if self.streaming_message.is_some() || !controller.is_workspace_review_for(message_id) {
+            return None;
+        }
+
+        let discard_view = view.clone();
+        let apply_view = view.clone();
+
+        Some(
+            v_flex()
+                .w_full()
+                .gap(px(8.))
+                .p(px(12.))
+                .rounded(cx.theme().radius_lg)
+                .border_1()
+                .border_color(cx.theme().warning.opacity(0.55))
+                .child(div().font_medium().child("Review staged workspace changes"))
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child(
+                            "Changes are isolated in AgentFS and have not touched the project yet.",
+                        ),
+                )
+                .child(
+                    h_flex()
+                        .justify_end()
+                        .gap(px(6.))
+                        .child(
+                            Button::new(("discard-agentfs", message_id.0))
+                                .outline()
+                                .small()
+                                .label("Discard")
+                                .on_click(move |_, window, cx| {
+                                    discard_view.update(cx, |view, cx| {
+                                        view.discard_workspace_review(window, cx);
+                                    });
+                                }),
+                        )
+                        .child(
+                            Button::new(("apply-agentfs", message_id.0))
+                                .primary()
+                                .small()
+                                .label("Apply changes")
+                                .on_click(move |_, window, cx| {
+                                    apply_view.update(cx, |view, cx| {
+                                        view.apply_workspace_review(window, cx);
+                                    });
+                                }),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn activity_section_is_active(&self, message: &Message, section: ActivitySection) -> bool {
         match section {
             ActivitySection::Commands => command_section_is_active(message, &self.live_commands),

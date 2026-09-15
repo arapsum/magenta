@@ -8,11 +8,12 @@ use magenta_core::{
     AgentActivity, AgentActivityKind, AgentApprovalDecision, AgentApprovalRequest,
     AgentApprovalSubject, AgentRunEvent, AgentRunStream, AgentToolCall, AgentToolDefinition,
     AgentToolOutput, AgentWorkspaceChange, Conversation, ConversationId, ConversationStore,
-    ProviderId, WorkspaceAccess, WorkspaceChangeKind, WorkspaceChangeState, WorkspaceOperation,
-    WorkspacePreview,
+    MemoryKind, MemoryState, NewAgentMemory, ProviderId, WorkspaceAccess, WorkspaceChangeKind,
+    WorkspaceChangeState, WorkspaceOperation, WorkspacePreview,
 };
+use sha2::{Digest as _, Sha256};
 
-use super::{AgentStreamContext, ApprovalResponse, agent_error};
+use super::{AgentContextServices, AgentStreamContext, ApprovalResponse, agent_error};
 
 mod commands;
 mod definition;
@@ -33,6 +34,12 @@ pub fn execute_tools(
 ) -> AgentRunStream {
     Box::pin(async_stream::try_stream! {
         for call in calls {
+            if matches!(call.name.as_str(), "search_code" | "save_memory_candidate") {
+                let output = execute_data_tool(&context, &call, &provider_id).await?;
+                yield AgentRunEvent::ToolResult(output);
+                continue;
+            }
+
             if call.name == "run_command" {
                 let mut events = commands::execute_command(
                     context.clone(),
@@ -43,87 +50,361 @@ pub fn execute_tools(
                 while let Some(event) = futures_util::StreamExt::next(&mut events).await {
                     yield event?;
                 }
+
                 continue;
             }
-            let prepared = match prepare_tool(
-                &context.store,
-                &context.workspace,
-                &context.root,
-                &context.conversation,
-                &context.assistant_message,
-                context.run_id,
-                &call,
+
+            for event in execute_workspace_tool(
+                &context,
+                call,
+                &approvals,
+                &provider_id,
+                &permissions,
             )
-            .await {
-                Ok(prepared) => prepared,
-                Err(error) => {
-                    let output = record_failure(&context, &call, &error, &provider_id).await?;
-                    yield AgentRunEvent::ToolResult(output);
-                    continue;
-                }
-            };
-            let mut preview = prepared.preview;
-            let proposed_change = workspace_change(&call, &preview, WorkspaceChangeState::Proposed);
-            if let Some(change) = proposed_change.clone() {
-                yield AgentRunEvent::WorkspaceChange(change);
+            .await?
+            {
+                yield event;
             }
-            if prepared.operation.is_mutating() || preview.protected {
-                let approval = workspace_approval(&call, &prepared.operation, &preview);
-                let granted_for_run = approval.can_approve_for_run
-                    && permissions
-                        .lock()
-                        .is_ok_and(|permissions| permissions.approve_workspace_edits);
-                if !granted_for_run {
-                    record_workspace_approval(&context, &call, &approval, &provider_id).await?;
-                    yield AgentRunEvent::ApprovalRequired(approval.clone());
-                    let decision = await_decision(&approvals, &approval.request_id).await;
-                    if decision == AgentApprovalDecision::Reject {
-                        let (change, output) = reject_workspace_tool(
-                            &context,
-                            &call,
-                            proposed_change,
-                            &provider_id,
-                        )
-                        .await?;
-                        if let Some(change) = change {
-                            yield AgentRunEvent::WorkspaceChange(change);
-                        }
-                        yield AgentRunEvent::ToolResult(output);
-                        continue;
-                    }
-                    if decision == AgentApprovalDecision::ApproveWorkspaceEditsForRun
-                        && approval.can_approve_for_run
-                        && let Ok(mut permissions) = permissions.lock()
-                    {
-                        permissions.approve_workspace_edits = true;
-                    }
-                }
-                if preview.protected {
-                    preview = match context
-                        .workspace
-                        .prepare(context.root.clone(), prepared.operation.clone(), true)
-                        .await
-                    {
-                        Ok(preview) => preview,
-                        Err(error) => {
-                            let detail = workspace_error_detail(&error);
-                            let output = record_failure(&context, &call, &detail, &provider_id)
-                                .await?;
-                            yield AgentRunEvent::ToolResult(output);
-                            continue;
-                        }
-                    };
-                }
-            }
-            let (output, change) = finish_tool(&context, &prepared.call, preview)
-                .await
-                .map_err(|error| agent_error(&provider_id, &error))?;
-            if let Some(change) = change {
-                yield AgentRunEvent::WorkspaceChange(change);
-            }
-            yield AgentRunEvent::ToolResult(output);
         }
     })
+}
+
+async fn execute_data_tool(
+    context: &AgentStreamContext,
+    call: &AgentToolCall,
+    provider_id: &ProviderId,
+) -> Result<AgentToolOutput, magenta_core::ProviderError> {
+    let output = execute_agent_data_tool(context, call).await;
+    record_result(
+        &context.store,
+        context.run_id,
+        &context.assistant_message,
+        context.conversation.id,
+        &call.name,
+        &output,
+    )
+    .await
+    .map_err(|error| agent_error(provider_id, &error))?;
+    Ok(output)
+}
+
+async fn execute_workspace_tool(
+    context: &AgentStreamContext,
+    call: AgentToolCall,
+    approvals: &Receiver<ApprovalResponse>,
+    provider_id: &ProviderId,
+    permissions: &AgentRunPermissionsHandle,
+) -> Result<Vec<AgentRunEvent>, magenta_core::ProviderError> {
+    let mut prepared = match prepare_tool(
+        &context.store,
+        &context.workspace,
+        &context.root,
+        &context.conversation,
+        &context.assistant_message,
+        context.run_id,
+        &call,
+    )
+    .await
+    {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            let output = record_failure(context, &call, &error, provider_id).await?;
+            return Ok(vec![AgentRunEvent::ToolResult(output)]);
+        }
+    };
+
+    apply_content_cache(context, &mut prepared).await;
+
+    let mut events = Vec::new();
+    let mut preview = prepared.preview;
+    let proposed_change = workspace_change(&call, &preview, WorkspaceChangeState::Proposed);
+    if let Some(change) = proposed_change.clone() {
+        events.push(AgentRunEvent::WorkspaceChange(change));
+    }
+
+    if prepared.operation.is_mutating() || preview.protected {
+        let approval = workspace_approval(&call, &prepared.operation, &preview);
+        if let Some(approval_events) = request_workspace_approval(
+            context,
+            &call,
+            &approval,
+            proposed_change,
+            approvals,
+            provider_id,
+            permissions,
+        )
+        .await?
+        {
+            events.extend(approval_events);
+            return Ok(events);
+        }
+
+        if preview.protected {
+            preview = match context
+                .workspace
+                .prepare(context.root.clone(), prepared.operation.clone(), true)
+                .await
+            {
+                Ok(preview) => preview,
+                Err(error) => {
+                    let detail = workspace_error_detail(&error);
+                    let output = record_failure(context, &call, &detail, provider_id).await?;
+                    events.push(AgentRunEvent::ToolResult(output));
+                    return Ok(events);
+                }
+            };
+        }
+    }
+
+    let (output, change) = finish_tool(context, &prepared.call, preview)
+        .await
+        .map_err(|error| agent_error(provider_id, &error))?;
+    if let Some(change) = change {
+        events.push(AgentRunEvent::WorkspaceChange(change));
+    }
+    events.push(AgentRunEvent::ToolResult(output));
+    Ok(events)
+}
+
+async fn request_workspace_approval(
+    context: &AgentStreamContext,
+    call: &AgentToolCall,
+    approval: &AgentApprovalRequest,
+    proposed_change: Option<AgentWorkspaceChange>,
+    approvals: &Receiver<ApprovalResponse>,
+    provider_id: &ProviderId,
+    permissions: &AgentRunPermissionsHandle,
+) -> Result<Option<Vec<AgentRunEvent>>, magenta_core::ProviderError> {
+    let granted_for_run = approval.can_approve_for_run
+        && permissions
+            .lock()
+            .is_ok_and(|permissions| permissions.approve_workspace_edits);
+    if granted_for_run {
+        return Ok(None);
+    }
+
+    record_workspace_approval(context, call, approval, provider_id).await?;
+    let decision = await_decision(approvals, &approval.request_id).await;
+    if decision != AgentApprovalDecision::Reject {
+        if decision == AgentApprovalDecision::ApproveWorkspaceEditsForRun
+            && approval.can_approve_for_run
+            && let Ok(mut permissions) = permissions.lock()
+        {
+            permissions.approve_workspace_edits = true;
+        }
+        return Ok(None);
+    }
+
+    let (change, output) =
+        reject_workspace_tool(context, call, proposed_change, provider_id).await?;
+    let mut events = Vec::with_capacity(2);
+    if let Some(change) = change {
+        events.push(AgentRunEvent::WorkspaceChange(change));
+    }
+    events.push(AgentRunEvent::ToolResult(output));
+    Ok(Some(events))
+}
+
+async fn apply_content_cache(context: &AgentStreamContext, prepared: &mut PreparedTool) {
+    if !matches!(prepared.operation, WorkspaceOperation::ReadFile { .. })
+        || prepared.preview.protected
+        || prepared.preview.output.is_empty()
+    {
+        return;
+    }
+
+    let Some(services) = &context.context_services else {
+        return;
+    };
+
+    let content_hash = format!("{:x}", Sha256::digest(prepared.preview.output.as_bytes()));
+
+    if let Ok(Some(cached)) = services
+        .cache
+        .cached_content(
+            context.root.clone(),
+            prepared.preview.path.clone(),
+            content_hash.clone(),
+        )
+        .await
+    {
+        prepared.preview.output = cached.compact_context;
+        prepared.preview.summary.push_str(" (content cache hit)");
+        return;
+    }
+
+    let compact_context = compact_content(&prepared.preview.output);
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|value| i64::try_from(value.as_millis()).ok())
+        .unwrap_or_default();
+
+    let _ = services
+        .cache
+        .cache_content(
+            context.root.clone(),
+            magenta_core::CachedContent {
+                path: prepared.preview.path.clone(),
+                content_hash,
+                version: timestamp,
+                content: prepared.preview.output.clone(),
+                compact_context,
+                byte_size: u64::try_from(prepared.preview.output.len()).unwrap_or(u64::MAX),
+                accessed_at: magenta_core::Timestamp(timestamp),
+            },
+        )
+        .await;
+}
+
+fn compact_content(content: &str) -> String {
+    const LIMIT: usize = 4_000;
+
+    if content.len() <= LIMIT {
+        return content.to_owned();
+    }
+
+    let mut end = LIMIT;
+    while !content.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    format!(
+        "{}\n… cached content truncated; use a narrower line range for full detail",
+        &content[..end]
+    )
+}
+
+async fn execute_agent_data_tool(
+    context: &AgentStreamContext,
+    call: &AgentToolCall,
+) -> AgentToolOutput {
+    let result = execute_agent_data_tool_result(context, call).await;
+
+    match result {
+        Ok(output) => AgentToolOutput {
+            call_id: call.id.clone(),
+            output,
+            is_error: false,
+        },
+        Err(output) => AgentToolOutput {
+            call_id: call.id.clone(),
+            output,
+            is_error: true,
+        },
+    }
+}
+
+async fn execute_agent_data_tool_result(
+    context: &AgentStreamContext,
+    call: &AgentToolCall,
+) -> Result<String, String> {
+    let services = context
+        .context_services
+        .as_ref()
+        .ok_or_else(|| "agent data services are unavailable".to_owned())?;
+    let arguments: serde_json::Value = serde_json::from_str(&call.arguments)
+        .map_err(|error| format!("invalid tool arguments: {error}"))?;
+
+    match call.name.as_str() {
+        "search_code" => search_code(context, services, &arguments).await,
+        "save_memory_candidate" => save_memory_candidate(context, services, &arguments).await,
+        _ => Err("unknown agent data tool".to_owned()),
+    }
+}
+
+async fn search_code(
+    context: &AgentStreamContext,
+    services: &AgentContextServices,
+    arguments: &serde_json::Value,
+) -> Result<String, String> {
+    let query = arguments
+        .get("query")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "query must be a non-empty string".to_owned())?;
+    let embedding = services
+        .embeddings
+        .embed(vec![query.to_owned()])
+        .await
+        .ok()
+        .and_then(|mut values| values.pop());
+    let matches = services
+        .code
+        .search_code(
+            context.root.clone(),
+            query.to_owned(),
+            embedding,
+            context
+                .review
+                .as_ref()
+                .map(|review| review.session_id.clone()),
+            12,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+
+    Ok(matches
+        .into_iter()
+        .map(|item| {
+            format!(
+                "{}:{}-{} ({:.3})\n{}",
+                item.chunk.path,
+                item.chunk.start_line,
+                item.chunk.end_line,
+                item.score,
+                item.chunk.content
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n"))
+}
+
+async fn save_memory_candidate(
+    context: &AgentStreamContext,
+    services: &AgentContextServices,
+    arguments: &serde_json::Value,
+) -> Result<String, String> {
+    let memory_text = arguments
+        .get("content")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "content must be a non-empty string".to_owned())?;
+    let kind = match arguments.get("kind").and_then(serde_json::Value::as_str) {
+        Some("fact") => MemoryKind::Fact,
+        Some("preference") => MemoryKind::Preference,
+        Some("decision") => MemoryKind::Decision,
+        Some("procedure") => MemoryKind::Procedure,
+        _ => return Err("unknown memory kind".to_owned()),
+    };
+    let confidence = arguments
+        .get("confidence")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.5)
+        .clamp(0.0, 1.0);
+    let embedding = services
+        .embeddings
+        .embed(vec![memory_text.to_owned()])
+        .await
+        .ok()
+        .and_then(|mut values| values.pop());
+    let memory = services
+        .memories
+        .remember(
+            context.root.clone(),
+            NewAgentMemory {
+                kind,
+                state: MemoryState::Candidate,
+                content: memory_text.to_owned(),
+                source_conversation_id: Some(context.conversation.id),
+                confidence,
+                embedding,
+            },
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+
+    Ok(format!("saved memory candidate {} for review", memory.id))
 }
 
 struct PreparedTool {
@@ -252,7 +533,7 @@ async fn finish_tool(
             change.state = WorkspaceChangeState::Failed;
             change.error = Some(output.output.clone());
         } else {
-            change.state = WorkspaceChangeState::Committed;
+            change.state = WorkspaceChangeState::Staged;
         }
         change
     });

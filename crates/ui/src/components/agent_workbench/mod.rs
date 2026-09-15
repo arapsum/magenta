@@ -184,6 +184,7 @@ impl WorkbenchDiff {
     fn state_label(&self) -> &str {
         match self.state {
             WorkspaceChangeState::Proposed => "Awaiting approval",
+            WorkspaceChangeState::Staged => "Staged in AgentFS",
             WorkspaceChangeState::Committed => "Committed",
             WorkspaceChangeState::Rejected => "Rejected",
             WorkspaceChangeState::Failed => self.error.as_deref().unwrap_or("Write failed"),
@@ -197,7 +198,7 @@ impl WorkbenchDiff {
     const fn status_icon(&self) -> IconName {
         match self.state {
             WorkspaceChangeState::Proposed => IconName::LoaderCircle,
-            WorkspaceChangeState::Committed => IconName::CircleCheck,
+            WorkspaceChangeState::Staged | WorkspaceChangeState::Committed => IconName::CircleCheck,
             WorkspaceChangeState::Rejected | WorkspaceChangeState::Failed => IconName::CircleX,
         }
     }
@@ -205,7 +206,7 @@ impl WorkbenchDiff {
     fn status_color(&self, cx: &App) -> Hsla {
         match self.state {
             WorkspaceChangeState::Proposed => cx.theme().warning,
-            WorkspaceChangeState::Committed => cx.theme().success,
+            WorkspaceChangeState::Staged | WorkspaceChangeState::Committed => cx.theme().success,
             WorkspaceChangeState::Rejected | WorkspaceChangeState::Failed => cx.theme().danger,
         }
     }

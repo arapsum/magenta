@@ -125,6 +125,10 @@ impl ConversationView {
                 gpui_kit::ParentElement::child,
             )
             .when_some(
+                self.render_workspace_review(message.id, cx, view),
+                gpui_kit::ParentElement::child,
+            )
+            .when_some(
                 message
                     .failure
                     .as_ref()

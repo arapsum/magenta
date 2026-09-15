@@ -21,10 +21,10 @@ use magenta_application::{
 };
 use magenta_core::{
     AgentProvider, ChatProvider, ConversationStore, ModelCatalog, ProviderAuthenticator,
-    RepositoryAccess, SettingsStore, WorkspaceAccess, WorkspaceCommandRunner,
+    RepositoryAccess, SettingsStore, WorkspaceAccess, WorkspaceSessionAccess,
 };
 use magenta_providers::OpenAiProvider;
-use magenta_workspace::{BubblewrapCommandRunner, LocalRepository, LocalWorkspace};
+use magenta_workspace::{AgentFsWorkspace, LocalRepository, LocalWorkspace};
 
 use magenta_ui::{notification_for_error, MagentaError, MainServices, MainView, Result};
 
@@ -288,11 +288,30 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
             std::io::Error::other("local data directory unavailable"),
         ),
     })?;
-    let sqlite_store = Arc::new(magenta_storage::SqliteConversationStore::new(
-        data_dir.join("magenta/conversations.sqlite3"),
+    let app_store = Arc::new(magenta_storage::TursoAppStore::new(
+        data_dir.join("magenta/magenta.db"),
     ));
-    let store: Arc<dyn ConversationStore> = sqlite_store.clone();
-    let project_store: Arc<dyn magenta_core::ProjectStore> = sqlite_store;
+
+    let store: Arc<dyn ConversationStore> = app_store.clone();
+    let project_store: Arc<dyn magenta_core::ProjectStore> = app_store;
+
+    let agent_data = Arc::new(magenta_storage::TursoAgentDatabase::new(
+        data_dir.join("magenta/projects"),
+    ));
+
+    let memory_store: Arc<dyn magenta_core::AgentMemoryStore> = agent_data.clone();
+    let code_index: Arc<dyn magenta_core::CodeIndex> = agent_data.clone();
+    let session_store: Arc<dyn magenta_core::AgentSessionStore> = agent_data.clone();
+    let content_cache: Arc<dyn magenta_core::AgentContentCache> = agent_data;
+
+    let embeddings: Arc<dyn magenta_core::EmbeddingProvider> = Arc::new(
+        magenta_storage::LocalEmbeddingProvider::new(data_dir.join("magenta/models")),
+    );
+
+    let code_indexer: Arc<dyn magenta_core::CodeIndexMaintainer> = Arc::new(
+        magenta_workspace::WorkspaceCodeIndexer::new(code_index.clone(), embeddings.clone()),
+    );
+
     let config_dir = dirs::config_dir().ok_or_else(|| MagentaError::StorageInitialize {
         source: magenta_core::StorageError::new(
             magenta_core::StorageErrorKind::Unavailable,
@@ -306,25 +325,41 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     let regenerate_provider = Arc::clone(&chat_provider);
     let regenerate_store = Arc::clone(&store);
     let regenerate_message = RegenerateMessage::new(regenerate_provider, regenerate_store);
+
     let local_workspace = Arc::new(LocalWorkspace);
-    let workspace: Arc<dyn WorkspaceAccess> = local_workspace.clone();
+
+    let reviewed_workspace = Arc::new(
+        AgentFsWorkspace::new(data_dir.join("magenta/agentfs")).map_err(|error| {
+            MagentaError::StorageInitialize {
+                source: magenta_core::StorageError::new(
+                    magenta_core::StorageErrorKind::Unavailable,
+                    error,
+                ),
+            }
+        })?,
+    );
+
+    let workspace: Arc<dyn WorkspaceAccess> = reviewed_workspace.clone();
+    let workspace_sessions: Arc<dyn WorkspaceSessionAccess> = reviewed_workspace;
     let workspace_browser: Arc<dyn magenta_core::WorkspaceBrowser> = local_workspace;
     let repository: Arc<dyn RepositoryAccess> = Arc::new(LocalRepository);
-    let command_runner: Option<Arc<dyn WorkspaceCommandRunner>> =
-        match BubblewrapCommandRunner::new() {
-            Ok(runner) => Some(Arc::new(runner)),
-            Err(error) => {
-                tracing::warn!(error = %error.source, "sandboxed commands are unavailable");
-                None
-            }
-        };
+
+    // Commands stay disabled until the AgentFS FUSE mount can be bound into
+    // bubblewrap; otherwise a command could bypass the reviewed overlay.
+    let command_runner = None;
+
     let projects = ProjectCatalog::new(project_store, workspace_browser);
+
     let agent = RunWorkspaceAgent::new(
         agent_provider,
         Arc::clone(&store),
         workspace,
         command_runner,
-    );
+    )
+    .with_agent_context(memory_store, code_index, embeddings, content_cache)
+    .with_code_indexer(code_indexer)
+    .with_workspace_sessions(workspace_sessions, session_store);
+
     let history = ConversationHistory::new(store);
     cx.open_window(window_options, move |window, cx| {
         let main_view = cx.new(|cx| {

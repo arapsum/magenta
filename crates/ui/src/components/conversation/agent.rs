@@ -14,6 +14,41 @@ enum AgentStreamControl {
 }
 
 impl ConversationView {
+    pub(crate) fn apply_workspace_review(&mut self, window: &Window, cx: &Context<'_, Self>) {
+        let Some(controller) = self.agent_controller.clone() else {
+            return;
+        };
+
+        self.generation_task = Some(cx.spawn_in(window, async move |view, window| {
+            let result = controller.apply_workspace_changes().await;
+
+            _ = view.update_in(window, |view, _, cx| {
+                if result.is_ok() {
+                    view.agent_controller.take();
+                    cx.emit(ConversationViewEvent::WorkspaceInvalidated);
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    pub(crate) fn discard_workspace_review(&mut self, window: &Window, cx: &Context<'_, Self>) {
+        let Some(controller) = self.agent_controller.clone() else {
+            return;
+        };
+
+        self.generation_task = Some(cx.spawn_in(window, async move |view, window| {
+            let result = controller.discard_workspace_changes().await;
+
+            _ = view.update_in(window, |view, _, cx| {
+                if result.is_ok() {
+                    view.agent_controller.take();
+                }
+                cx.notify();
+            });
+        }));
+    }
+
     pub(crate) fn start_agent_generation(
         &mut self,
         pending: PendingAgentGeneration,

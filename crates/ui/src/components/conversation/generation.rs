@@ -321,7 +321,13 @@ impl ConversationView {
     }
 
     pub(super) fn clear_agent_state(&mut self) {
-        self.agent_controller.take();
+        if !self
+            .agent_controller
+            .as_ref()
+            .is_some_and(AgentApprovalController::has_pending_workspace_review)
+        {
+            self.agent_controller.take();
+        }
         self.pending_agent_approval.take();
         for command in self.live_commands.values_mut() {
             if command.result.is_none() {

@@ -6,7 +6,7 @@ use super::{
 use magenta_core::{AgentToolCall, WorkspaceCommand, WorkspaceOperation, WorkspacePreview};
 
 #[test]
-fn tool_definitions_expose_only_the_supported_workspace_operations() {
+fn tool_definitions_expose_only_supported_tools() {
     let definitions = tool_definitions(true);
 
     assert_eq!(
@@ -17,6 +17,8 @@ fn tool_definitions_expose_only_the_supported_workspace_operations() {
         vec![
             "list_files",
             "search_text",
+            "search_code",
+            "save_memory_candidate",
             "read_file",
             "apply_patch",
             "create_file",
@@ -31,8 +33,18 @@ fn tool_definitions_expose_only_the_supported_workspace_operations() {
             .collect::<Vec<_>>(),
         vec!["apply_patch", "create_file", "run_command"]
     );
-    assert!(definitions[2].protected_read);
-    assert!(!definitions[0].protected_read);
+    assert!(
+        definitions
+            .iter()
+            .find(|definition| definition.name == "read_file")
+            .is_some_and(|definition| definition.protected_read)
+    );
+    assert!(
+        definitions
+            .iter()
+            .find(|definition| definition.name == "list_files")
+            .is_some_and(|definition| !definition.protected_read)
+    );
 }
 
 #[test]

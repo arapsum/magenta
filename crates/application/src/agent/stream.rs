@@ -43,6 +43,9 @@ pub fn agent_stream(
                         continuation = Some(next);
                     }
                     AgentProviderEvent::Completed(outcome) => {
+                        if let Some(review) = &context.review {
+                            review.awaiting_review().await;
+                        }
                         yield AgentRunEvent::Completed(outcome);
                         return;
                     }
@@ -155,7 +158,11 @@ fn loop_guard_error(
                 permitted_tool_calls: MAX_AGENT_TOOL_CALLS,
             },
             std::io::Error::other(format!(
-                "agent loop limit exceeded: observed {observed_rounds} rounds and {observed_tool_calls} tool calls; permitted {MAX_AGENT_ROUNDS} rounds and {MAX_AGENT_TOOL_CALLS} tool calls"
+                concat!(
+                    "agent loop limit exceeded: observed {} rounds and ",
+                    "{} tool calls; permitted {} rounds and {} tool calls",
+                ),
+                observed_rounds, observed_tool_calls, MAX_AGENT_ROUNDS, MAX_AGENT_TOOL_CALLS,
             )),
         ),
         AgentLoopFailure::Repeated => magenta_core::ProviderError::with_kind(

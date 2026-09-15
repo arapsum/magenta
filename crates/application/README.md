@@ -39,16 +39,19 @@ identical batch. Fingerprints compare names and canonicalized JSON arguments,
 not provider-generated call IDs. Limit and repetition failures have typed
 provider error categories.
 
-[agent/tools.rs](src/agent/tools.rs) defines `list_files`, `search_text`,
-`read_file`, `create_file`, and `apply_patch`. `run_command` is advertised only
-when a command runner was injected. Command execution is coordinated in
-[agent/commands.rs](src/agent/commands.rs).
+[agent/tool](src/agent/tool) defines the workspace tools plus semantic
+`search_code` and `save_memory_candidate`. `/remember …` immediately stores an
+active project memory. Before a run, incremental indexing and hybrid
+memory/code retrieval add ranked project context under a 1,500-token
+approximation.
 
-File operations prepare a preview before commit. The stream emits proposed
+File operations prepare a preview before staging. The stream emits proposed
 changes and approval requests; `AgentApprovalController::decide` answers the
 matching request ID. `ApproveWorkspaceEditsForRun` covers eligible, unprotected
 creates and patches for that stream only. Protected reads and commands retain
-individual approval. Permission state is not saved or reused for a retry.
+individual approval. Permission state is not saved or reused for a retry. Once
+the run completes, its AgentFS session becomes `awaiting-review`; the controller
+and conversation UI expose final Apply and Discard operations.
 
 Tool calls, approval requests, and results are recorded through the store, while
 change and command-output events drive the UI. Expected tool failures become
