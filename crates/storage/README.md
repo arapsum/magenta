@@ -1,16 +1,22 @@
 # magenta-storage
 
-Local persistence adapters for Magenta: SQLite conversations and projects,
-managed image attachments, and TOML settings. Core traits are its public
-boundary; database and filesystem work runs on `smol::unblock` workers.
+Local persistence adapters for Magenta: Turso application and agent databases,
+managed image attachments, local embeddings, and TOML settings. Core traits
+remain the public boundary.
 [Workspace overview](../../README.md).
 
 ## Public API and initialization
 
-- `SqliteConversationStore::new(path)` implements `ConversationStore` and
-  `ProjectStore`. Call and await `ConversationStore::initialize` before using
-  it. Initialization creates directories/schema, migrates existing data,
-  recovers interrupted runs, and reconciles managed attachments.
+- `TursoAppStore::new(path)` is the primary `ConversationStore` and
+  `ProjectStore`; desktop opens it as `magenta.db`.
+- `TursoAgentDatabase::new(projects_directory)` implements project-scoped
+  memory, code-index, content-cache, and AgentFS-session ports. Root bytes are
+  SHA-256 keyed so data is isolated by project.
+- `LocalEmbeddingProvider` lazily downloads and caches `AllMiniLML6V2` on the
+  first semantic operation. Retrieval falls back to lexical ranking if model
+  initialization is unavailable.
+- `SqliteConversationStore` remains temporarily available for regression tests
+  and comparison. The desktop does not import the old `conversations.sqlite3`.
 - `TomlSettingsStore::new(path)` implements `SettingsStore`. It needs no separate
   initialization; loading a missing file returns `AppSettings::default()`.
 
@@ -18,7 +24,20 @@ Constructors accept paths rather than choosing user directories. The desktop
 crate supplies the production locations listed in the
 [project README](../../README.md#local-data-and-settings).
 
-## SQLite and turn lifecycle
+## Turso and agent data
+
+[turso_app.rs](src/turso_app.rs) implements primary conversation/project
+persistence with local Turso and `_magenta_schema` versioning. Immediate
+transactions retain the existing atomic turn lifecycle. Search uses a portable
+`LIKE` fallback while Turso's FTS support is experimental.
+
+[agent_database.rs](src/agent_database.rs) creates `agent.db` beneath
+`projects/<root-hash>/`. It stores reviewed/candidate memories, hybrid lexical
+and cosine retrieval data, incremental code chunks, bounded content-cache
+versions, and AgentFS session state. Cache retention is three versions per path
+and 256 MiB per project database.
+
+## Legacy SQLite turn lifecycle
 
 [src/lib.rs](src/lib.rs) implements the ports. Connections enable foreign keys,
 a five-second busy timeout, and WAL journaling during initialization. Immediate

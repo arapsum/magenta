@@ -1,19 +1,25 @@
-//! Local SQLite, managed-attachment, and TOML settings adapters for Magenta.
+//! Local Turso, legacy SQLite, managed-attachment, embedding, and settings adapters.
 //!
 //! [`SqliteConversationStore`] implements conversation and project persistence;
 //! initialize it through [`magenta_core::ConversationStore`] before use.
 //! [`TomlSettingsStore`] preserves editable preferences and unknown TOML keys.
 //! Connections, migrations, and filesystem work are confined to blocking workers.
 
+mod agent_database;
 mod attachments;
 mod database;
+mod embeddings;
 mod migrations;
 mod records;
 mod search;
 mod settings;
 mod turns;
+mod turso_app;
 
+pub use agent_database::TursoAgentDatabase;
+pub use embeddings::LocalEmbeddingProvider;
 pub use settings::TomlSettingsStore;
+pub use turso_app::TursoAppStore;
 
 pub(crate) use database::{
     activity_kind, agent_run_status, attachment_directory, connect, database_error, decode_mode,
