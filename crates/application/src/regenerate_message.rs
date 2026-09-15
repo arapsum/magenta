@@ -5,6 +5,7 @@ use magenta_core::{
     GenerationRequest, GenerationStream, Message, MessageId, ProviderId,
 };
 
+use crate::trace::traced_generation_stream;
 use crate::{RegenerateMessageError, RetryMessageError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,10 +64,15 @@ impl RegenerateMessage {
             .begin_regeneration(input.conversation_id, input.target_message_id, 0)
             .await?;
         let provider_id = prepared.conversation.generation.provider.clone();
-        let stream = self.provider.stream(GenerationRequest {
-            generation: prepared.conversation.generation,
-            messages: prepared.context,
-        });
+        let stream = traced_generation_stream(
+            self.store.clone(),
+            prepared.assistant_message.id,
+            prepared.assistant_message.assistant_trace.clone(),
+            self.provider.stream(GenerationRequest {
+                generation: prepared.conversation.generation,
+                messages: prepared.context,
+            }),
+        );
         Ok(PendingRegeneration {
             target_message_id: input.target_message_id,
             assistant_message: prepared.assistant_message,
@@ -105,10 +111,15 @@ impl RegenerateMessage {
             )
             .await?;
         let provider_id = prepared.conversation.generation.provider.clone();
-        let stream = self.provider.stream(GenerationRequest {
-            generation: prepared.conversation.generation.clone(),
-            messages: prepared.context,
-        });
+        let stream = traced_generation_stream(
+            self.store.clone(),
+            prepared.assistant_message.id,
+            prepared.assistant_message.assistant_trace.clone(),
+            self.provider.stream(GenerationRequest {
+                generation: prepared.conversation.generation.clone(),
+                messages: prepared.context,
+            }),
+        );
         Ok(PendingRetry {
             conversation: prepared.conversation,
             assistant_message: prepared.assistant_message,

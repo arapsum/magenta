@@ -1,22 +1,18 @@
 use async_channel::Receiver;
 use futures_util::StreamExt as _;
 use magenta_core::{
-    AgentActivity, AgentActivityKind, AgentApprovalDecision, AgentApprovalRequest,
-    AgentApprovalSubject, AgentRunEvent, AgentRunStream, AgentToolCall, AgentToolOutput,
-    ProviderId, WorkspaceCommand, WorkspaceCommandEvent, WorkspaceCommandResult,
-    WorkspaceCommandStatus,
+    AgentApprovalDecision, AgentApprovalRequest, AgentApprovalSubject, AgentRunEvent,
+    AgentRunStream, AgentToolCall, AgentToolOutput, WorkspaceCommand, WorkspaceCommandEvent,
+    WorkspaceCommandResult, WorkspaceCommandStatus,
 };
 
-use super::super::{AgentStreamContext, ApprovalResponse, agent_error};
-use super::{
-    await_decision, failed_output, record_activity, record_approval, record_result, rejected_output,
-};
+use super::super::{AgentStreamContext, ApprovalResponse};
+use super::{await_decision, failed_output, rejected_output};
 
 pub fn execute_command(
     context: AgentStreamContext,
     call: AgentToolCall,
     approvals: Receiver<ApprovalResponse>,
-    provider_id: ProviderId,
 ) -> AgentRunStream {
     Box::pin(async_stream::try_stream! {
         let command = match parse_command(&call)
@@ -25,50 +21,20 @@ pub fn execute_command(
             Ok(command) => command,
             Err(error) => {
                 let output = failed_output(&call.id, &error);
-                persist_result(&context, &call, &output, &provider_id).await?;
                 yield AgentRunEvent::ToolResult(output);
                 return;
             }
         };
-        record_activity(
-            &context.store,
-            context.run_id,
-            &context.assistant_message,
-            AgentActivity {
-                kind: AgentActivityKind::ToolCall,
-                call_id: call.id.clone(),
-                tool_name: call.name.clone(),
-                status: "requested".to_owned(),
-                summary: command.display(),
-                detail: serde_json::to_string(&command)
-                    .expect("command serialization is infallible"),
-            },
-            context.conversation.id,
-        )
-        .await
-        .map_err(|error| agent_error(&provider_id, &error))?;
 
         let Some(runner) = context.command_runner.clone() else {
             let output = failed_output(&call.id, "sandboxed command execution is unavailable");
-            persist_result(&context, &call, &output, &provider_id).await?;
             yield AgentRunEvent::ToolResult(output);
             return;
         };
         let approval = command_approval(&call, &command);
-        record_approval(
-            &context.store,
-            context.run_id,
-            &context.assistant_message,
-            context.conversation.id,
-            &call,
-            &approval,
-        )
-        .await
-        .map_err(|error| agent_error(&provider_id, &error))?;
         yield AgentRunEvent::ApprovalRequired(approval.clone());
         if await_decision(&approvals, &approval.request_id).await == AgentApprovalDecision::Reject {
             let output = rejected_output(&call.id, "the user rejected this command");
-            persist_result(&context, &call, &output, &provider_id).await?;
             yield AgentRunEvent::ToolResult(output);
             return;
         }
@@ -116,7 +82,6 @@ pub fn execute_command(
             output: serde_json::to_string(&result).expect("command result serialization is infallible"),
             is_error,
         };
-        persist_result(&context, &call, &output, &provider_id).await?;
         yield AgentRunEvent::WorkspaceInvalidated;
         yield AgentRunEvent::ToolResult(output);
     })
@@ -131,24 +96,6 @@ fn command_approval(call: &AgentToolCall, command: &WorkspaceCommand) -> AgentAp
         subject: AgentApprovalSubject::Command(command.clone()),
         can_approve_for_run: false,
     }
-}
-
-async fn persist_result(
-    context: &AgentStreamContext,
-    call: &AgentToolCall,
-    output: &AgentToolOutput,
-    provider_id: &ProviderId,
-) -> Result<(), magenta_core::ProviderError> {
-    record_result(
-        &context.store,
-        context.run_id,
-        &context.assistant_message,
-        context.conversation.id,
-        &call.name,
-        output,
-    )
-    .await
-    .map_err(|error| agent_error(provider_id, &error))
 }
 
 pub(super) fn parse_command(call: &AgentToolCall) -> Result<WorkspaceCommand, String> {

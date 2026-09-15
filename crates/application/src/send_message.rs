@@ -2,11 +2,12 @@ use std::sync::Arc;
 
 use futures_util::StreamExt as _;
 use magenta_core::{
-    AttachmentDraft, BeginTurn, ChatProvider, Conversation, ConversationId, ConversationMode,
-    ConversationStore, GenerationConfig, GenerationEvent, GenerationRequest, GenerationStream,
-    Message, MessageId, MessageRole, MessageStatus,
+    AssistantTrace, AttachmentDraft, BeginTurn, ChatProvider, Conversation, ConversationId,
+    ConversationMode, ConversationStore, GenerationConfig, GenerationEvent, GenerationRequest,
+    GenerationStream, Message, MessageId, MessageRole, MessageStatus,
 };
 
+use crate::trace::traced_generation_stream;
 use crate::{SendMessageError, TitleConversationError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,10 +77,15 @@ impl SendMessage {
                 request_overhead_tokens: 0,
             })
             .await?;
-        let stream = self.provider.stream(GenerationRequest {
-            generation: prepared.conversation.generation.clone(),
-            messages: prepared.context,
-        });
+        let stream = traced_generation_stream(
+            self.store.clone(),
+            prepared.assistant_message.id,
+            prepared.assistant_message.assistant_trace.clone(),
+            self.provider.stream(GenerationRequest {
+                generation: prepared.conversation.generation.clone(),
+                messages: prepared.context,
+            }),
+        );
         Ok(PendingGeneration {
             conversation: prepared.conversation,
             user_message: prepared.user_message,
@@ -117,7 +123,7 @@ impl SendMessage {
             attachments: Vec::new(),
             generation_outcome: None,
             failure: None,
-            agent_activities: Vec::new(),
+            assistant_trace: AssistantTrace::default(),
         };
         let mut stream = self.provider.stream(GenerationRequest {
             generation,
@@ -127,8 +133,12 @@ impl SendMessage {
         let mut completed = false;
         while let Some(event) = stream.next().await {
             match event? {
-                GenerationEvent::Started => {}
-                GenerationEvent::TextDelta(delta) => output.push_str(&delta),
+                GenerationEvent::Started
+                | GenerationEvent::ReasoningSummaryStarted { .. }
+                | GenerationEvent::ReasoningSummaryDelta { .. }
+                | GenerationEvent::ReasoningSummaryCompleted { .. } => {}
+                GenerationEvent::TextDelta(delta)
+                | GenerationEvent::TextDeltaWithPhase { delta, .. } => output.push_str(&delta),
                 GenerationEvent::Completed(_) => {
                     completed = true;
                     break;

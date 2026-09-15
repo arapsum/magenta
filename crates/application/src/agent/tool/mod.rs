@@ -5,9 +5,8 @@ use std::{
 
 use async_channel::Receiver;
 use magenta_core::{
-    AgentActivity, AgentActivityKind, AgentApprovalDecision, AgentApprovalRequest,
-    AgentApprovalSubject, AgentRunEvent, AgentRunStream, AgentToolCall, AgentToolDefinition,
-    AgentToolOutput, AgentWorkspaceChange, Conversation, ConversationId, ConversationStore,
+    AgentApprovalDecision, AgentApprovalRequest, AgentApprovalSubject, AgentRunEvent,
+    AgentRunStream, AgentToolCall, AgentToolDefinition, AgentToolOutput, AgentWorkspaceChange,
     MemoryKind, MemoryState, NewAgentMemory, ProviderId, WorkspaceAccess, WorkspaceChangeKind,
     WorkspaceChangeState, WorkspaceOperation, WorkspacePreview,
 };
@@ -35,7 +34,7 @@ pub fn execute_tools(
     Box::pin(async_stream::try_stream! {
         for call in calls {
             if matches!(call.name.as_str(), "search_code" | "save_memory_candidate") {
-                let output = execute_data_tool(&context, &call, &provider_id).await?;
+                let output = execute_data_tool(&context, &call).await;
                 yield AgentRunEvent::ToolResult(output);
                 continue;
             }
@@ -45,7 +44,6 @@ pub fn execute_tools(
                     context.clone(),
                     call,
                     approvals.clone(),
-                    provider_id.clone(),
                 );
                 while let Some(event) = futures_util::StreamExt::next(&mut events).await {
                     yield event?;
@@ -69,23 +67,8 @@ pub fn execute_tools(
     })
 }
 
-async fn execute_data_tool(
-    context: &AgentStreamContext,
-    call: &AgentToolCall,
-    provider_id: &ProviderId,
-) -> Result<AgentToolOutput, magenta_core::ProviderError> {
-    let output = execute_agent_data_tool(context, call).await;
-    record_result(
-        &context.store,
-        context.run_id,
-        &context.assistant_message,
-        context.conversation.id,
-        &call.name,
-        &output,
-    )
-    .await
-    .map_err(|error| agent_error(provider_id, &error))?;
-    Ok(output)
+async fn execute_data_tool(context: &AgentStreamContext, call: &AgentToolCall) -> AgentToolOutput {
+    execute_agent_data_tool(context, call).await
 }
 
 async fn execute_workspace_tool(
@@ -95,20 +78,10 @@ async fn execute_workspace_tool(
     provider_id: &ProviderId,
     permissions: &AgentRunPermissionsHandle,
 ) -> Result<Vec<AgentRunEvent>, magenta_core::ProviderError> {
-    let mut prepared = match prepare_tool(
-        &context.store,
-        &context.workspace,
-        &context.root,
-        &context.conversation,
-        &context.assistant_message,
-        context.run_id,
-        &call,
-    )
-    .await
-    {
+    let mut prepared = match prepare_tool(&context.workspace, &context.root, &call).await {
         Ok(prepared) => prepared,
         Err(error) => {
-            let output = record_failure(context, &call, &error, provider_id).await?;
+            let output = failed_output(&call.id, &error);
             return Ok(vec![AgentRunEvent::ToolResult(output)]);
         }
     };
@@ -124,16 +97,9 @@ async fn execute_workspace_tool(
 
     if prepared.operation.is_mutating() || preview.protected {
         let approval = workspace_approval(&call, &prepared.operation, &preview);
-        if let Some(approval_events) = request_workspace_approval(
-            context,
-            &call,
-            &approval,
-            proposed_change,
-            approvals,
-            provider_id,
-            permissions,
-        )
-        .await?
+        if let Some(approval_events) =
+            request_workspace_approval(&call, &approval, proposed_change, approvals, permissions)
+                .await?
         {
             events.extend(approval_events);
             return Ok(events);
@@ -148,7 +114,7 @@ async fn execute_workspace_tool(
                 Ok(preview) => preview,
                 Err(error) => {
                     let detail = workspace_error_detail(&error);
-                    let output = record_failure(context, &call, &detail, provider_id).await?;
+                    let output = failed_output(&call.id, &detail);
                     events.push(AgentRunEvent::ToolResult(output));
                     return Ok(events);
                 }
@@ -167,12 +133,10 @@ async fn execute_workspace_tool(
 }
 
 async fn request_workspace_approval(
-    context: &AgentStreamContext,
     call: &AgentToolCall,
     approval: &AgentApprovalRequest,
     proposed_change: Option<AgentWorkspaceChange>,
     approvals: &Receiver<ApprovalResponse>,
-    provider_id: &ProviderId,
     permissions: &AgentRunPermissionsHandle,
 ) -> Result<Option<Vec<AgentRunEvent>>, magenta_core::ProviderError> {
     let granted_for_run = approval.can_approve_for_run
@@ -183,7 +147,6 @@ async fn request_workspace_approval(
         return Ok(None);
     }
 
-    record_workspace_approval(context, call, approval, provider_id).await?;
     let decision = await_decision(approvals, &approval.request_id).await;
     if decision != AgentApprovalDecision::Reject {
         if decision == AgentApprovalDecision::ApproveWorkspaceEditsForRun
@@ -195,8 +158,7 @@ async fn request_workspace_approval(
         return Ok(None);
     }
 
-    let (change, output) =
-        reject_workspace_tool(context, call, proposed_change, provider_id).await?;
+    let (change, output) = reject_workspace_tool(call, proposed_change);
     let mut events = Vec::with_capacity(2);
     if let Some(change) = change {
         events.push(AgentRunEvent::WorkspaceChange(change));
@@ -413,30 +375,10 @@ struct PreparedTool {
     preview: WorkspacePreview,
 }
 
-async fn record_workspace_approval(
-    context: &AgentStreamContext,
-    call: &AgentToolCall,
-    approval: &AgentApprovalRequest,
-    provider_id: &ProviderId,
-) -> Result<(), magenta_core::ProviderError> {
-    record_approval(
-        &context.store,
-        context.run_id,
-        &context.assistant_message,
-        context.conversation.id,
-        call,
-        approval,
-    )
-    .await
-    .map_err(|error| agent_error(provider_id, &error))
-}
-
-async fn reject_workspace_tool(
-    context: &AgentStreamContext,
+fn reject_workspace_tool(
     call: &AgentToolCall,
     proposed_change: Option<AgentWorkspaceChange>,
-    provider_id: &ProviderId,
-) -> Result<(Option<AgentWorkspaceChange>, AgentToolOutput), magenta_core::ProviderError> {
+) -> (Option<AgentWorkspaceChange>, AgentToolOutput) {
     let change = proposed_change.map(|mut change| {
         change.state = WorkspaceChangeState::Rejected;
         change
@@ -444,46 +386,15 @@ async fn reject_workspace_tool(
 
     let output = rejected_output(&call.id, "the user rejected this operation");
 
-    record_result(
-        &context.store,
-        context.run_id,
-        &context.assistant_message,
-        context.conversation.id,
-        &call.name,
-        &output,
-    )
-    .await
-    .map_err(|error| agent_error(provider_id, &error))?;
-    Ok((change, output))
+    (change, output)
 }
 
 async fn prepare_tool(
-    store: &Arc<dyn ConversationStore>,
     workspace: &Arc<dyn WorkspaceAccess>,
     root: &Path,
-    conversation: &Conversation,
-    assistant_message: &magenta_core::Message,
-    run_id: Option<magenta_core::AgentRunId>,
     call: &AgentToolCall,
 ) -> Result<PreparedTool, String> {
     let operation = parse_operation(call)?;
-    let path = operation.path().to_owned();
-
-    record_activity(
-        store,
-        run_id,
-        assistant_message,
-        AgentActivity {
-            kind: AgentActivityKind::ToolCall,
-            call_id: call.id.clone(),
-            tool_name: call.name.clone(),
-            status: "requested".to_owned(),
-            summary: format!("{} {path}", call.name),
-            detail: call.arguments.clone(),
-        },
-        conversation.id,
-    )
-    .await?;
 
     let preview = workspace
         .prepare(root.to_path_buf(), operation.clone(), false)
@@ -524,16 +435,6 @@ async fn finish_tool(
             is_error: false,
         }
     };
-
-    record_result(
-        &context.store,
-        context.run_id,
-        &context.assistant_message,
-        context.conversation.id,
-        &call.name,
-        &output,
-    )
-    .await?;
 
     let change = proposed.map(|mut change| {
         if output.is_error {
@@ -600,27 +501,6 @@ fn workspace_change(
     })
 }
 
-async fn record_failure(
-    context: &AgentStreamContext,
-    call: &AgentToolCall,
-    message: &str,
-    provider_id: &ProviderId,
-) -> Result<AgentToolOutput, magenta_core::ProviderError> {
-    let output = failed_output(&call.id, message);
-
-    record_result(
-        &context.store,
-        context.run_id,
-        &context.assistant_message,
-        context.conversation.id,
-        &call.name,
-        &output,
-    )
-    .await
-    .map_err(|error| agent_error(provider_id, &error))?;
-    Ok(output)
-}
-
 pub(super) async fn await_decision(
     approvals: &Receiver<ApprovalResponse>,
     request_id: &str,
@@ -631,85 +511,6 @@ pub(super) async fn await_decision(
         }
     }
     AgentApprovalDecision::Reject
-}
-
-pub(super) async fn record_approval(
-    store: &Arc<dyn ConversationStore>,
-    run_id: Option<magenta_core::AgentRunId>,
-    assistant_message: &magenta_core::Message,
-    conversation_id: ConversationId,
-    call: &AgentToolCall,
-    request: &AgentApprovalRequest,
-) -> Result<(), String> {
-    record_activity(
-        store,
-        run_id,
-        assistant_message,
-        AgentActivity {
-            kind: AgentActivityKind::ApprovalRequested,
-            call_id: call.id.clone(),
-            tool_name: call.name.clone(),
-            status: "awaiting-approval".to_owned(),
-            summary: request.reason.clone(),
-            detail: match &request.subject {
-                AgentApprovalSubject::Workspace { diff, .. } => diff.clone().unwrap_or_default(),
-                AgentApprovalSubject::Command(command) => command.display(),
-            },
-        },
-        conversation_id,
-    )
-    .await
-}
-
-pub(super) async fn record_activity(
-    store: &Arc<dyn ConversationStore>,
-    run_id: Option<magenta_core::AgentRunId>,
-    assistant_message: &magenta_core::Message,
-    activity: AgentActivity,
-    conversation_id: ConversationId,
-) -> Result<(), String> {
-    let Some(run_id) = run_id else {
-        return Ok(());
-    };
-
-    store
-        .append_agent_activity(magenta_core::AgentActivityRecord {
-            run_id,
-            assistant_message_id: assistant_message.id,
-            conversation_id,
-            activity,
-        })
-        .await
-        .map_err(|error| error.to_string())
-}
-
-pub(super) async fn record_result(
-    store: &Arc<dyn ConversationStore>,
-    run_id: Option<magenta_core::AgentRunId>,
-    assistant_message: &magenta_core::Message,
-    conversation_id: ConversationId,
-    tool_name: &str,
-    output: &AgentToolOutput,
-) -> Result<(), String> {
-    record_activity(
-        store,
-        run_id,
-        assistant_message,
-        AgentActivity {
-            kind: AgentActivityKind::ToolResult,
-            call_id: output.call_id.clone(),
-            tool_name: tool_name.to_owned(),
-            status: if output.is_error {
-                "failed".to_owned()
-            } else {
-                "completed".to_owned()
-            },
-            summary: tool_name.to_owned(),
-            detail: output.output.clone(),
-        },
-        conversation_id,
-    )
-    .await
 }
 
 pub fn parse_operation(call: &AgentToolCall) -> Result<WorkspaceOperation, String> {

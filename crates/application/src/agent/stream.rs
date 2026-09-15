@@ -40,7 +40,29 @@ pub fn agent_stream(
                         }
                     }
                     AgentProviderEvent::TextDelta(delta) => {
-                        yield AgentRunEvent::TextDelta(delta);
+                        let event = AgentRunEvent::TextDelta(delta);
+                        context.trace.observe_agent(&event).await;
+                        yield event;
+                    }
+                    AgentProviderEvent::TextDeltaWithPhase { delta, phase } => {
+                        let event = AgentRunEvent::TextDeltaWithPhase { delta, phase };
+                        context.trace.observe_agent(&event).await;
+                        yield event;
+                    }
+                    AgentProviderEvent::ReasoningSummaryStarted { key, title } => {
+                        let event = AgentRunEvent::ReasoningSummaryStarted { key, title };
+                        context.trace.observe_agent(&event).await;
+                        yield event;
+                    }
+                    AgentProviderEvent::ReasoningSummaryDelta { key, delta } => {
+                        let event = AgentRunEvent::ReasoningSummaryDelta { key, delta };
+                        context.trace.observe_agent(&event).await;
+                        yield event;
+                    }
+                    AgentProviderEvent::ReasoningSummaryCompleted { key, text } => {
+                        let event = AgentRunEvent::ReasoningSummaryCompleted { key, text };
+                        context.trace.observe_agent(&event).await;
+                        yield event;
                     }
                     AgentProviderEvent::ToolCall { call, continuation: next } => {
                         calls.push(call.clone());
@@ -50,7 +72,9 @@ pub fn agent_stream(
                         if let Some(review) = &context.review {
                             review.awaiting_review().await;
                         }
-                        yield AgentRunEvent::Completed(outcome);
+                        let event = AgentRunEvent::Completed(outcome);
+                        context.trace.observe_agent(&event).await;
+                        yield event;
                         return;
                     }
                 }
@@ -69,7 +93,9 @@ pub fn agent_stream(
                 .map_err(|error| loop_guard_error(&provider_id, error))?;
 
             for call in calls.iter().cloned() {
-                yield AgentRunEvent::ToolCall(call);
+                let event = AgentRunEvent::ToolCall(call);
+                context.trace.observe_agent(&event).await;
+                yield event;
             }
 
             let mut outputs = Vec::with_capacity(calls.len());
@@ -86,6 +112,7 @@ pub fn agent_stream(
                 if let AgentRunEvent::ToolResult(output) = &event {
                     outputs.push(output.clone());
                 }
+                context.trace.observe_agent(&event).await;
                 yield event;
             }
 

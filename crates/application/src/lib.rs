@@ -12,6 +12,7 @@ mod history;
 mod projects;
 mod regenerate_message;
 mod send_message;
+pub mod trace;
 
 pub use agent::{
     AgentApprovalController, AgentSendTarget, PendingAgentGeneration, RetryWorkspaceAgentInput,

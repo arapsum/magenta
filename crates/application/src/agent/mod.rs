@@ -13,6 +13,7 @@ use magenta_core::{
     WorkspaceCommandRunner, WorkspaceSessionAccess, estimate_agent_overhead,
 };
 
+use super::trace::AssistantTraceRecorder;
 use crate::{RetryMessageError, SendMessageError};
 
 const MAX_AGENT_ROUNDS: usize = 64;
@@ -53,13 +54,11 @@ pub struct PendingAgentGeneration {
 #[derive(Clone)]
 pub struct AgentStreamContext {
     pub provider: Arc<dyn AgentProvider>,
-    pub store: Arc<dyn ConversationStore>,
     pub workspace: Arc<dyn WorkspaceAccess>,
     pub command_runner: Option<Arc<dyn WorkspaceCommandRunner>>,
     pub root: std::path::PathBuf,
     pub conversation: Conversation,
-    pub assistant_message: Message,
-    pub run_id: Option<magenta_core::AgentRunId>,
+    pub trace: AssistantTraceRecorder,
     pub review: Option<AgentReviewHandle>,
     context_services: Option<AgentContextServices>,
 }
@@ -269,35 +268,8 @@ impl RunWorkspaceAgent {
             return Err(SendMessageError::WorkspaceUnavailable);
         }
 
-        if let Some(content) = prompt.strip_prefix("/remember ")
-            && let Some(services) = &self.context_services
-        {
-            let embedding = services
-                .embeddings
-                .embed(vec![content.to_owned()])
-                .await
-                .ok()
-                .and_then(|mut values| values.pop());
-
-            let _ = services
-                .memories
-                .remember(
-                    input.workspace_root.clone(),
-                    NewAgentMemory {
-                        kind: MemoryKind::Fact,
-                        state: MemoryState::Active,
-                        content: content.to_owned(),
-                        source_conversation_id: None,
-                        confidence: 1.0,
-                        embedding,
-                    },
-                )
-                .await;
-        }
-
-        if let Some(indexer) = &self.code_indexer {
-            let _ = indexer.refresh(input.workspace_root.clone()).await;
-        }
+        self.prepare_agent_context(&input.workspace_root, &prompt)
+            .await;
 
         let retrieved_context = self
             .retrieve_context(&input.workspace_root, &prompt, None)
@@ -348,13 +320,15 @@ impl RunWorkspaceAgent {
         let stream = stream::agent_stream(
             AgentStreamContext {
                 provider: self.provider.clone(),
-                store: self.store.clone(),
                 workspace: self.workspace.clone(),
                 command_runner: self.command_runner.clone(),
                 root: input.workspace_root,
                 conversation: prepared.conversation.clone(),
-                assistant_message: prepared.assistant_message.clone(),
-                run_id: prepared.agent_run_id,
+                trace: AssistantTraceRecorder::new(
+                    self.store.clone(),
+                    prepared.assistant_message.id,
+                    prepared.assistant_message.assistant_trace.clone(),
+                ),
                 review,
                 context_services: self.context_services.clone(),
             },
@@ -372,6 +346,38 @@ impl RunWorkspaceAgent {
             assistant_sequence: prepared.assistant_sequence,
             context_report: prepared.context_report,
         })
+    }
+
+    async fn prepare_agent_context(&self, root: &std::path::Path, prompt: &str) {
+        if let Some(content) = prompt.strip_prefix("/remember ")
+            && let Some(services) = &self.context_services
+        {
+            let embedding = services
+                .embeddings
+                .embed(vec![content.to_owned()])
+                .await
+                .ok()
+                .and_then(|mut values| values.pop());
+
+            let _ = services
+                .memories
+                .remember(
+                    root.to_path_buf(),
+                    NewAgentMemory {
+                        kind: MemoryKind::Fact,
+                        state: MemoryState::Active,
+                        content: content.to_owned(),
+                        source_conversation_id: None,
+                        confidence: 1.0,
+                        embedding,
+                    },
+                )
+                .await;
+        }
+
+        if let Some(indexer) = &self.code_indexer {
+            let _ = indexer.refresh(root.to_path_buf()).await;
+        }
     }
 
     /// Starts a new agent attempt while retaining the failed response. The
@@ -443,13 +449,15 @@ impl RunWorkspaceAgent {
         let stream = stream::agent_stream(
             AgentStreamContext {
                 provider: self.provider.clone(),
-                store: self.store.clone(),
                 workspace: self.workspace.clone(),
                 command_runner: self.command_runner.clone(),
                 root: workspace_root,
                 conversation: prepared.conversation.clone(),
-                assistant_message: prepared.assistant_message.clone(),
-                run_id: prepared.agent_run_id,
+                trace: AssistantTraceRecorder::new(
+                    self.store.clone(),
+                    prepared.assistant_message.id,
+                    prepared.assistant_message.assistant_trace.clone(),
+                ),
                 review,
                 context_services: self.context_services.clone(),
             },
