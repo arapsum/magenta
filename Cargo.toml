@@ -17,6 +17,7 @@ edition = "2024"
 
 [workspace.dependencies]
 anyhow = "1"
+agentfs-sdk = "=0.6.4"
 async-process = "2"
 async-lock = "3"
 async-net = "2"
@@ -29,6 +30,7 @@ dirs = "6"
 futures-core = "0.3"
 futures-channel = "0.3"
 futures-util = { version = "0.3", features = ["io"] }
+fastembed = { version = "=6.1.0", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries-rustls-tls"] }
 http_client = { package = "gpui-pre-http-client", version = "0.3.1" }
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service"] }
 magenta-application = { path = "crates/application" }
@@ -69,7 +71,9 @@ sha2 = "0.10"
 smol = "2"
 thiserror = "2"
 toml_edit = "0.22"
+tokio = { version = "1", features = ["rt-multi-thread"] }
 tracing = "0.1"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+turso = { version = "=0.4.4", default-features = false }
 url = "2"

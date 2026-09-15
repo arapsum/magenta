@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+fastembed.workspace = true
 image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 magenta-core.workspace = true
 parking_lot.workspace = true
@@ -11,9 +12,11 @@ rand.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 smol.workspace = true
 toml_edit.workspace = true
 tracing.workspace = true
+turso.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

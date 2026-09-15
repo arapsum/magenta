@@ -4,16 +4,20 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+agentfs-sdk.workspace = true
 async-channel.workspace = true
 async-process.workspace = true
 async-stream.workspace = true
 futures-util.workspace = true
 globset.workspace = true
 ignore.workspace = true
+libc = "0.2"
 magenta-core.workspace = true
+parking_lot.workspace = true
 sha2.workspace = true
 smol.workspace = true
 tempfile.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
