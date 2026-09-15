@@ -454,7 +454,7 @@ fn commit(root: &Path, mutation: &WorkspaceMutation) -> io::Result<String> {
     Ok(format!("{action} {}", mutation.path))
 }
 
-fn display_diff(path: &str, before: &str, after: &str) -> String {
+pub fn display_diff(path: &str, before: &str, after: &str) -> String {
     let mut diff = format!("--- a/{path}\n+++ b/{path}\n@@\n");
     for line in before.lines() {
         diff.push('-');
@@ -469,7 +469,7 @@ fn display_diff(path: &str, before: &str, after: &str) -> String {
     diff
 }
 
-fn digest(bytes: &[u8]) -> String {
+pub fn digest(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     format!("{:x}", hasher.finalize())

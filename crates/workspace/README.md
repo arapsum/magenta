@@ -14,6 +14,11 @@ enforce their own authorization before committing mutations or running commands.
 - `BubblewrapCommandRunner::new()` discovers `bwrap` and performs an isolation
   probe. On success it implements `WorkspaceCommandRunner`; on failure desktop
   composition omits the runner and exposes files-only Agent mode.
+- `AgentFsWorkspace` stages approved writes in a per-run AgentFS overlay. Final
+  Apply performs host digest checks and rollback; Discard never changes host
+  files. Missing sessions fail closed to read-only Work mode.
+- `WorkspaceCodeIndexer` scans ignored-aware Rust, JavaScript, TypeScript, and
+  Python sources, skips unchanged hashes, and stores bounded symbol-aware chunks.
 
 Exports are in [src/lib.rs](src/lib.rs). File work runs on blocking workers;
 commands stream start, stdout/stderr chunks, and terminal results.
@@ -54,7 +59,11 @@ project explorer's direct-child listings. Listings/search use `ignore` walking
 and their configured filters; browse and agent policies are deliberately
 implemented separately.
 
-## Command sandbox
+## AgentFS review and command sandbox
+
+Desktop command tools are currently disabled. They can be re-enabled once an
+AgentFS FUSE mount is bound into bubblewrap at `/workspace`; binding the host
+root would bypass final review.
 
 [command/mod.rs](src/command/mod.rs) passes an executable and argument vector
 directly to Bubblewrap. It does not implicitly interpolate a shell command.
