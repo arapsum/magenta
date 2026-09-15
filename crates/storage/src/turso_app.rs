@@ -10,19 +10,21 @@ use std::{
 };
 
 use magenta_core::{
-    AgentActivity, AgentActivityKind, AgentActivityRecord, AgentRunId, Attachment, BeginTurn,
-    Conversation, ConversationId, ConversationMode, ConversationPage, ConversationSearchResult,
-    ConversationStore, ConversationSummary, GenerationConfig, Message, MessageId, MessagePage,
-    MessageRole, MessageSequence, MessageStatus, PreparedTurn, Project, ProjectStore, StorageError,
-    StorageErrorKind, StorageFuture, StoredMessage, Timestamp, select_context,
+    AgentRunId, AssistantTrace, AssistantTraceEntry, AssistantTraceKind, AssistantTraceStatus,
+    Attachment, BeginTurn, Conversation, ConversationId, ConversationMode, ConversationPage,
+    ConversationSearchResult, ConversationStore, ConversationSummary, GenerationConfig, Message,
+    MessageId, MessagePage, MessageRole, MessageSequence, MessageStatus, PreparedTurn, Project,
+    ProjectStore, StorageError, StorageErrorKind, StorageFuture, StoredMessage, Timestamp,
+    select_context,
 };
+use rusqlite::OptionalExtension;
 use turso::{
     Connection, Row, params,
     transaction::{Transaction, TransactionBehavior},
 };
 
 type Result<T> = std::result::Result<T, StorageError>;
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const PAGE_SIZE: usize = 50;
 
 const SCHEMA: &str = r"
@@ -40,6 +42,7 @@ CREATE TABLE IF NOT EXISTS messages (
  id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
  sequence INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL,
  generation TEXT NOT NULL, outcome TEXT, failure TEXT, omitted_context_messages INTEGER NOT NULL DEFAULT 0,
+ thinking_duration_ms INTEGER,
  created_at INTEGER NOT NULL, UNIQUE(conversation_id, sequence)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS one_stream_per_conversation ON messages(conversation_id) WHERE status = 'streaming';
@@ -53,13 +56,17 @@ CREATE TABLE IF NOT EXISTS agent_runs (
  assistant_message_id INTEGER NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
  status TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER
 );
-CREATE TABLE IF NOT EXISTS agent_activities (
- id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
- sequence INTEGER NOT NULL, kind TEXT NOT NULL, call_id TEXT NOT NULL, tool_name TEXT NOT NULL,
- status TEXT NOT NULL, summary TEXT NOT NULL, detail TEXT NOT NULL, created_at INTEGER NOT NULL,
- UNIQUE(run_id, sequence)
+CREATE TABLE IF NOT EXISTS assistant_traces (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ assistant_message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+ trace_key TEXT NOT NULL, sequence INTEGER NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL,
+ title TEXT NOT NULL, tool_name TEXT, input TEXT NOT NULL, output TEXT NOT NULL,
+ started_at INTEGER, finished_at INTEGER,
+ UNIQUE(assistant_message_id, trace_key),
+ UNIQUE(assistant_message_id, sequence)
 );
-CREATE INDEX IF NOT EXISTS agent_activity_order ON agent_activities(run_id, sequence);
+CREATE INDEX IF NOT EXISTS assistant_trace_order
+ ON assistant_traces(assistant_message_id, sequence);
 CREATE TABLE IF NOT EXISTS attachments (
  message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE, position INTEGER NOT NULL,
  name TEXT NOT NULL, source_path BLOB NOT NULL, mime_type TEXT NOT NULL, byte_size INTEGER NOT NULL,
@@ -134,7 +141,8 @@ impl ConversationStore for TursoAppStore {
                 std::fs::create_dir_all(parent).map_err(super::unavailable)?;
             }
 
-            let connection = Self::connect_path(&path).await?;
+            repair_legacy_message_index(&path)?;
+            let mut connection = Self::connect_path(&path).await?;
             connection.execute_batch(SCHEMA).await.map_err(db)?;
 
             let version = schema_version(&connection).await?;
@@ -144,6 +152,10 @@ impl ConversationStore for TursoAppStore {
                     StorageErrorKind::UnsupportedVersion,
                     "app database was created by a newer Magenta",
                 ));
+            }
+
+            if version == 1 {
+                migrate_v1_to_v2(&mut connection).await?;
             }
 
             connection
@@ -414,13 +426,14 @@ impl ConversationStore for TursoAppStore {
 
             let changed = transaction
                 .execute(
-                    "UPDATE messages SET content=?1,status=?2,outcome=?3,failure=?4 \
-                     WHERE id=?5 AND conversation_id=?6 AND status='streaming'",
+                    "UPDATE messages SET content=?1,status=?2,outcome=?3,failure=?4,thinking_duration_ms=?5 \
+                     WHERE id=?6 AND conversation_id=?7 AND status='streaming'",
                     params![
                         message.content,
                         status_name(message.status),
                         outcome,
                         failure,
+                        message.assistant_trace.thinking_duration_ms.map(as_i64).transpose()?,
                         as_i64(message.id.0)?,
                         as_i64(message.conversation_id.0)?,
                     ],
@@ -434,6 +447,8 @@ impl ConversationStore for TursoAppStore {
                     "message is no longer streaming",
                 ));
             }
+
+            replace_trace(&transaction, message.id, &message.assistant_trace).await?;
 
             let timestamp = super::now()?;
 
@@ -552,44 +567,119 @@ impl ConversationStore for TursoAppStore {
         })
     }
 
-    fn append_agent_activity(&self, record: AgentActivityRecord) -> StorageFuture<()> {
+    fn upsert_assistant_trace(
+        &self,
+        message_id: MessageId,
+        trace: AssistantTrace,
+    ) -> StorageFuture<()> {
         self.run(async move |mut connection| {
             let transaction = connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .await
                 .map_err(db)?;
-
-            let sequence = scalar_i64(
-                &transaction,
-                "SELECT COALESCE(MAX(sequence)+1,0) \
-                 FROM agent_activities WHERE run_id=?1",
-                [as_i64(record.run_id.0)?],
-            )
-            .await?;
-
-            transaction
+            let duration = trace.thinking_duration_ms.map(as_i64).transpose()?;
+            let changed = transaction
                 .execute(
-                    "INSERT INTO agent_activities( \
-                     run_id,sequence,kind,call_id,tool_name,status,summary,detail,created_at \
-                     ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-                    params![
-                        as_i64(record.run_id.0)?,
-                        sequence,
-                        activity_kind(&record.activity.kind),
-                        record.activity.call_id,
-                        record.activity.tool_name,
-                        record.activity.status,
-                        record.activity.summary,
-                        record.activity.detail,
-                        super::now()?,
-                    ],
+                    "UPDATE messages SET thinking_duration_ms=?1 WHERE id=?2",
+                    params![duration, as_i64(message_id.0)?],
                 )
                 .await
                 .map_err(db)?;
-
+            if changed == 0 {
+                return Err(super::failure(
+                    StorageErrorKind::NotFound,
+                    "assistant message does not exist",
+                ));
+            }
+            replace_trace(&transaction, message_id, &trace).await?;
             transaction.commit().await.map_err(db)
         })
     }
+}
+
+fn repair_legacy_message_index(path: &std::path::Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let mut connection = rusqlite::Connection::open(path).map_err(super::database_error)?;
+    connection
+        .pragma_update(None, "writable_schema", true)
+        .map_err(super::database_error)?;
+
+    let table_sql = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='messages'",
+            (),
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(super::database_error)?;
+    let Some(table_sql) = table_sql else {
+        return Ok(());
+    };
+
+    let has_inline_unique = table_sql.to_ascii_uppercase().contains("UNIQUE");
+    let orphaned_index = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master \
+             WHERE type='index' AND name='sqlite_autoindex_messages_1' \
+               AND tbl_name='messages' AND sql IS NULL)",
+            (),
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(super::database_error)?
+        != 0;
+
+    if has_inline_unique || !orphaned_index {
+        return Ok(());
+    }
+
+    let duplicate_sequence = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM messages \
+             GROUP BY conversation_id, sequence HAVING COUNT(*) > 1)",
+            (),
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(super::database_error)?
+        != 0;
+    if duplicate_sequence {
+        return Err(super::failure(
+            StorageErrorKind::InvalidData,
+            "cannot repair duplicate message sequences",
+        ));
+    }
+
+    let schema_version = connection
+        .pragma_query_value(None, "schema_version", |row| row.get::<_, i64>(0))
+        .map_err(super::database_error)?;
+    let transaction = connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(super::database_error)?;
+    transaction
+        .execute(
+            "DELETE FROM sqlite_master WHERE type='index' \
+             AND name='sqlite_autoindex_messages_1' AND tbl_name='messages'",
+            (),
+        )
+        .map_err(super::database_error)?;
+    transaction
+        .execute_batch(&format!(
+            "PRAGMA schema_version = {}",
+            schema_version.saturating_add(1)
+        ))
+        .map_err(super::database_error)?;
+    transaction.commit().map_err(super::database_error)?;
+
+    connection
+        .execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS message_conversation_sequence \
+             ON messages(conversation_id, sequence)",
+            (),
+        )
+        .map_err(super::database_error)?;
+    Ok(())
 }
 
 impl ProjectStore for TursoAppStore {
@@ -894,12 +984,21 @@ async fn regenerate(
     transaction
         .execute(
             "UPDATE messages SET content='',status='streaming',outcome=NULL, \
-             failure=NULL,generation=?1,omitted_context_messages=?2 WHERE id=?3",
+             failure=NULL,thinking_duration_ms=NULL,generation=?1,omitted_context_messages=?2 \
+             WHERE id=?3",
             params![
                 generation,
                 i64::try_from(context_report.omitted_messages).map_err(super::invalid)?,
                 as_i64(target.0)?,
             ],
+        )
+        .await
+        .map_err(db)?;
+
+    transaction
+        .execute(
+            "DELETE FROM assistant_traces WHERE assistant_message_id=?1",
+            [as_i64(target.0)?],
         )
         .await
         .map_err(db)?;
@@ -921,7 +1020,7 @@ async fn regenerate(
         attachments: Vec::new(),
         generation_outcome: None,
         failure: None,
-        agent_activities: Vec::new(),
+        assistant_trace: AssistantTrace::default(),
     };
 
     transaction.commit().await.map_err(db)?;
@@ -1105,7 +1204,7 @@ async fn insert_user(
         attachments,
         generation_outcome: None,
         failure: None,
-        agent_activities: Vec::new(),
+        assistant_trace: AssistantTrace::default(),
     })
 }
 
@@ -1143,7 +1242,7 @@ async fn insert_assistant(
         attachments: Vec::new(),
         generation_outcome: None,
         failure: None,
-        agent_activities: Vec::new(),
+        assistant_trace: AssistantTrace::default(),
     })
 }
 
@@ -1226,6 +1325,7 @@ struct RawMessage {
     generation: String,
     outcome: Option<String>,
     failure: Option<String>,
+    thinking_duration_ms: Option<i64>,
     created_at: i64,
     omitted: i64,
 }
@@ -1240,8 +1340,9 @@ fn raw_message(row: &Row) -> Result<RawMessage> {
         generation: row.get(5).map_err(db)?,
         outcome: row.get(6).map_err(db)?,
         failure: row.get(7).map_err(db)?,
-        created_at: row.get(8).map_err(db)?,
-        omitted: row.get(9).map_err(db)?,
+        thinking_duration_ms: row.get(8).map_err(db)?,
+        created_at: row.get(9).map_err(db)?,
+        omitted: row.get(10).map_err(db)?,
     })
 }
 
@@ -1257,7 +1358,7 @@ async fn read_page(
         let mut statement = connection
             .prepare(
                 "SELECT id,sequence,role,content,status,generation,outcome,failure, \
-                 created_at,omitted_context_messages \
+                 thinking_duration_ms,created_at,omitted_context_messages \
                  FROM messages \
                  WHERE conversation_id=?1 AND sequence>?2 \
                  ORDER BY sequence LIMIT 51",
@@ -1279,7 +1380,7 @@ async fn read_page(
         let mut statement = connection
             .prepare(
                 "SELECT id,sequence,role,content,status,generation,outcome,failure, \
-                 created_at,omitted_context_messages \
+                 thinking_duration_ms,created_at,omitted_context_messages \
                  FROM messages \
                  WHERE conversation_id=?1 AND sequence<?2 \
                  ORDER BY sequence DESC LIMIT 51",
@@ -1333,7 +1434,7 @@ async fn read_range(
     let mut statement = connection
         .prepare(
             "SELECT id,sequence,role,content,status,generation,outcome,failure, \
-             created_at,omitted_context_messages \
+             thinking_duration_ms,created_at,omitted_context_messages \
              FROM messages \
              WHERE conversation_id=?1 AND sequence BETWEEN ?2 AND ?3 \
              ORDER BY sequence",
@@ -1419,7 +1520,7 @@ async fn read_context(
     let mut statement = connection
         .prepare(
             "SELECT id,sequence,role,content,status,generation,outcome,failure, \
-             created_at,omitted_context_messages \
+             thinking_duration_ms,created_at,omitted_context_messages \
              FROM messages \
              WHERE conversation_id=?1 AND sequence<?2 AND status='complete' \
              ORDER BY sequence",
@@ -1457,7 +1558,7 @@ async fn hydrate_message(
 ) -> Result<StoredMessage> {
     let id = MessageId(as_u64(raw.id)?);
     let attachments = read_attachments(connection, id).await?;
-    let activities = read_activities(connection, id).await?;
+    let assistant_trace = read_trace(connection, id, raw.thinking_duration_ms).await?;
 
     let outcome = raw
         .outcome
@@ -1484,7 +1585,7 @@ async fn hydrate_message(
         attachments,
         generation_outcome: outcome,
         failure,
-        agent_activities: activities.clone(),
+        assistant_trace,
     };
 
     Ok(StoredMessage {
@@ -1492,7 +1593,6 @@ async fn hydrate_message(
         sequence: MessageSequence(raw.sequence),
         created_at: Timestamp(raw.created_at),
         generation,
-        agent_activities: activities,
         omitted_context_messages: usize::try_from(raw.omitted).map_err(super::invalid)?,
     })
 }
@@ -1553,33 +1653,338 @@ async fn read_managed_attachments(
     Ok(result)
 }
 
-async fn read_activities(connection: &Connection, id: MessageId) -> Result<Vec<AgentActivity>> {
+async fn read_trace(
+    connection: &Connection,
+    id: MessageId,
+    thinking_duration_ms: Option<i64>,
+) -> Result<AssistantTrace> {
     let mut statement = connection
         .prepare(
-            "SELECT a.kind,a.call_id,a.tool_name,a.status,a.summary,a.detail \
-             FROM agent_activities a \
-             JOIN agent_runs r ON r.id=a.run_id \
-             WHERE r.assistant_message_id=?1 \
-             ORDER BY a.sequence",
+            "SELECT trace_key,sequence,kind,status,title,tool_name,input,output,started_at,finished_at \
+             FROM assistant_traces \
+             WHERE assistant_message_id=?1 \
+             ORDER BY sequence",
         )
         .await
         .map_err(db)?;
     let mut rows = statement.query([as_i64(id.0)?]).await.map_err(db)?;
 
-    let mut result = Vec::new();
+    let mut entries = Vec::new();
 
     while let Some(row) = rows.next().await.map_err(db)? {
-        result.push(AgentActivity {
-            kind: parse_activity_kind(&row.get::<String>(0).map_err(db)?)?,
-            call_id: row.get(1).map_err(db)?,
-            tool_name: row.get(2).map_err(db)?,
-            status: row.get(3).map_err(db)?,
-            summary: row.get(4).map_err(db)?,
-            detail: row.get(5).map_err(db)?,
+        entries.push(AssistantTraceEntry {
+            key: row.get(0).map_err(db)?,
+            sequence: u64::try_from(row.get::<i64>(1).map_err(db)?).map_err(super::invalid)?,
+            kind: parse_trace_kind(&row.get::<String>(2).map_err(db)?)?,
+            status: parse_trace_status(&row.get::<String>(3).map_err(db)?)?,
+            title: row.get(4).map_err(db)?,
+            tool_name: row.get(5).map_err(db)?,
+            input: row.get(6).map_err(db)?,
+            output: row.get(7).map_err(db)?,
+            started_at: row.get::<Option<i64>>(8).map_err(db)?.map(Timestamp),
+            finished_at: row.get::<Option<i64>>(9).map_err(db)?.map(Timestamp),
         });
     }
 
-    Ok(result)
+    Ok(AssistantTrace {
+        entries,
+        thinking_duration_ms: thinking_duration_ms
+            .map(|value| u64::try_from(value).map_err(super::invalid))
+            .transpose()?,
+    })
+}
+
+async fn replace_trace(
+    transaction: &Transaction<'_>,
+    message_id: MessageId,
+    trace: &AssistantTrace,
+) -> Result<()> {
+    transaction
+        .execute(
+            "DELETE FROM assistant_traces WHERE assistant_message_id=?1",
+            [as_i64(message_id.0)?],
+        )
+        .await
+        .map_err(db)?;
+
+    for entry in &trace.entries {
+        transaction
+            .execute(
+                "INSERT INTO assistant_traces( \
+                 assistant_message_id,trace_key,sequence,kind,status,title,tool_name,input,output, \
+                 started_at,finished_at \
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                params![
+                    as_i64(message_id.0)?,
+                    entry.key.clone(),
+                    as_i64(entry.sequence)?,
+                    trace_kind(entry.kind),
+                    trace_status(entry.status),
+                    entry.title.clone(),
+                    entry.tool_name.clone(),
+                    entry.input.clone(),
+                    entry.output.clone(),
+                    entry.started_at.map(|value| value.0),
+                    entry.finished_at.map(|value| value.0),
+                ],
+            )
+            .await
+            .map_err(db)?;
+    }
+    Ok(())
+}
+
+async fn migrate_v1_to_v2(connection: &mut Connection) -> Result<()> {
+    let legacy_exists = scalar_i64(
+        connection,
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_activities'",
+        (),
+    )
+    .await?
+        != 0;
+    let traces = if legacy_exists {
+        Some(load_legacy_traces(connection).await?)
+    } else {
+        None
+    };
+
+    rebuild_v1_message_graph(connection).await?;
+
+    if let Some(traces) = traces {
+        persist_legacy_traces(connection, traces).await?;
+    }
+
+    Ok(())
+}
+
+async fn load_legacy_traces(
+    connection: &Connection,
+) -> Result<std::collections::BTreeMap<i64, Vec<LegacyTrace>>> {
+    let mut statement = connection
+        .prepare(
+            "SELECT r.assistant_message_id,a.call_id,a.tool_name,a.kind,a.status, \
+             a.summary,a.detail,a.created_at,a.sequence \
+             FROM agent_activities a \
+             JOIN agent_runs r ON r.id=a.run_id \
+             ORDER BY r.assistant_message_id,a.sequence",
+        )
+        .await
+        .map_err(db)?;
+    let mut rows = statement.query(()).await.map_err(db)?;
+    let mut traces: std::collections::BTreeMap<i64, Vec<LegacyTrace>> =
+        std::collections::BTreeMap::new();
+
+    while let Some(row) = rows.next().await.map_err(db)? {
+        let message_id: i64 = row.get(0).map_err(db)?;
+        let call_id: String = row.get(1).map_err(db)?;
+        let entries = traces.entry(message_id).or_default();
+        let index = entries.iter().position(|entry| entry.call_id == call_id);
+        let kind: String = row.get(3).map_err(db)?;
+        let status: String = row.get(4).map_err(db)?;
+        let summary: String = row.get(5).map_err(db)?;
+        let detail: String = row.get(6).map_err(db)?;
+        let created_at: i64 = row.get(7).map_err(db)?;
+        let entry = index.map_or_else(
+            || {
+                entries.push(LegacyTrace {
+                    call_id: call_id.clone(),
+                    tool_name: row.get(2).map_err(db)?,
+                    title: summary.clone(),
+                    input: String::new(),
+                    output: String::new(),
+                    status: AssistantTraceStatus::Requested,
+                    started_at: created_at,
+                    finished_at: None,
+                });
+                Ok(entries.len() - 1)
+            },
+            Ok,
+        )?;
+        let entry = &mut entries[entry];
+        match kind.as_str() {
+            "tool-call" => {
+                entry.input = detail;
+                entry.title = summary;
+            }
+            "approval-requested" => {
+                entry.status = AssistantTraceStatus::AwaitingApproval;
+                if entry.input.is_empty() {
+                    entry.input = detail;
+                }
+                entry.title = summary;
+            }
+            "tool-result" => {
+                entry.output = detail;
+                entry.status =
+                    if status == "failed" && entry.output.to_ascii_lowercase().contains("reject") {
+                        AssistantTraceStatus::Rejected
+                    } else if status == "failed" {
+                        AssistantTraceStatus::Failed
+                    } else {
+                        AssistantTraceStatus::Completed
+                    };
+                entry.finished_at = Some(created_at);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(traces)
+}
+
+async fn persist_legacy_traces(
+    connection: &mut Connection,
+    traces: std::collections::BTreeMap<i64, Vec<LegacyTrace>>,
+) -> Result<()> {
+    for (message_id, entries) in traces {
+        let trace = AssistantTrace {
+            entries: entries
+                .into_iter()
+                .enumerate()
+                .map(|(sequence, entry)| AssistantTraceEntry {
+                    key: format!("tool:{}", entry.call_id),
+                    sequence: sequence as u64,
+                    kind: AssistantTraceKind::Tool,
+                    status: entry.status,
+                    title: entry.title,
+                    tool_name: Some(entry.tool_name),
+                    input: entry.input,
+                    output: entry.output,
+                    started_at: Some(Timestamp(entry.started_at)),
+                    finished_at: entry.finished_at.map(Timestamp),
+                })
+                .collect(),
+            thinking_duration_ms: None,
+        };
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .await
+            .map_err(db)?;
+        replace_trace(&transaction, MessageId(as_u64(message_id)?), &trace).await?;
+        transaction.commit().await.map_err(db)?;
+    }
+    Ok(())
+}
+
+async fn rebuild_v1_message_graph(connection: &Connection) -> Result<()> {
+    // Turso 0.4.4 drops table-level UNIQUE constraints when ADD COLUMN rewrites
+    // a table's CREATE statement. Rebuild the small message graph instead so
+    // the persisted schema retains its uniqueness and remains reopenable.
+    connection
+        .execute_batch(
+            r"
+            ALTER TABLE messages RENAME TO messages_v1;
+            DROP TABLE IF EXISTS assistant_traces;
+
+            DROP TABLE IF EXISTS agent_activities;
+
+            ALTER TABLE agent_runs RENAME TO agent_runs_v1;
+            ALTER TABLE attachments RENAME TO attachments_v1;
+
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                sequence INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                status TEXT NOT NULL,
+                generation TEXT NOT NULL,
+                outcome TEXT,
+                failure TEXT,
+                omitted_context_messages INTEGER NOT NULL DEFAULT 0,
+                thinking_duration_ms INTEGER,
+                created_at INTEGER NOT NULL
+            );
+
+            INSERT INTO messages(
+                id, conversation_id, sequence, role, content, status, generation,
+                outcome, failure, omitted_context_messages, thinking_duration_ms, created_at
+            )
+            SELECT
+                id, conversation_id, sequence, role, content, status, generation,
+                outcome, failure, omitted_context_messages, NULL, created_at
+            FROM messages_v1;
+
+            CREATE TABLE agent_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                assistant_message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+                status TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                finished_at INTEGER
+            );
+
+            INSERT INTO agent_runs(
+                id, conversation_id, assistant_message_id, status, started_at, finished_at
+            )
+            SELECT id, conversation_id, assistant_message_id, status, started_at, finished_at
+            FROM agent_runs_v1;
+
+            CREATE TABLE assistant_traces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                assistant_message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+                trace_key TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                title TEXT NOT NULL,
+                tool_name TEXT,
+                input TEXT NOT NULL,
+                output TEXT NOT NULL,
+                started_at INTEGER,
+                finished_at INTEGER
+            );
+            CREATE TABLE attachments (
+                message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                source_path BLOB NOT NULL,
+                mime_type TEXT NOT NULL,
+                byte_size INTEGER NOT NULL,
+                managed INTEGER NOT NULL
+            );
+
+            INSERT INTO attachments(
+                message_id, position, name, source_path, mime_type, byte_size, managed
+            )
+            SELECT message_id, position, name, source_path, mime_type, byte_size, managed
+            FROM attachments_v1;
+
+            DROP TABLE agent_runs_v1;
+            DROP TABLE attachments_v1;
+            DROP TABLE messages_v1;
+
+            CREATE UNIQUE INDEX message_conversation_sequence
+                ON messages(conversation_id, sequence);
+            CREATE UNIQUE INDEX one_stream_per_conversation
+                ON messages(conversation_id) WHERE status = 'streaming';
+            CREATE INDEX message_conversation_order
+                ON messages(conversation_id, sequence);
+            CREATE UNIQUE INDEX agent_run_assistant_message
+                ON agent_runs(assistant_message_id);
+            CREATE UNIQUE INDEX assistant_trace_key
+                ON assistant_traces(assistant_message_id, trace_key);
+            CREATE UNIQUE INDEX assistant_trace_sequence
+                ON assistant_traces(assistant_message_id, sequence);
+            CREATE INDEX assistant_trace_order
+                ON assistant_traces(assistant_message_id, sequence);
+            CREATE UNIQUE INDEX attachment_position
+                ON attachments(message_id, position);
+            ",
+        )
+        .await
+        .map_err(db)
+}
+
+struct LegacyTrace {
+    call_id: String,
+    tool_name: String,
+    title: String,
+    input: String,
+    output: String,
+    status: AssistantTraceStatus,
+    started_at: i64,
+    finished_at: Option<i64>,
 }
 
 async fn schema_version(connection: &Connection) -> Result<i64> {
@@ -1678,21 +2083,47 @@ const fn run_status(value: MessageStatus) -> &'static str {
         MessageStatus::Streaming => "running",
     }
 }
-const fn activity_kind(value: &AgentActivityKind) -> &'static str {
+const fn trace_kind(value: AssistantTraceKind) -> &'static str {
     match value {
-        AgentActivityKind::ToolCall => "tool-call",
-        AgentActivityKind::ApprovalRequested => "approval-requested",
-        AgentActivityKind::ToolResult => "tool-result",
+        AssistantTraceKind::ReasoningSummary => "reasoning_summary",
+        AssistantTraceKind::Tool => "tool",
     }
 }
-fn parse_activity_kind(value: &str) -> Result<AgentActivityKind> {
+fn parse_trace_kind(value: &str) -> Result<AssistantTraceKind> {
     match value {
-        "tool-call" => Ok(AgentActivityKind::ToolCall),
-        "approval-requested" => Ok(AgentActivityKind::ApprovalRequested),
-        "tool-result" => Ok(AgentActivityKind::ToolResult),
+        "reasoning_summary" => Ok(AssistantTraceKind::ReasoningSummary),
+        "tool" => Ok(AssistantTraceKind::Tool),
         _ => Err(super::failure(
             StorageErrorKind::InvalidData,
-            "unknown agent activity kind",
+            "unknown assistant trace kind",
+        )),
+    }
+}
+const fn trace_status(value: AssistantTraceStatus) -> &'static str {
+    match value {
+        AssistantTraceStatus::Streaming => "streaming",
+        AssistantTraceStatus::Requested => "requested",
+        AssistantTraceStatus::Running => "running",
+        AssistantTraceStatus::AwaitingApproval => "awaiting_approval",
+        AssistantTraceStatus::Completed => "completed",
+        AssistantTraceStatus::Rejected => "rejected",
+        AssistantTraceStatus::Failed => "failed",
+        AssistantTraceStatus::Stopped => "stopped",
+    }
+}
+fn parse_trace_status(value: &str) -> Result<AssistantTraceStatus> {
+    match value {
+        "streaming" => Ok(AssistantTraceStatus::Streaming),
+        "requested" => Ok(AssistantTraceStatus::Requested),
+        "running" => Ok(AssistantTraceStatus::Running),
+        "awaiting_approval" => Ok(AssistantTraceStatus::AwaitingApproval),
+        "completed" => Ok(AssistantTraceStatus::Completed),
+        "rejected" => Ok(AssistantTraceStatus::Rejected),
+        "failed" => Ok(AssistantTraceStatus::Failed),
+        "stopped" => Ok(AssistantTraceStatus::Stopped),
+        _ => Err(super::failure(
+            StorageErrorKind::InvalidData,
+            "unknown assistant trace status",
         )),
     }
 }

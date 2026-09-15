@@ -1,7 +1,7 @@
 use magenta_core::{
-    AgentActivity, AgentActivityKind, Attachment, Conversation, ConversationId, ConversationMode,
-    Message, MessageId, MessagePage, MessageRole, MessageSequence, MessageStatus, StoredMessage,
-    Timestamp,
+    AssistantTrace, AssistantTraceEntry, AssistantTraceKind, AssistantTraceStatus, Attachment,
+    Conversation, ConversationId, ConversationMode, Message, MessageId, MessagePage, MessageRole,
+    MessageSequence, MessageStatus, StoredMessage, Timestamp,
 };
 use rusqlite::{Connection, params};
 
@@ -44,7 +44,7 @@ pub fn page(
         .prepare(
             r"
                 SELECT id, sequence, role, content, status, generation, outcome, failure,
-                       created_at, omitted_context_messages
+                       thinking_duration_ms, created_at, omitted_context_messages
                 FROM messages
                 WHERE conversation_id = ?1
                   AND (?2 IS NULL OR sequence < ?2)
@@ -88,7 +88,7 @@ pub fn page_after(
         .prepare(
             r"
                 SELECT id, sequence, role, content, status, generation, outcome, failure,
-                       created_at, omitted_context_messages
+                       thinking_duration_ms, created_at, omitted_context_messages
                 FROM messages
                 WHERE conversation_id = ?1 AND sequence > ?2
                 ORDER BY sequence
@@ -128,7 +128,7 @@ pub fn page_around(
         .prepare(
             r"
                 SELECT id, sequence, role, content, status, generation, outcome, failure,
-                       created_at, omitted_context_messages
+                       thinking_duration_ms, created_at, omitted_context_messages
                 FROM messages
                 WHERE conversation_id = ?1
                   AND sequence BETWEEN ?2 AND ?3
@@ -175,7 +175,7 @@ pub fn context(connection: &Connection, id: ConversationId, before: i64) -> Resu
         .prepare(
             r"
                 SELECT id, sequence, role, content, status, generation, outcome, failure,
-                       created_at, omitted_context_messages
+                       thinking_duration_ms, created_at, omitted_context_messages
                 FROM messages
                 WHERE conversation_id = ?1
                   AND sequence < ?2
@@ -230,7 +230,8 @@ fn read_message(
     };
     let content = row.get(3).map_err(database_error)?;
     let attachments = attachments(connection, message_id)?;
-    let agent_activities = agent_activities(connection, message_id)?;
+    let thinking_duration_ms: Option<i64> = row.get(8).map_err(database_error)?;
+    let assistant_trace = assistant_trace(connection, message_id, thinking_duration_ms)?;
     let generation_outcome = outcome
         .as_deref()
         .map(serde_json::from_str)
@@ -242,10 +243,10 @@ fn read_message(
         .transpose()
         .map_err(invalid)?;
     let sequence = MessageSequence(row.get(1).map_err(database_error)?);
-    let created_at = Timestamp(row.get(8).map_err(database_error)?);
+    let created_at = Timestamp(row.get(9).map_err(database_error)?);
     let generation = serde_json::from_str(&generation).map_err(invalid)?;
     let omitted_context_messages =
-        usize::try_from(row.get::<_, i64>(9).map_err(database_error)?).map_err(invalid)?;
+        usize::try_from(row.get::<_, i64>(10).map_err(database_error)?).map_err(invalid)?;
 
     Ok(StoredMessage {
         message: Message {
@@ -257,12 +258,11 @@ fn read_message(
             attachments,
             generation_outcome,
             failure,
-            agent_activities: agent_activities.clone(),
+            assistant_trace,
         },
         sequence,
         created_at,
         generation,
-        agent_activities,
         omitted_context_messages,
     })
 }
@@ -281,16 +281,19 @@ fn has_messages_after(
         .map_err(database_error)
 }
 
-fn agent_activities(connection: &Connection, message_id: MessageId) -> Result<Vec<AgentActivity>> {
+fn assistant_trace(
+    connection: &Connection,
+    message_id: MessageId,
+    thinking_duration_ms: Option<i64>,
+) -> Result<AssistantTrace> {
     let mut statement = connection
         .prepare(
             r"
-                SELECT activity.kind, activity.call_id, activity.tool_name,
-                       activity.status, activity.summary, activity.detail
-                FROM agent_activities AS activity
-                INNER JOIN agent_runs AS run ON run.id = activity.run_id
-                WHERE run.assistant_message_id = ?1
-                ORDER BY activity.sequence
+                SELECT trace_key, sequence, kind, status, title, tool_name,
+                       input, output, started_at, finished_at
+                FROM assistant_traces
+                WHERE assistant_message_id = ?1
+                ORDER BY sequence
             ",
         )
         .map_err(database_error)?;
@@ -298,37 +301,78 @@ fn agent_activities(connection: &Connection, message_id: MessageId) -> Result<Ve
         .query_map([message_id.0], |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
+                row.get::<_, i64>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, Option<i64>>(8)?,
+                row.get::<_, Option<i64>>(9)?,
             ))
         })
         .map_err(database_error)?;
-    rows.map(|row| {
-        let (kind, call_id, tool_name, status, summary, detail) = row.map_err(database_error)?;
-        let kind = match kind.as_str() {
-            "tool-call" => AgentActivityKind::ToolCall,
-            "approval-requested" => AgentActivityKind::ApprovalRequested,
-            "tool-result" => AgentActivityKind::ToolResult,
-            _ => {
-                return Err(failure(
-                    magenta_core::StorageErrorKind::InvalidData,
-                    "unknown agent activity kind",
-                ));
-            }
-        };
-        Ok(AgentActivity {
-            kind,
-            call_id,
-            tool_name,
-            status,
-            summary,
-            detail,
+    let entries = rows
+        .map(|row| {
+            let (
+                key,
+                sequence,
+                kind,
+                status,
+                title,
+                tool_name,
+                input,
+                output,
+                started_at,
+                finished_at,
+            ) = row.map_err(database_error)?;
+            let kind = match kind.as_str() {
+                "reasoning_summary" => AssistantTraceKind::ReasoningSummary,
+                "tool" => AssistantTraceKind::Tool,
+                _ => {
+                    return Err(failure(
+                        magenta_core::StorageErrorKind::InvalidData,
+                        "unknown assistant trace kind",
+                    ));
+                }
+            };
+            let status = match status.as_str() {
+                "streaming" => AssistantTraceStatus::Streaming,
+                "requested" => AssistantTraceStatus::Requested,
+                "running" => AssistantTraceStatus::Running,
+                "awaiting_approval" => AssistantTraceStatus::AwaitingApproval,
+                "completed" => AssistantTraceStatus::Completed,
+                "rejected" => AssistantTraceStatus::Rejected,
+                "failed" => AssistantTraceStatus::Failed,
+                "stopped" => AssistantTraceStatus::Stopped,
+                _ => {
+                    return Err(failure(
+                        magenta_core::StorageErrorKind::InvalidData,
+                        "unknown assistant trace status",
+                    ));
+                }
+            };
+            Ok(AssistantTraceEntry {
+                key,
+                sequence: u64::try_from(sequence).map_err(invalid)?,
+                kind,
+                status,
+                title,
+                tool_name,
+                input,
+                output,
+                started_at: started_at.map(Timestamp),
+                finished_at: finished_at.map(Timestamp),
+            })
         })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(AssistantTrace {
+        entries,
+        thinking_duration_ms: thinking_duration_ms
+            .map(|value| u64::try_from(value).map_err(invalid))
+            .transpose()?,
     })
-    .collect()
 }
 
 fn attachments(connection: &Connection, id: MessageId) -> Result<Vec<Attachment>> {

@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use magenta_core::{
-    AgentRunId, Attachment, BeginTurn, Conversation, ConversationId, ConversationMode,
-    GenerationConfig, Message, MessageId, MessageRole, MessageSequence, MessageStatus,
-    PreparedTurn, StorageErrorKind, select_context,
+    AgentRunId, AssistantTrace, Attachment, BeginTurn, Conversation, ConversationId,
+    ConversationMode, GenerationConfig, Message, MessageId, MessageRole, MessageSequence,
+    MessageStatus, PreparedTurn, StorageErrorKind, select_context,
 };
 use rusqlite::{Connection, Transaction, TransactionBehavior, params};
 
@@ -259,7 +259,7 @@ fn insert_user_message(
         attachments,
         generation_outcome: None,
         failure: None,
-        agent_activities: Vec::new(),
+        assistant_trace: AssistantTrace::default(),
     })
 }
 
@@ -302,7 +302,7 @@ fn insert_assistant_message(
         attachments: Vec::new(),
         generation_outcome: None,
         failure: None,
-        agent_activities: Vec::new(),
+        assistant_trace: AssistantTrace::default(),
     })
 }
 
@@ -356,7 +356,8 @@ pub fn regenerate(
         .execute(
             r"
                 UPDATE messages
-                SET content = '', status = 'streaming', outcome = NULL, generation = ?1,
+                SET content = '', status = 'streaming', outcome = NULL, thinking_duration_ms = NULL,
+                    generation = ?1,
                     omitted_context_messages = ?2
                 WHERE id = ?3
             ",
@@ -365,6 +366,13 @@ pub fn regenerate(
                 i64::try_from(context_report.omitted_messages).map_err(invalid)?,
                 target.0
             ],
+        )
+        .map_err(database_error)?;
+
+    transaction
+        .execute(
+            "DELETE FROM assistant_traces WHERE assistant_message_id = ?1",
+            [target.0],
         )
         .map_err(database_error)?;
 
@@ -384,7 +392,7 @@ pub fn regenerate(
         attachments: Vec::new(),
         generation_outcome: None,
         failure: None,
-        agent_activities: Vec::new(),
+        assistant_trace: AssistantTrace::default(),
     };
 
     transaction.commit().map_err(database_error)?;
@@ -527,7 +535,7 @@ fn insert_retry_assistant_message(
         attachments: Vec::new(),
         generation_outcome: None,
         failure: None,
-        agent_activities: Vec::new(),
+        assistant_trace: AssistantTrace::default(),
     })
 }
 

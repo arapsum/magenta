@@ -1,10 +1,12 @@
 use magenta_core::{
-    AgentMemoryStore, AgentSession, AgentSessionState, AgentSessionStore, BeginTurn, CodeChunk,
-    CodeIndex, ConversationMode, ConversationStore, EffortLevel, GenerationConfig, MemoryKind,
+    AgentMemoryStore, AgentSession, AgentSessionState, AgentSessionStore, AssistantTrace,
+    AssistantTraceEntry, AssistantTraceKind, AssistantTraceStatus, BeginTurn, CodeChunk, CodeIndex,
+    ConversationId, ConversationMode, ConversationStore, EffortLevel, GenerationConfig, MemoryKind,
     MemoryState, MessageStatus, ModelId, NewAgentMemory, Project, ProjectStore, ProviderId,
     Timestamp,
 };
 use magenta_storage::{TursoAgentDatabase, TursoAppStore};
+use turso::{Builder, params};
 
 fn generation() -> GenerationConfig {
     GenerationConfig::new(
@@ -176,6 +178,356 @@ fn project_database_separates_memory_code_and_sessions_by_root() {
                 .unwrap()
                 .state,
             AgentSessionState::AwaitingReview
+        );
+    });
+}
+
+#[test]
+fn local_turso_app_store_persists_ordered_assistant_traces_and_duration() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("trace.db");
+        let store = TursoAppStore::new(path.clone());
+        store.initialize().await.unwrap();
+
+        let pending = store
+            .begin_turn(BeginTurn {
+                conversation_id: None,
+                title: "Trace conversation".into(),
+                prompt: "show the work".into(),
+                attachments: Vec::new(),
+                generation: generation(),
+                mode: ConversationMode::Chat,
+                workspace_root: None,
+                request_overhead_tokens: 0,
+            })
+            .await
+            .unwrap();
+        let conversation_id = pending.conversation.id;
+        let assistant_id = pending.assistant_message.id;
+        let mut assistant = pending.assistant_message;
+        assistant.content = "Finished".into();
+        assistant.status = MessageStatus::Complete;
+        assistant.assistant_trace = AssistantTrace {
+            entries: vec![
+                AssistantTraceEntry {
+                    key: "reasoning:rs_1:0".into(),
+                    sequence: 0,
+                    kind: AssistantTraceKind::ReasoningSummary,
+                    status: AssistantTraceStatus::Completed,
+                    title: "Thinking".into(),
+                    tool_name: None,
+                    input: String::new(),
+                    output: "Checked the request.".into(),
+                    started_at: Some(Timestamp(10)),
+                    finished_at: Some(Timestamp(20)),
+                },
+                AssistantTraceEntry {
+                    key: "tool:call_1".into(),
+                    sequence: 1,
+                    kind: AssistantTraceKind::Tool,
+                    status: AssistantTraceStatus::Completed,
+                    title: "List files".into(),
+                    tool_name: Some("list_files".into()),
+                    input: "{\"path\":\".\"}".into(),
+                    output: "README.md".into(),
+                    started_at: Some(Timestamp(21)),
+                    finished_at: Some(Timestamp(30)),
+                },
+            ],
+            thinking_duration_ms: Some(30),
+        };
+        store.finalize(assistant).await.unwrap();
+        drop(store);
+
+        let reopened = TursoAppStore::new(path);
+        reopened.initialize().await.unwrap();
+        let page = reopened.load(conversation_id).await.unwrap();
+        let saved = page
+            .page
+            .messages
+            .iter()
+            .find(|message| message.message.id == assistant_id)
+            .expect("assistant message should reload");
+        assert_eq!(saved.message.assistant_trace.thinking_duration_ms, Some(30));
+        assert_eq!(
+            saved
+                .message
+                .assistant_trace
+                .entries
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["reasoning:rs_1:0", "tool:call_1"]
+        );
+
+        reopened.delete(conversation_id).await.unwrap();
+        assert!(reopened.load(conversation_id).await.is_err());
+    });
+}
+
+#[test]
+fn local_turso_v1_migration_backfills_one_trace_entry_per_tool_call() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("legacy.db");
+        let database = Builder::new_local(&path.to_string_lossy())
+            .build()
+            .await
+            .unwrap();
+        let connection = database.connect().unwrap();
+        connection
+            .execute_batch(
+                r"
+                CREATE TABLE _magenta_schema(component TEXT PRIMARY KEY, version INTEGER NOT NULL);
+                INSERT INTO _magenta_schema(component, version) VALUES ('app', 1);
+                CREATE TABLE conversations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    generation TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    workspace_root BLOB,
+                    pinned INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE TABLE messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                    sequence INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    generation TEXT NOT NULL,
+                    outcome TEXT,
+                    failure TEXT,
+                    omitted_context_messages INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    UNIQUE(conversation_id, sequence)
+                );
+                CREATE UNIQUE INDEX one_stream_per_conversation
+                    ON messages(conversation_id) WHERE status = 'streaming';
+                CREATE INDEX message_conversation_order
+                    ON messages(conversation_id, sequence);
+                CREATE TABLE projects (
+                    root BLOB PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    added_at INTEGER NOT NULL,
+                    last_opened_at INTEGER NOT NULL
+                );
+                CREATE TABLE agent_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                    assistant_message_id INTEGER NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+                    status TEXT NOT NULL,
+                    started_at INTEGER NOT NULL,
+                    finished_at INTEGER
+                );
+                CREATE TABLE agent_activities (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+                    sequence INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    call_id TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    detail TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    UNIQUE(run_id, sequence)
+                );
+                CREATE INDEX agent_activity_order ON agent_activities(run_id, sequence);
+                CREATE TABLE attachments (
+                    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+                    position INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    source_path BLOB NOT NULL,
+                    mime_type TEXT NOT NULL,
+                    byte_size INTEGER NOT NULL,
+                    managed INTEGER NOT NULL,
+                    PRIMARY KEY(message_id, position)
+                );
+                ",
+            )
+            .await
+            .unwrap();
+
+        let generation = serde_json::to_string(&generation()).unwrap();
+        connection
+            .execute(
+                "INSERT INTO conversations(id,title,generation,mode,created_at,updated_at) \
+                 VALUES (1,'Legacy',?1,'agent',1,2)",
+                params![generation.as_str()],
+            )
+            .await
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO messages(id,conversation_id,sequence,role,content,status,generation,created_at) \
+                 VALUES (1,1,0,'user','Inspect this','complete',?1,1), \
+                        (2,1,1,'assistant','','streaming',?1,2)",
+                params![generation.as_str()],
+            )
+            .await
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO agent_runs(id,conversation_id,assistant_message_id,status,started_at) \
+                 VALUES (1,1,2,'running',2)",
+                (),
+            )
+            .await
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO agent_activities( \
+                 run_id,sequence,kind,call_id,tool_name,status,summary,detail,created_at \
+                 ) VALUES (1,0,'tool-call','call_1','read_file','requested','Read file','{\"path\":\"README.md\"}',3), \
+                          (1,1,'approval-requested','call_1','read_file','awaiting-approval','Approval','README.md',4), \
+                          (1,2,'tool-result','call_1','read_file','completed','Read file','contents',5)",
+                (),
+            )
+            .await
+            .unwrap();
+        drop(connection);
+        drop(database);
+
+        let store = TursoAppStore::new(path);
+        store.initialize().await.unwrap();
+        let page = store.load(ConversationId(1)).await.unwrap();
+        let assistant = page
+            .page
+            .messages
+            .iter()
+            .find(|message| message.message.id.0 == 2)
+            .expect("legacy assistant should reload");
+        assert_eq!(assistant.message.assistant_trace.entries.len(), 1);
+        let entry = &assistant.message.assistant_trace.entries[0];
+        assert_eq!(entry.key, "tool:call_1");
+        assert_eq!(entry.sequence, 0);
+        assert_eq!(entry.output, "contents");
+        assert_eq!(entry.status, AssistantTraceStatus::Completed);
+
+        let reopened = TursoAppStore::new(directory.path().join("legacy.db"));
+        reopened.initialize().await.unwrap();
+        let reloaded = reopened.load(ConversationId(1)).await.unwrap();
+        assert_eq!(
+            reloaded
+                .page
+                .messages
+                .iter()
+                .find(|message| message.message.id.0 == 2)
+                .unwrap()
+                .message
+                .assistant_trace
+                .entries
+                .len(),
+            1
+        );
+    });
+}
+
+#[test]
+fn local_turso_app_store_repairs_orphaned_message_autoindex() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("orphaned.db");
+        let database = Builder::new_local(&path.to_string_lossy())
+            .build()
+            .await
+            .unwrap();
+        let connection = database.connect().unwrap();
+        connection
+            .execute_batch(
+                r"
+                CREATE TABLE _magenta_schema(component TEXT PRIMARY KEY, version INTEGER NOT NULL);
+                INSERT INTO _magenta_schema(component, version) VALUES ('app', 2);
+                CREATE TABLE conversations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    generation TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    workspace_root BLOB,
+                    pinned INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE TABLE messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                    sequence INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    generation TEXT NOT NULL,
+                    outcome TEXT,
+                    failure TEXT,
+                    omitted_context_messages INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    UNIQUE(conversation_id, sequence)
+                );
+                ",
+            )
+            .await
+            .unwrap();
+        let generation = serde_json::to_string(&generation()).unwrap();
+        connection
+            .execute(
+                "INSERT INTO conversations(id,title,generation,mode,created_at,updated_at) \
+                 VALUES (1,'Repair',?1,'chat',1,2)",
+                params![generation.as_str()],
+            )
+            .await
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO messages(id,conversation_id,sequence,role,content,status,generation,created_at) \
+                 VALUES (1,1,0,'assistant','Recovered','complete',?1,2)",
+                params![generation.as_str()],
+            )
+            .await
+            .unwrap();
+        connection
+            .execute(
+                "ALTER TABLE messages ADD COLUMN thinking_duration_ms INTEGER",
+                (),
+            )
+            .await
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE conversations SET generation=?1",
+                params![generation.as_str()],
+            )
+            .await
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE messages SET generation=?1",
+                params![generation.as_str()],
+            )
+            .await
+            .unwrap();
+        drop(connection);
+        drop(database);
+
+        let store = TursoAppStore::new(path.clone());
+        store.initialize().await.unwrap();
+        let page = store.load(ConversationId(1)).await.unwrap();
+        assert_eq!(page.page.messages[0].message.content, "Recovered");
+
+        let reopened = TursoAppStore::new(path);
+        reopened.initialize().await.unwrap();
+        assert_eq!(
+            reopened
+                .load(ConversationId(1))
+                .await
+                .unwrap()
+                .page
+                .messages[0]
+                .message
+                .content,
+            "Recovered"
         );
     });
 }

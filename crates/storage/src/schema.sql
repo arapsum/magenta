@@ -20,6 +20,7 @@ CREATE TABLE messages (
     outcome TEXT,
     failure TEXT,
     omitted_context_messages INTEGER NOT NULL DEFAULT 0 CHECK (omitted_context_messages >= 0),
+    thinking_duration_ms INTEGER CHECK (thinking_duration_ms IS NULL OR thinking_duration_ms >= 0),
     created_at INTEGER NOT NULL,
     UNIQUE (conversation_id, sequence)
 );
@@ -48,21 +49,24 @@ CREATE TABLE agent_runs (
     finished_at INTEGER
 );
 
-CREATE TABLE agent_activities (
+CREATE TABLE assistant_traces (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id INTEGER NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+    assistant_message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    trace_key TEXT NOT NULL,
     sequence INTEGER NOT NULL CHECK (sequence >= 0),
-    kind TEXT NOT NULL CHECK (kind IN ('tool-call', 'approval-requested', 'tool-result')),
-    call_id TEXT NOT NULL,
-    tool_name TEXT NOT NULL,
-    status TEXT NOT NULL,
-    summary TEXT NOT NULL,
-    detail TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    UNIQUE (run_id, sequence)
+    kind TEXT NOT NULL CHECK (kind IN ('reasoning_summary', 'tool')),
+    status TEXT NOT NULL CHECK (status IN ('streaming', 'requested', 'running', 'awaiting_approval', 'completed', 'rejected', 'failed', 'stopped')),
+    title TEXT NOT NULL,
+    tool_name TEXT,
+    input TEXT NOT NULL,
+    output TEXT NOT NULL,
+    started_at INTEGER,
+    finished_at INTEGER,
+    UNIQUE (assistant_message_id, trace_key),
+    UNIQUE (assistant_message_id, sequence)
 );
 
-CREATE INDEX agent_activity_order ON agent_activities(run_id, sequence);
+CREATE INDEX assistant_trace_order ON assistant_traces(assistant_message_id, sequence);
 
 CREATE TABLE attachments (
     message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -121,4 +125,4 @@ CREATE TRIGGER message_fts_update AFTER UPDATE OF content ON messages BEGIN
     INSERT INTO message_fts(rowid, content) VALUES (new.id, new.content);
 END;
 
-PRAGMA user_version = 7;
+PRAGMA user_version = 8;

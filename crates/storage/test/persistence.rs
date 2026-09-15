@@ -254,8 +254,25 @@ fn version_four_migration_backfills_full_text_indexes() {
                     DROP TRIGGER message_fts_update;
                     DROP TABLE conversation_fts;
                     DROP TABLE message_fts;
+                    DROP INDEX assistant_trace_order;
+                    DROP TABLE assistant_traces;
+                    CREATE TABLE agent_activities (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id INTEGER NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+                        sequence INTEGER NOT NULL,
+                        kind TEXT NOT NULL,
+                        call_id TEXT NOT NULL,
+                        tool_name TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        summary TEXT NOT NULL,
+                        detail TEXT NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        UNIQUE (run_id, sequence)
+                    );
+                    CREATE INDEX agent_activity_order ON agent_activities(run_id, sequence);
                     ALTER TABLE messages DROP COLUMN omitted_context_messages;
                     ALTER TABLE messages DROP COLUMN failure;
+                    ALTER TABLE messages DROP COLUMN thinking_duration_ms;
                     PRAGMA user_version = 4;
                 ",
             )

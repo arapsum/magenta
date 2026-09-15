@@ -22,8 +22,8 @@ pub use settings::TomlSettingsStore;
 pub use turso_app::TursoAppStore;
 
 pub(crate) use database::{
-    activity_kind, agent_run_status, attachment_directory, connect, database_error, decode_mode,
-    failure, invalid, now, unavailable,
+    agent_run_status, attachment_directory, connect, database_error, decode_mode, failure, invalid,
+    now, unavailable,
 };
 
 use std::{
@@ -35,7 +35,7 @@ use std::{
 };
 
 use magenta_core::{
-    AgentActivityRecord, BeginTurn, ConversationId, ConversationPage, ConversationSearchResult,
+    AssistantTrace, BeginTurn, ConversationId, ConversationPage, ConversationSearchResult,
     ConversationStore, ConversationSummary, Message, MessageId, MessagePage, MessageSequence,
     PreparedTurn, Project, ProjectStore, StorageError, StorageErrorKind, StorageFuture, Timestamp,
 };
@@ -300,9 +300,10 @@ impl ConversationStore for SqliteConversationStore {
                 .execute(
                     r"
                         UPDATE messages
-                        SET content = ?1, status = ?2, outcome = ?3, failure = ?4
-                        WHERE id = ?5
-                          AND conversation_id = ?6
+                        SET content = ?1, status = ?2, outcome = ?3, failure = ?4,
+                            thinking_duration_ms = ?5
+                        WHERE id = ?6
+                          AND conversation_id = ?7
                           AND status = 'streaming'
                     ",
                     params![
@@ -310,6 +311,9 @@ impl ConversationStore for SqliteConversationStore {
                         records::status(message.status),
                         outcome,
                         failure_json,
+                        message.assistant_trace.thinking_duration_ms
+                            .map(|value| i64::try_from(value).map_err(invalid))
+                            .transpose()?,
                         message.id.0,
                         message.conversation_id.0
                     ],
@@ -321,6 +325,7 @@ impl ConversationStore for SqliteConversationStore {
                     "message is no longer streaming",
                 ));
             }
+            replace_trace(&transaction, message.id, &message.assistant_trace)?;
             transaction
                 .execute(
                     "UPDATE agent_runs SET status = ?1, finished_at = ?2 WHERE assistant_message_id = ?3 AND status = 'running'",
@@ -422,39 +427,91 @@ impl ConversationStore for SqliteConversationStore {
         })
     }
 
-    fn append_agent_activity(&self, activity: AgentActivityRecord) -> StorageFuture<()> {
+    fn upsert_assistant_trace(
+        &self,
+        message_id: MessageId,
+        trace: AssistantTrace,
+    ) -> StorageFuture<()> {
         self.run(move |connection| {
-            let sequence: i64 = connection
-                .query_row(
-                    "SELECT COALESCE(MAX(sequence) + 1, 0) FROM agent_activities WHERE run_id = ?1",
-                    [activity.run_id.0],
-                    |row| row.get(0),
-                )
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(database_error)?;
-            connection
+            let duration = trace
+                .thinking_duration_ms
+                .map(|value| i64::try_from(value).map_err(invalid))
+                .transpose()?;
+            let changed = transaction
                 .execute(
-                    r"
-                        INSERT INTO agent_activities(
-                            run_id, sequence, kind, call_id, tool_name,
-                            status, summary, detail, created_at
-                        )
-                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-                    ",
-                    params![
-                        activity.run_id.0,
-                        sequence,
-                        activity_kind(&activity.activity.kind),
-                        activity.activity.call_id,
-                        activity.activity.tool_name,
-                        activity.activity.status,
-                        activity.activity.summary,
-                        activity.activity.detail,
-                        now()?,
-                    ],
+                    "UPDATE messages SET thinking_duration_ms = ?1 WHERE id = ?2",
+                    params![duration, message_id.0],
                 )
                 .map_err(database_error)?;
-            Ok(())
+            if changed == 0 {
+                return Err(failure(
+                    StorageErrorKind::NotFound,
+                    "assistant message does not exist",
+                ));
+            }
+            replace_trace(&transaction, message_id, &trace)?;
+            transaction.commit().map_err(database_error)
         })
+    }
+}
+
+fn replace_trace(
+    transaction: &rusqlite::Transaction<'_>,
+    message_id: MessageId,
+    trace: &AssistantTrace,
+) -> Result<()> {
+    transaction
+        .execute(
+            "DELETE FROM assistant_traces WHERE assistant_message_id = ?1",
+            [message_id.0],
+        )
+        .map_err(database_error)?;
+    for entry in &trace.entries {
+        transaction
+            .execute(
+                "INSERT INTO assistant_traces( \
+                 assistant_message_id, trace_key, sequence, kind, status, title, tool_name, \
+                 input, output, started_at, finished_at \
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    message_id.0,
+                    entry.key,
+                    i64::try_from(entry.sequence).map_err(invalid)?,
+                    trace_kind(entry.kind),
+                    trace_status(entry.status),
+                    entry.title,
+                    entry.tool_name,
+                    entry.input,
+                    entry.output,
+                    entry.started_at.map(|value| value.0),
+                    entry.finished_at.map(|value| value.0),
+                ],
+            )
+            .map_err(database_error)?;
+    }
+    Ok(())
+}
+
+const fn trace_kind(kind: magenta_core::AssistantTraceKind) -> &'static str {
+    match kind {
+        magenta_core::AssistantTraceKind::ReasoningSummary => "reasoning_summary",
+        magenta_core::AssistantTraceKind::Tool => "tool",
+    }
+}
+
+const fn trace_status(status: magenta_core::AssistantTraceStatus) -> &'static str {
+    match status {
+        magenta_core::AssistantTraceStatus::Streaming => "streaming",
+        magenta_core::AssistantTraceStatus::Requested => "requested",
+        magenta_core::AssistantTraceStatus::Running => "running",
+        magenta_core::AssistantTraceStatus::AwaitingApproval => "awaiting_approval",
+        magenta_core::AssistantTraceStatus::Completed => "completed",
+        magenta_core::AssistantTraceStatus::Rejected => "rejected",
+        magenta_core::AssistantTraceStatus::Failed => "failed",
+        magenta_core::AssistantTraceStatus::Stopped => "stopped",
     }
 }
 

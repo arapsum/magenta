@@ -4,6 +4,7 @@ mod v3_to_v4;
 mod v4_to_v5;
 mod v5_to_v6;
 mod v6_to_v7;
+mod v7_to_v8;
 
 use magenta_core::StorageErrorKind;
 use rusqlite::Transaction;
@@ -18,32 +19,41 @@ pub fn apply(version: i64, transaction: &Transaction<'_>) -> Result<()> {
             v3_to_v4::apply(transaction)?;
             v4_to_v5::apply(transaction)?;
             v5_to_v6::apply(transaction)?;
-            v6_to_v7::apply(transaction)
+            v6_to_v7::apply(transaction)?;
+            v7_to_v8::apply(transaction)
         }
         2 => {
             v2_to_v3::apply(transaction)?;
             v3_to_v4::apply(transaction)?;
             v4_to_v5::apply(transaction)?;
             v5_to_v6::apply(transaction)?;
-            v6_to_v7::apply(transaction)
+            v6_to_v7::apply(transaction)?;
+            v7_to_v8::apply(transaction)
         }
         3 => {
             v3_to_v4::apply(transaction)?;
             v4_to_v5::apply(transaction)?;
             v5_to_v6::apply(transaction)?;
-            v6_to_v7::apply(transaction)
+            v6_to_v7::apply(transaction)?;
+            v7_to_v8::apply(transaction)
         }
         4 => {
             v4_to_v5::apply(transaction)?;
             v5_to_v6::apply(transaction)?;
-            v6_to_v7::apply(transaction)
+            v6_to_v7::apply(transaction)?;
+            v7_to_v8::apply(transaction)
         }
         5 => {
             v5_to_v6::apply(transaction)?;
-            v6_to_v7::apply(transaction)
+            v6_to_v7::apply(transaction)?;
+            v7_to_v8::apply(transaction)
         }
-        6 => v6_to_v7::apply(transaction),
-        7 => Ok(()),
+        6 => {
+            v6_to_v7::apply(transaction)?;
+            v7_to_v8::apply(transaction)
+        }
+        7 => v7_to_v8::apply(transaction),
+        8 => Ok(()),
         _ => Err(failure(
             StorageErrorKind::UnsupportedVersion,
             "unsupported database schema version",

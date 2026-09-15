@@ -3,7 +3,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use magenta_core::{AgentActivityKind, StorageError, StorageErrorKind};
+use magenta_core::{StorageError, StorageErrorKind};
 use rusqlite::Connection;
 
 use super::Result;
@@ -28,14 +28,6 @@ pub fn attachment_directory(database_path: &Path) -> PathBuf {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("attachments")
-}
-
-pub const fn activity_kind(kind: &AgentActivityKind) -> &'static str {
-    match kind {
-        AgentActivityKind::ToolCall => "tool-call",
-        AgentActivityKind::ApprovalRequested => "approval-requested",
-        AgentActivityKind::ToolResult => "tool-result",
-    }
 }
 
 pub const fn agent_run_status(status: magenta_core::MessageStatus) -> &'static str {
