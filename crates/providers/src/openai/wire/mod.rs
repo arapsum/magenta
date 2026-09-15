@@ -83,6 +83,14 @@ pub struct StreamEvent {
     #[serde(default)]
     pub output_index: Option<u64>,
     #[serde(default)]
+    pub summary_index: Option<u64>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub phase: Option<String>,
+    #[serde(default)]
+    pub part: Option<serde_json::Value>,
+    #[serde(default)]
     pub item: Option<serde_json::Value>,
     #[serde(default)]
     pub response: Option<ResponsePayload>,
@@ -100,6 +108,38 @@ pub struct ResponsePayload {
     pub error: Option<ResponseError>,
     #[serde(default)]
     pub output: Vec<serde_json::Value>,
+}
+
+pub fn reasoning_summary_parts(
+    output: &[serde_json::Value],
+) -> impl Iterator<Item = (String, usize, String)> + '_ {
+    output
+        .iter()
+        .filter_map(|item| {
+            if item.get("type").and_then(serde_json::Value::as_str) != Some("reasoning") {
+                return None;
+            }
+            let item_id = item.get("id").and_then(serde_json::Value::as_str)?;
+            let summaries = item.get("summary")?.as_array()?;
+            Some(
+                summaries
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(index, summary)| {
+                        if summary.get("type").and_then(serde_json::Value::as_str)
+                            != Some("summary_text")
+                        {
+                            return None;
+                        }
+                        let text = summary
+                            .get("text")
+                            .and_then(serde_json::Value::as_str)
+                            .filter(|text| !text.is_empty())?;
+                        Some((item_id.to_owned(), index, text.to_owned()))
+                    }),
+            )
+        })
+        .flatten()
 }
 
 #[derive(Debug, Deserialize)]

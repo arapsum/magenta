@@ -24,6 +24,15 @@ pub fn assert_success_contract(
                 assert!(outcome.is_none(), "text cannot follow completion");
                 response.push_str(chunk);
             }
+            GenerationEvent::TextDeltaWithPhase { delta, .. } => {
+                assert!(outcome.is_none(), "text cannot follow completion");
+                response.push_str(delta);
+            }
+            GenerationEvent::ReasoningSummaryStarted { .. }
+            | GenerationEvent::ReasoningSummaryDelta { .. }
+            | GenerationEvent::ReasoningSummaryCompleted { .. } => {
+                assert!(outcome.is_none(), "trace cannot follow completion");
+            }
             GenerationEvent::Completed(completed) => {
                 assert_eq!(index + 1, events.len(), "completion must be final");
                 assert!(outcome.replace(completed.clone()).is_none());

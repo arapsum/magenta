@@ -12,10 +12,10 @@ use futures_util::{
 };
 use http_client::{HttpClient, Method, StatusCode};
 use magenta_core::{
-    AuthenticationFuture, AuthorizationSession, ChatProvider, GenerationEvent, GenerationOutcome,
-    GenerationRequest, GenerationStream, ModelCatalog, ModelCatalogFuture, ModelDescriptor,
-    ProviderAccount, ProviderAuthenticator, ProviderError, ProviderErrorDiagnostic,
-    ProviderErrorKind,
+    AssistantTextPhase, AuthenticationFuture, AuthorizationSession, ChatProvider, GenerationEvent,
+    GenerationOutcome, GenerationRequest, GenerationStream, ModelCatalog, ModelCatalogFuture,
+    ModelDescriptor, ProviderAccount, ProviderAuthenticator, ProviderError,
+    ProviderErrorDiagnostic, ProviderErrorKind,
 };
 use reqwest_client::ReqwestClient;
 use serde_json::Value;
@@ -26,7 +26,7 @@ use self::{
     sse::EventDecoder,
     wire::{
         ModelsResponse, ResponseError, ResponsesRequest, StreamEvent, model_descriptors,
-        parse_finish_reason, usage,
+        parse_finish_reason, reasoning_summary_parts, usage,
     },
 };
 
@@ -262,7 +262,58 @@ impl OpenAiProvider {
                 .delta
                 .as_deref()
                 .filter(|delta| !delta.is_empty())
-                .map(|delta| StreamOutput::Text(delta.to_owned()))),
+                .map(|delta| {
+                    event
+                        .phase
+                        .as_deref()
+                        .and_then(assistant_text_phase)
+                        .map_or_else(
+                            || StreamOutput::Text(delta.to_owned()),
+                            |phase| StreamOutput::TextWithPhase {
+                                delta: delta.to_owned(),
+                                phase,
+                            },
+                        )
+                })),
+            "response.reasoning_summary_part.added" => {
+                let valid_part = event.part.as_ref().is_none_or(|part| {
+                    part.get("type").and_then(Value::as_str) == Some("summary_text")
+                });
+                if !valid_part {
+                    return Ok(None);
+                }
+                summary_key(event).map_or_else(
+                    || Ok(None),
+                    |key| {
+                        Ok(Some(StreamOutput::ReasoningSummaryStarted {
+                            key,
+                            title: "Thinking".to_owned(),
+                        }))
+                    },
+                )
+            }
+            "response.reasoning_summary_text.delta" => summary_key(event).map_or_else(
+                || Ok(None),
+                |key| {
+                    Ok(event
+                        .delta
+                        .as_deref()
+                        .filter(|delta| !delta.is_empty())
+                        .map(|delta| StreamOutput::ReasoningSummaryDelta {
+                            key,
+                            delta: delta.to_owned(),
+                        }))
+                },
+            ),
+            "response.reasoning_summary_text.done" => summary_key(event).map_or_else(
+                || Ok(None),
+                |key| {
+                    Ok(Some(StreamOutput::ReasoningSummaryCompleted {
+                        key,
+                        text: event.text.clone().unwrap_or_default(),
+                    }))
+                },
+            ),
             "response.completed" => {
                 let response = event.response.as_ref().ok_or_else(|| {
                     OpenAiProviderError::Protocol(
@@ -336,61 +387,91 @@ impl OpenAiProvider {
             return Err(self.http_error(response).await);
         }
 
-        let stream = async_stream::try_stream! {
-            let mut decoder = EventDecoder::default();
-            let mut reader = BufReader::new(response.into_body());
-            let mut line = String::new();
-            let mut completed = false;
-            yield GenerationEvent::Started;
+        Ok(generation_response_stream(response))
+    }
+}
 
-            loop {
-                line.clear();
-                let count = reader.read_line(&mut line).await.map_err(|error| {
-                    provider_error(
-                        ProviderErrorKind::Transport,
-                        OpenAiProviderError::Transport(error.to_string()),
-                    )
-                })?;
-                if count == 0 {
-                    break;
-                }
-                if let Some(event) = decoder.push_line(&line) {
-                    ensure_stream_is_active(completed)?;
-                    match decode_stream_event(&event.data)? {
-                        Some(StreamOutput::Text(delta)) => {
-                            yield GenerationEvent::TextDelta(delta);
-                        }
-                        Some(StreamOutput::Completed(outcome)) => {
-                            completed = true;
-                            yield GenerationEvent::Completed(outcome);
-                        }
-                        None => {}
-                    }
-                }
+fn generation_response_stream(
+    response: http_client::Response<http_client::AsyncBody>,
+) -> impl futures_util::Stream<Item = Result<GenerationEvent, ProviderError>> {
+    async_stream::try_stream! {
+        let mut decoder = EventDecoder::default();
+        let mut reader = BufReader::new(response.into_body());
+        let mut line = String::new();
+        let mut completed = false;
+        let mut state = ChatStreamState::default();
+        yield GenerationEvent::Started;
+
+        loop {
+            line.clear();
+            let count = reader.read_line(&mut line).await.map_err(|error| {
+                provider_error(
+                    ProviderErrorKind::Transport,
+                    OpenAiProviderError::Transport(error.to_string()),
+                )
+            })?;
+            if count == 0 {
+                break;
             }
-
-            if let Some(event) = decoder.finish() {
+            if let Some(event) = decoder.push_line(&line) {
                 ensure_stream_is_active(completed)?;
-                match decode_stream_event(&event.data)? {
-                    Some(StreamOutput::Text(delta)) => {
-                        yield GenerationEvent::TextDelta(delta);
-                    }
-                    Some(StreamOutput::Completed(outcome)) => {
+                let event = parse_stream_event(&event.data)?;
+                for output in state.observe(&event)? {
+                    let is_completed = matches!(&output, StreamOutput::Completed(_));
+                    yield generation_event(output);
+                    if is_completed {
                         completed = true;
-                        yield GenerationEvent::Completed(outcome);
                     }
-                    None => {}
                 }
             }
+        }
 
-            if !completed {
-                Err::<(), _>(provider_error(
-                    ProviderErrorKind::IncompleteResponse,
-                    OpenAiProviderError::IncompleteStream,
-                ))?;
+        if let Some(event) = decoder.finish() {
+            ensure_stream_is_active(completed)?;
+            let event = parse_stream_event(&event.data)?;
+            for output in state.observe(&event)? {
+                let is_completed = matches!(&output, StreamOutput::Completed(_));
+                yield generation_event(output);
+                if is_completed {
+                    completed = true;
+                }
             }
-        };
-        Ok(stream)
+        }
+
+        if !completed {
+            Err::<(), _>(provider_error(
+                ProviderErrorKind::IncompleteResponse,
+                OpenAiProviderError::IncompleteStream,
+            ))?;
+        }
+    }
+}
+
+fn parse_stream_event(data: &str) -> Result<StreamEvent, ProviderError> {
+    serde_json::from_str::<StreamEvent>(data).map_err(|error| {
+        provider_error(
+            ProviderErrorKind::Protocol,
+            OpenAiProviderError::Protocol(error.to_string()),
+        )
+    })
+}
+
+fn generation_event(output: StreamOutput) -> GenerationEvent {
+    match output {
+        StreamOutput::Text(delta) => GenerationEvent::TextDelta(delta),
+        StreamOutput::TextWithPhase { delta, phase } => {
+            GenerationEvent::TextDeltaWithPhase { delta, phase }
+        }
+        StreamOutput::ReasoningSummaryStarted { key, title } => {
+            GenerationEvent::ReasoningSummaryStarted { key, title }
+        }
+        StreamOutput::ReasoningSummaryDelta { key, delta } => {
+            GenerationEvent::ReasoningSummaryDelta { key, delta }
+        }
+        StreamOutput::ReasoningSummaryCompleted { key, text } => {
+            GenerationEvent::ReasoningSummaryCompleted { key, text }
+        }
+        StreamOutput::Completed(outcome) => GenerationEvent::Completed(outcome),
     }
 }
 
@@ -428,20 +509,164 @@ impl ProviderAuthenticator for OpenAiProvider {
     }
 }
 
+#[derive(Clone)]
 enum StreamOutput {
     Text(String),
+    TextWithPhase {
+        delta: String,
+        phase: AssistantTextPhase,
+    },
+    ReasoningSummaryStarted {
+        key: String,
+        title: String,
+    },
+    ReasoningSummaryDelta {
+        key: String,
+        delta: String,
+    },
+    ReasoningSummaryCompleted {
+        key: String,
+        text: String,
+    },
     Completed(GenerationOutcome),
 }
 
-fn decode_stream_event(data: &str) -> Result<Option<StreamOutput>, ProviderError> {
-    let event = serde_json::from_str::<StreamEvent>(data).map_err(|error| {
-        provider_error(
-            ProviderErrorKind::Protocol,
-            OpenAiProviderError::Protocol(error.to_string()),
-        )
-    })?;
-    OpenAiProvider::stream_event(&event)
-        .map_err(|error| provider_error(ProviderErrorKind::Protocol, error))
+#[derive(Default)]
+struct ChatStreamState {
+    phases: std::collections::HashMap<String, AssistantTextPhase>,
+    summaries: std::collections::HashMap<String, ChatSummaryState>,
+}
+
+#[derive(Default)]
+struct ChatSummaryState {
+    text: String,
+    started: bool,
+    completed: bool,
+}
+
+impl ChatStreamState {
+    fn observe(&mut self, event: &StreamEvent) -> Result<Vec<StreamOutput>, ProviderError> {
+        if matches!(
+            event.kind.as_str(),
+            "response.output_item.added" | "response.output_item.done"
+        ) && let Some(item) = event.item.as_ref()
+            && item.get("type").and_then(Value::as_str) == Some("message")
+            && let Some(id) = item.get("id").and_then(Value::as_str)
+            && let Some(phase) = item
+                .get("phase")
+                .and_then(Value::as_str)
+                .and_then(assistant_text_phase)
+        {
+            self.phases.insert(id.to_owned(), phase);
+        }
+
+        if event.kind == "response.output_text.delta"
+            && event.phase.is_none()
+            && let Some(item_id) = event.item_id.as_deref()
+            && let Some(phase) = self.phases.get(item_id).copied()
+        {
+            let mut outputs = Vec::new();
+            if let Some(delta) = event.delta.as_deref().filter(|delta| !delta.is_empty()) {
+                outputs.push(StreamOutput::TextWithPhase {
+                    delta: delta.to_owned(),
+                    phase,
+                });
+            }
+            return Ok(outputs);
+        }
+
+        let decoded = OpenAiProvider::stream_event(event)
+            .map_err(|error| provider_error(ProviderErrorKind::Protocol, error))?;
+        let terminal = decoded
+            .clone()
+            .filter(|output| matches!(output, StreamOutput::Completed(_)));
+        let mut outputs = Vec::new();
+        if let Some(output) = decoded.filter(|output| !matches!(output, StreamOutput::Completed(_)))
+        {
+            if let Some(key) = match &output {
+                StreamOutput::ReasoningSummaryDelta { key, .. }
+                | StreamOutput::ReasoningSummaryCompleted { key, .. } => Some(key),
+                _ => None,
+            }
+            .filter(|key| !self.summaries.get(*key).is_some_and(|state| state.started))
+            {
+                outputs.push(StreamOutput::ReasoningSummaryStarted {
+                    key: key.clone(),
+                    title: "Thinking".to_owned(),
+                });
+            }
+            self.observe_summary_output(&output);
+            outputs.push(output);
+        }
+
+        if matches!(
+            event.kind.as_str(),
+            "response.completed" | "response.incomplete"
+        ) && let Some(response) = event.response.as_ref()
+        {
+            for (item_id, summary_index, text) in reasoning_summary_parts(&response.output) {
+                let key = format!("reasoning:{item_id}:{summary_index}");
+                let state = self.summaries.entry(key.clone()).or_default();
+                if state.completed {
+                    continue;
+                }
+                if !state.started {
+                    outputs.push(StreamOutput::ReasoningSummaryStarted {
+                        key: key.clone(),
+                        title: "Thinking".to_owned(),
+                    });
+                    state.started = true;
+                }
+                state.text.clone_from(&text);
+                state.completed = true;
+                outputs.push(StreamOutput::ReasoningSummaryCompleted { key, text });
+            }
+        }
+
+        if let Some(terminal) = terminal {
+            outputs.push(terminal);
+        }
+
+        Ok(outputs)
+    }
+
+    fn observe_summary_output(&mut self, output: &StreamOutput) {
+        match output {
+            StreamOutput::ReasoningSummaryStarted { key, .. } => {
+                self.summaries.entry(key.clone()).or_default().started = true;
+            }
+            StreamOutput::ReasoningSummaryDelta { key, delta } => {
+                let state = self.summaries.entry(key.clone()).or_default();
+                state.started = true;
+                state.text.push_str(delta);
+            }
+            StreamOutput::ReasoningSummaryCompleted { key, text } => {
+                let state = self.summaries.entry(key.clone()).or_default();
+                state.started = true;
+                if !text.is_empty() {
+                    state.text.clone_from(text);
+                }
+                state.completed = true;
+            }
+            _ => {}
+        }
+    }
+}
+
+fn summary_key(event: &StreamEvent) -> Option<String> {
+    Some(format!(
+        "reasoning:{}:{}",
+        event.item_id.as_deref()?,
+        event.summary_index?
+    ))
+}
+
+fn assistant_text_phase(value: &str) -> Option<AssistantTextPhase> {
+    match value {
+        "commentary" => Some(AssistantTextPhase::Commentary),
+        "final_answer" => Some(AssistantTextPhase::FinalAnswer),
+        _ => None,
+    }
 }
 
 fn ensure_stream_is_active(completed: bool) -> Result<(), ProviderError> {

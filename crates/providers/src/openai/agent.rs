@@ -7,10 +7,14 @@ use futures_util::{
 use http_client::StatusCode;
 use magenta_core::{
     AgentContinuation, AgentProvider, AgentProviderEvent, AgentProviderStream, AgentRequest,
-    AgentResumeRequest, AgentToolCall, GenerationOutcome, ProviderError, ProviderErrorKind,
+    AgentResumeRequest, AgentToolCall, AssistantTextPhase, GenerationOutcome, ProviderError,
+    ProviderErrorKind,
 };
 
-use super::{OpenAiProvider, StreamEvent, wire::ResponsePayload, wire::ResponsesRequest};
+use super::{
+    OpenAiProvider, StreamEvent, assistant_text_phase,
+    wire::{ResponsePayload, ResponsesRequest, reasoning_summary_parts},
+};
 
 impl AgentProvider for OpenAiProvider {
     fn start(&self, request: AgentRequest) -> AgentProviderStream {
@@ -129,25 +133,11 @@ fn agent_response_stream(
                 if let Some(output) =
                     decode_agent_event(&event.data, &model, &effort, &mut state)?
                 {
-                    match output {
-                        StreamOutput::Text(delta) => {
-                            yield AgentProviderEvent::TextDelta(delta);
-                        }
-                        StreamOutput::AgentTools { calls, continuation } => {
-                            terminal = true;
-                            for call in calls {
-                                yield AgentProviderEvent::ToolCall {
-                                    call,
-                                    continuation: continuation.clone(),
-                                };
-                            }
-                            break;
-                        }
-                        StreamOutput::Completed(outcome) => {
-                            terminal = true;
-                            yield AgentProviderEvent::Completed(outcome);
-                            break;
-                        }
+                    for event in agent_provider_events(&mut state, Some(output), &mut terminal) {
+                        yield event;
+                    }
+                    if terminal {
+                        break;
                     }
                 }
             }
@@ -159,24 +149,8 @@ fn agent_response_stream(
                 .map(|event| decode_agent_event(&event.data, &model, &effort, &mut state))
                 .transpose()?
                 .flatten();
-            match output {
-                Some(StreamOutput::Text(delta)) => {
-                    yield AgentProviderEvent::TextDelta(delta);
-                }
-                Some(StreamOutput::AgentTools { calls, continuation }) => {
-                    terminal = true;
-                    for call in calls {
-                        yield AgentProviderEvent::ToolCall {
-                            call,
-                            continuation: continuation.clone(),
-                        };
-                    }
-                }
-                Some(StreamOutput::Completed(outcome)) => {
-                    terminal = true;
-                    yield AgentProviderEvent::Completed(outcome);
-                }
-                None => {}
+            for event in agent_provider_events(&mut state, output, &mut terminal) {
+                yield event;
             }
         }
 
@@ -187,6 +161,58 @@ fn agent_response_stream(
             ))?;
         }
     }
+}
+
+fn agent_provider_events(
+    state: &mut AgentStreamState,
+    output: Option<StreamOutput>,
+    terminal: &mut bool,
+) -> Vec<AgentProviderEvent> {
+    let mut events = Vec::new();
+    for pending in state.take_pending() {
+        match pending {
+            StreamOutput::ReasoningSummaryStarted { key, title } => {
+                events.push(AgentProviderEvent::ReasoningSummaryStarted { key, title });
+            }
+            StreamOutput::ReasoningSummaryCompleted { key, text } => {
+                events.push(AgentProviderEvent::ReasoningSummaryCompleted { key, text });
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(output) = output {
+        match output {
+            StreamOutput::Text(delta) => events.push(AgentProviderEvent::TextDelta(delta)),
+            StreamOutput::TextWithPhase { delta, phase } => {
+                events.push(AgentProviderEvent::TextDeltaWithPhase { delta, phase });
+            }
+            StreamOutput::ReasoningSummaryStarted { key, title } => {
+                events.push(AgentProviderEvent::ReasoningSummaryStarted { key, title });
+            }
+            StreamOutput::ReasoningSummaryDelta { key, delta } => {
+                events.push(AgentProviderEvent::ReasoningSummaryDelta { key, delta });
+            }
+            StreamOutput::ReasoningSummaryCompleted { key, text } => {
+                events.push(AgentProviderEvent::ReasoningSummaryCompleted { key, text });
+            }
+            StreamOutput::AgentTools {
+                calls,
+                continuation,
+            } => {
+                *terminal = true;
+                events.extend(calls.into_iter().map(|call| AgentProviderEvent::ToolCall {
+                    call,
+                    continuation: continuation.clone(),
+                }));
+            }
+            StreamOutput::Completed(outcome) => {
+                *terminal = true;
+                events.push(AgentProviderEvent::Completed(outcome));
+            }
+        }
+    }
+    events
 }
 
 fn decode_agent_event(
@@ -203,66 +229,146 @@ fn decode_agent_event(
     })?;
     state.observe(&event);
     match event.kind.as_str() {
-        "response.output_text.delta" | "response.refusal.delta" => Ok(event
-            .delta
-            .filter(|delta| !delta.is_empty())
-            .map(StreamOutput::Text)),
+        "response.output_text.delta" | "response.refusal.delta" => {
+            Ok(decode_agent_text(&event, state))
+        }
+        "response.reasoning_summary_part.added" => Ok(decode_summary_part(&event, state)),
+        "response.reasoning_summary_text.delta" => Ok(decode_summary_delta(&event, state)),
+        "response.reasoning_summary_text.done" => Ok(decode_summary_done(&event, state)),
         "response.completed" | "response.done" | "response.incomplete" => {
-            let response = event.response.as_ref().ok_or_else(|| {
-                super::provider_error(
-                    ProviderErrorKind::Protocol,
-                    super::OpenAiProviderError::Protocol(
-                        "agent completion did not contain a response payload".to_owned(),
-                    ),
-                )
-            })?;
-            let output = state.response_output(response);
-            let calls = function_calls(&output)?;
-            if calls.is_empty() {
-                Ok(Some(StreamOutput::Completed(GenerationOutcome::new(
-                    super::parse_finish_reason(response),
-                    super::usage(response),
-                ))))
-            } else {
-                let continuation = state.continuation_items(output);
-                let payload = serde_json::to_vec(&continuation).map_err(|error| {
-                    super::provider_error(
-                        ProviderErrorKind::Protocol,
-                        super::OpenAiProviderError::Protocol(error.to_string()),
-                    )
-                })?;
-                Ok(Some(StreamOutput::AgentTools {
-                    calls,
-                    continuation: AgentContinuation {
-                        provider: super::auth::openai_provider(),
-                        model: magenta_core::ModelId::new(model),
-                        effort: effort.clone(),
-                        payload,
-                    },
-                }))
-            }
+            decode_agent_completion(&event, model, effort, state)
         }
-        "response.failed" | "error" | "response.error" => {
-            let error = event
-                .error
-                .as_ref()
-                .or_else(|| {
-                    event
-                        .response
-                        .as_ref()
-                        .and_then(|response| response.error.as_ref())
-                })
-                .map_or_else(
-                    || "the provider reported an unspecified error".to_owned(),
-                    super::response_error_detail,
-                );
-            Err(super::provider_error(
-                ProviderErrorKind::Protocol,
-                super::OpenAiProviderError::StreamFailed(error),
-            ))
-        }
+        "response.failed" | "error" | "response.error" => Err(agent_stream_error(&event)),
         _ => Ok(None),
     }
+}
+
+fn decode_agent_text(event: &StreamEvent, state: &AgentStreamState) -> Option<StreamOutput> {
+    event
+        .delta
+        .as_ref()
+        .filter(|delta| !delta.is_empty())
+        .map(|delta| {
+            let phase = event
+                .phase
+                .as_deref()
+                .and_then(assistant_text_phase)
+                .or_else(|| state.phase_for(event.item_id.as_deref()));
+            phase.map_or_else(
+                || StreamOutput::Text(delta.clone()),
+                |phase| StreamOutput::TextWithPhase {
+                    delta: delta.clone(),
+                    phase,
+                },
+            )
+        })
+}
+
+fn decode_summary_part(event: &StreamEvent, state: &mut AgentStreamState) -> Option<StreamOutput> {
+    AgentStreamState::summary_key(event)
+        .filter(|key| state.begin_summary(key))
+        .map(|key| StreamOutput::ReasoningSummaryStarted {
+            key,
+            title: "Thinking".to_owned(),
+        })
+}
+
+fn decode_summary_delta(event: &StreamEvent, state: &mut AgentStreamState) -> Option<StreamOutput> {
+    let key = AgentStreamState::summary_key(event)?;
+    let delta = event.delta.as_deref().filter(|delta| !delta.is_empty())?;
+    if !state
+        .summaries
+        .get(&key)
+        .is_some_and(|summary| summary.started)
+    {
+        state.pending.push(StreamOutput::ReasoningSummaryStarted {
+            key: key.clone(),
+            title: "Thinking".to_owned(),
+        });
+    }
+    state.append_summary(&key, delta);
+    Some(StreamOutput::ReasoningSummaryDelta {
+        key,
+        delta: delta.to_owned(),
+    })
+}
+
+fn decode_summary_done(event: &StreamEvent, state: &mut AgentStreamState) -> Option<StreamOutput> {
+    let key = AgentStreamState::summary_key(event)?;
+    let started = state
+        .summaries
+        .get(&key)
+        .is_some_and(|summary| summary.started);
+    let (key, text) = state.finish_summary(&key, event.text.as_deref())?;
+    if !started {
+        state.pending.push(StreamOutput::ReasoningSummaryStarted {
+            key: key.clone(),
+            title: "Thinking".to_owned(),
+        });
+    }
+    Some(StreamOutput::ReasoningSummaryCompleted { key, text })
+}
+
+fn decode_agent_completion(
+    event: &StreamEvent,
+    model: &str,
+    effort: &magenta_core::EffortLevel,
+    state: &mut AgentStreamState,
+) -> Result<Option<StreamOutput>, ProviderError> {
+    let response = event.response.as_ref().ok_or_else(|| {
+        super::provider_error(
+            ProviderErrorKind::Protocol,
+            super::OpenAiProviderError::Protocol(
+                "agent completion did not contain a response payload".to_owned(),
+            ),
+        )
+    })?;
+    let output = state.response_output(response);
+    state.queue_reasoning_fallback(&output);
+    let calls = function_calls(&output)?;
+    if calls.is_empty() {
+        return Ok(Some(StreamOutput::Completed(GenerationOutcome::new(
+            super::parse_finish_reason(response),
+            super::usage(response),
+        ))));
+    }
+
+    let continuation = state.continuation_items(output);
+    let payload = serde_json::to_vec(&continuation).map_err(|error| {
+        super::provider_error(
+            ProviderErrorKind::Protocol,
+            super::OpenAiProviderError::Protocol(error.to_string()),
+        )
+    })?;
+    Ok(Some(StreamOutput::AgentTools {
+        calls,
+        continuation: AgentContinuation {
+            provider: super::auth::openai_provider(),
+            model: magenta_core::ModelId::new(model),
+            effort: effort.clone(),
+            payload,
+        },
+    }))
+}
+
+fn agent_stream_error(event: &StreamEvent) -> ProviderError {
+    let error = event
+        .error
+        .as_ref()
+        .or_else(|| {
+            event
+                .response
+                .as_ref()
+                .and_then(|response| response.error.as_ref())
+        })
+        .map_or_else(
+            || "the provider reported an unspecified error".to_owned(),
+            super::response_error_detail,
+        );
+    super::provider_error(
+        ProviderErrorKind::Protocol,
+        super::OpenAiProviderError::StreamFailed(error),
+    )
 }
 
 fn function_calls(output: &[serde_json::Value]) -> Result<Vec<AgentToolCall>, ProviderError> {
@@ -299,6 +405,16 @@ struct AgentStreamState {
     input_items: Vec<serde_json::Value>,
     output_items: Vec<CapturedItem>,
     arguments: HashMap<String, String>,
+    phases: HashMap<String, AssistantTextPhase>,
+    summaries: HashMap<String, AgentSummaryState>,
+    pending: Vec<StreamOutput>,
+}
+
+#[derive(Default)]
+struct AgentSummaryState {
+    text: String,
+    started: bool,
+    completed: bool,
 }
 
 impl AgentStreamState {
@@ -313,6 +429,15 @@ impl AgentStreamState {
         match event.kind.as_str() {
             "response.output_item.added" | "response.output_item.done" => {
                 if let Some(item) = event.item.clone() {
+                    if item.get("type").and_then(serde_json::Value::as_str) == Some("message")
+                        && let Some(id) = item.get("id").and_then(serde_json::Value::as_str)
+                        && let Some(phase) = item
+                            .get("phase")
+                            .and_then(serde_json::Value::as_str)
+                            .and_then(assistant_text_phase)
+                    {
+                        self.phases.insert(id.to_owned(), phase);
+                    }
                     self.upsert_item(item, event.output_index);
                 }
             }
@@ -343,6 +468,71 @@ impl AgentStreamState {
         }
     }
 
+    fn phase_for(&self, item_id: Option<&str>) -> Option<AssistantTextPhase> {
+        item_id.and_then(|item_id| self.phases.get(item_id).copied())
+    }
+
+    fn summary_key(event: &StreamEvent) -> Option<String> {
+        Some(format!(
+            "reasoning:{}:{}",
+            event.item_id.as_deref()?,
+            event.summary_index?
+        ))
+    }
+
+    fn begin_summary(&mut self, key: &str) -> bool {
+        let state = self.summaries.entry(key.to_owned()).or_default();
+        if state.started {
+            return false;
+        }
+        state.started = true;
+        true
+    }
+
+    fn append_summary(&mut self, key: &str, delta: &str) {
+        let state = self.summaries.entry(key.to_owned()).or_default();
+        state.started = true;
+        state.text.push_str(delta);
+    }
+
+    fn finish_summary(&mut self, key: &str, text: Option<&str>) -> Option<(String, String)> {
+        let state = self.summaries.entry(key.to_owned()).or_default();
+        if state.completed {
+            return None;
+        }
+        state.started = true;
+        if let Some(text) = text.filter(|text| !text.is_empty()) {
+            text.clone_into(&mut state.text);
+        }
+        state.completed = true;
+        Some((key.to_owned(), state.text.clone()))
+    }
+
+    fn queue_reasoning_fallback(&mut self, output: &[serde_json::Value]) {
+        for (item_id, summary_index, text) in reasoning_summary_parts(output) {
+            let key = format!("reasoning:{item_id}:{summary_index}");
+            let state = self.summaries.entry(key.clone()).or_default();
+            if state.completed {
+                continue;
+            }
+            if !state.started {
+                state.started = true;
+                self.pending.push(StreamOutput::ReasoningSummaryStarted {
+                    key: key.clone(),
+                    title: "Thinking".to_owned(),
+                });
+            }
+            state.text.clone_from(&text);
+            state.completed = true;
+            self.pending
+                .push(StreamOutput::ReasoningSummaryCompleted { key, text });
+        }
+    }
+
+    fn take_pending(&mut self) -> Vec<StreamOutput> {
+        std::mem::take(&mut self.pending)
+    }
+
     fn response_output(&self, response: &ResponsePayload) -> Vec<serde_json::Value> {
         if response.output.is_empty() {
             return self
@@ -352,17 +542,16 @@ impl AgentStreamState {
                 .collect();
         }
 
-        if response.output.iter().any(is_function_call) {
-            return response.output.clone();
-        }
-
         let mut output = response.output.clone();
-        output.extend(
-            self.output_items
-                .iter()
-                .filter(|item| is_function_call(&item.value))
-                .map(|item| item.value.clone()),
-        );
+        for item in &self.output_items {
+            let duplicate = output.iter().any(|candidate| {
+                item_key(candidate, None).is_some()
+                    && item_key(candidate, None) == Some(item.key.clone())
+            });
+            if !duplicate {
+                output.push(item.value.clone());
+            }
+        }
         output
     }
 
@@ -426,6 +615,22 @@ fn protocol_error(message: &str) -> ProviderError {
 
 enum StreamOutput {
     Text(String),
+    TextWithPhase {
+        delta: String,
+        phase: AssistantTextPhase,
+    },
+    ReasoningSummaryStarted {
+        key: String,
+        title: String,
+    },
+    ReasoningSummaryDelta {
+        key: String,
+        delta: String,
+    },
+    ReasoningSummaryCompleted {
+        key: String,
+        text: String,
+    },
     AgentTools {
         calls: Vec<AgentToolCall>,
         continuation: AgentContinuation,
