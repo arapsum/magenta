@@ -20,13 +20,17 @@ pub fn agent_stream(
     Box::pin(async_stream::try_stream! {
         let mut loop_guard = AgentLoopGuard::default();
         let provider_id = request.generation.provider.clone();
+
         let mut provider_stream = context.provider.start(request.clone());
+
         let mut first_started = false;
+
         let permissions = Arc::new(Mutex::new(AgentRunPermissions::default()));
 
         loop {
             let mut calls = Vec::new();
             let mut continuation = None;
+
             while let Some(event) = provider_stream.next().await {
                 match event? {
                     AgentProviderEvent::Started => {
@@ -59,14 +63,17 @@ pub fn agent_stream(
                 ))?;
                 unreachable!();
             };
+
             loop_guard
                 .accept_batch(&calls)
                 .map_err(|error| loop_guard_error(&provider_id, error))?;
+
             for call in calls.iter().cloned() {
                 yield AgentRunEvent::ToolCall(call);
             }
 
             let mut outputs = Vec::with_capacity(calls.len());
+
             let mut tool_stream = tool::execute_tools(
                 context.clone(),
                 calls,
@@ -104,6 +111,7 @@ impl AgentLoopGuard {
     fn accept_batch(&mut self, calls: &[AgentToolCall]) -> Result<(), AgentLoopFailure> {
         let observed_rounds = self.rounds.saturating_add(1);
         let observed_tool_calls = self.tool_calls.saturating_add(calls.len());
+
         if observed_rounds > MAX_AGENT_ROUNDS || observed_tool_calls > MAX_AGENT_TOOL_CALLS {
             return Err(AgentLoopFailure::Limit {
                 observed_rounds,
@@ -112,6 +120,7 @@ impl AgentLoopGuard {
         }
 
         let fingerprint = tool_batch_fingerprint(calls);
+
         if fingerprint.is_empty() {
             self.last_batch_fingerprint = None;
             self.consecutive_identical_batches = 0;
@@ -121,12 +130,14 @@ impl AgentLoopGuard {
             self.last_batch_fingerprint = Some(fingerprint);
             self.consecutive_identical_batches = 1;
         }
+
         if self.consecutive_identical_batches >= 3 {
             return Err(AgentLoopFailure::Repeated);
         }
 
         self.rounds = observed_rounds;
         self.tool_calls = observed_tool_calls;
+
         Ok(())
     }
 }
@@ -197,11 +208,13 @@ fn canonical_json(value: &serde_json::Value) -> String {
         }
         serde_json::Value::Array(values) => {
             let values = values.iter().map(canonical_json).collect::<Vec<_>>();
+
             format!("[{}]", values.join(","))
         }
         serde_json::Value::Object(values) => {
             let mut entries = values.iter().collect::<Vec<_>>();
             entries.sort_unstable_by_key(|(left, _)| *left);
+
             let entries = entries
                 .into_iter()
                 .map(|(key, value)| {
@@ -210,6 +223,7 @@ fn canonical_json(value: &serde_json::Value) -> String {
                     format!("{key}:{}", canonical_json(value))
                 })
                 .collect::<Vec<_>>();
+
             format!("{{{}}}", entries.join(","))
         }
     }

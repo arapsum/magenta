@@ -130,8 +130,10 @@ impl ConversationView {
             })
             .filter_map(|activity| self.render_command_activity(message, activity, cx))
             .collect::<Vec<_>>();
+
         let rows = build_activity_rows(message);
         let mut content = v_flex().w_full().gap(px(8.));
+
         if let Some(command_section) = self.render_command_section(message, commands, cx, view) {
             content = content.child(command_section);
         }
@@ -155,6 +157,7 @@ impl ConversationView {
 
         let message_id = message.id;
         let command_count = commands.len();
+
         let command_view = view.clone();
         let command_open = self.activity_section_is_open(message, ActivitySection::Commands);
         let command_label = if command_count == 1 {
@@ -204,6 +207,7 @@ impl ConversationView {
 
         let message_id = message.id;
         let tool_call_count = rows.len();
+
         let activity_accordion = self.render_activity_accordion(message_id, rows, cx, view);
         let tool_view = view.clone();
         let tool_open = self.activity_section_is_open(message, ActivitySection::ToolCalls);
@@ -252,6 +256,7 @@ impl ConversationView {
             .iter()
             .map(|row| row.call_id.clone())
             .collect::<Vec<_>>();
+
         let activity_view = view.clone();
         let mut accordion = Accordion::new(("agent-activity", message_id.0))
             .multiple(true)
@@ -299,6 +304,7 @@ impl ConversationView {
         let live = self
             .live_commands
             .get(&(message.id, activity.call_id.clone()));
+
         let pending_command = self
             .pending_agent_approval
             .as_ref()
@@ -315,11 +321,13 @@ impl ConversationView {
             .map(|live| live.command.clone())
             .or(pending_command)
             .or_else(|| serde_json::from_str::<WorkspaceCommand>(&activity.detail).ok())?;
+
         let result_activity = message.agent_activities.iter().rev().find(|candidate| {
             candidate.call_id == activity.call_id && candidate.kind == AgentActivityKind::ToolResult
         });
         let persisted_result = result_activity
             .and_then(|result| serde_json::from_str::<WorkspaceCommandResult>(&result.detail).ok());
+
         let result = live
             .and_then(|live| live.result.as_ref())
             .or(persisted_result.as_ref());
@@ -331,6 +339,7 @@ impl ConversationView {
             || result.map_or("", |result| result.stderr.as_str()),
             |live| live.stderr.as_str(),
         );
+
         let pending = self
             .pending_agent_approval
             .as_ref()
@@ -366,6 +375,7 @@ impl ConversationView {
                 WorkspaceCommandStatus::Failed => ("Failed", cx.theme().danger),
             },
         );
+
         let mut output = match (stdout.is_empty(), stderr.is_empty()) {
             (false, false) => format!("{stdout}\n{stderr}"),
             (false, true) => stdout.to_owned(),

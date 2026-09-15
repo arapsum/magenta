@@ -66,17 +66,22 @@ impl ConversationView {
             context_report,
         } = pending;
         let provider_id = conversation.generation.provider.clone();
+
         self.cancel_generation(cx);
+
         let user = Self::rendered_message(user_message, cx);
         if self.conversation.is_some() {
             self.origins
                 .insert(assistant_message.id, conversation.generation);
         }
+
         let assistant = Self::rendered_message(assistant_message, cx);
         let old_count = self.messages.len();
         let assistant_id = assistant.message.id;
+
         self.messages.push(user);
         self.messages.push(assistant);
+
         self.set_pending_metadata(
             self.messages[old_count].message.id,
             user_sequence,
@@ -85,6 +90,7 @@ impl ConversationView {
             context_report.omitted_messages,
             cx,
         );
+
         if self.trim_oldest_to_limit(cx) == 0 {
             self.list_state.splice(old_count..old_count, 2);
         } else {
@@ -113,14 +119,18 @@ impl ConversationView {
             context_report,
             ..
         } = pending;
+
         self.cancel_generation(cx);
         self.conversation = Some(conversation.clone());
         self.origins
             .insert(assistant_message.id, conversation.generation.clone());
+
         let assistant = Self::rendered_message(assistant_message, cx);
         let old_count = self.messages.len();
         let assistant_id = assistant.message.id;
+
         self.messages.push(assistant);
+
         self.set_pending_metadata(
             MessageId(0),
             magenta_core::MessageSequence(0),
@@ -129,6 +139,7 @@ impl ConversationView {
             context_report.omitted_messages,
             cx,
         );
+
         if self.trim_oldest_to_limit(cx) == 0 {
             self.list_state.splice(old_count..old_count, 1);
         } else {
@@ -158,12 +169,14 @@ impl ConversationView {
     ) {
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
+
         self.streaming_message = Some(assistant_id);
         self.generation_progress = Some(GenerationProgress::new(
             assistant_id,
             provider_id.clone(),
             self.origins.get(&assistant_id).cloned(),
         ));
+
         self.start_generation_clock(generation, assistant_id, window, cx);
         self.generation_task = Some(cx.spawn_in(window, async move |view, window| {
             let mut completed = None;
@@ -286,6 +299,7 @@ impl ConversationView {
         cx: &mut Context<'_, Self>,
     ) {
         self.pending_agent_approval = Some((assistant_id, approval.clone()));
+
         let detail = match &approval.subject {
             AgentApprovalSubject::Workspace { diff, .. } => diff.clone().unwrap_or_default(),
             AgentApprovalSubject::Command(command) => command.display(),
@@ -313,6 +327,7 @@ impl ConversationView {
         cx: &mut Context<'_, Self>,
     ) {
         let tool_name = self.tool_name_for_result(assistant_id, &result.call_id);
+
         if tool_name == "run_command"
             && let Ok(command_result) =
                 serde_json::from_str::<WorkspaceCommandResult>(&result.output)
@@ -324,6 +339,7 @@ impl ConversationView {
             command.stderr.clone_from(&command_result.stderr);
             command.result = Some(command_result);
         }
+
         self.pending_agent_approval = None;
         self.push_agent_activity(
             generation,
@@ -406,6 +422,7 @@ fn append_bounded(output: &mut String, chunk: &str) {
     if output.len() <= MAX_LIVE_OUTPUT_BYTES {
         return;
     }
+
     let mut start = output.len() - MAX_LIVE_OUTPUT_BYTES;
     while !output.is_char_boundary(start) {
         start += 1;

@@ -441,7 +441,9 @@ async fn reject_workspace_tool(
         change.state = WorkspaceChangeState::Rejected;
         change
     });
+
     let output = rejected_output(&call.id, "the user rejected this operation");
+
     record_result(
         &context.store,
         context.run_id,
@@ -466,6 +468,7 @@ async fn prepare_tool(
 ) -> Result<PreparedTool, String> {
     let operation = parse_operation(call)?;
     let path = operation.path().to_owned();
+
     record_activity(
         store,
         run_id,
@@ -486,6 +489,7 @@ async fn prepare_tool(
         .prepare(root.to_path_buf(), operation.clone(), false)
         .await
         .map_err(|error| workspace_error_detail(&error))?;
+
     Ok(PreparedTool {
         call: call.clone(),
         operation,
@@ -499,6 +503,7 @@ async fn finish_tool(
     preview: WorkspacePreview,
 ) -> Result<(AgentToolOutput, Option<AgentWorkspaceChange>), String> {
     let proposed = workspace_change(call, &preview, WorkspaceChangeState::Proposed);
+
     let output = if let Some(mutation) = preview.mutation {
         match context
             .workspace
@@ -519,6 +524,7 @@ async fn finish_tool(
             is_error: false,
         }
     };
+
     record_result(
         &context.store,
         context.run_id,
@@ -528,6 +534,7 @@ async fn finish_tool(
         &output,
     )
     .await?;
+
     let change = proposed.map(|mut change| {
         if output.is_error {
             change.state = WorkspaceChangeState::Failed;
@@ -537,6 +544,7 @@ async fn finish_tool(
         }
         change
     });
+
     Ok((output, change))
 }
 
@@ -599,6 +607,7 @@ async fn record_failure(
     provider_id: &ProviderId,
 ) -> Result<AgentToolOutput, magenta_core::ProviderError> {
     let output = failed_output(&call.id, message);
+
     record_result(
         &context.store,
         context.run_id,
@@ -662,6 +671,7 @@ pub(super) async fn record_activity(
     let Some(run_id) = run_id else {
         return Ok(());
     };
+
     store
         .append_agent_activity(magenta_core::AgentActivityRecord {
             run_id,
@@ -705,6 +715,7 @@ pub(super) async fn record_result(
 pub fn parse_operation(call: &AgentToolCall) -> Result<WorkspaceOperation, String> {
     let value: serde_json::Value = serde_json::from_str(&call.arguments)
         .map_err(|error| format!("invalid tool arguments: {error}"))?;
+
     let string = |name: &str| {
         value
             .get(name)
@@ -712,6 +723,7 @@ pub fn parse_operation(call: &AgentToolCall) -> Result<WorkspaceOperation, Strin
             .map(ToOwned::to_owned)
             .ok_or_else(|| format!("tool argument {name} must be a string"))
     };
+
     let path_or_root = |name: &str| {
         string(name).map(|path| {
             if path.is_empty() {
@@ -721,6 +733,7 @@ pub fn parse_operation(call: &AgentToolCall) -> Result<WorkspaceOperation, Strin
             }
         })
     };
+
     match call.name.as_str() {
         "list_files" => Ok(WorkspaceOperation::ListFiles {
             path: path_or_root("path")?,

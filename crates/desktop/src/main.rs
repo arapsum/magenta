@@ -205,6 +205,7 @@ fn run_application(diagnostics_error: Option<MagentaError>, launch_failed: Rc<Ce
 
     app.run(move |cx: &mut App| {
         initialize_application(cx);
+
         let startup_warnings = collect_startup_warnings(diagnostics_error, cx);
         launch_main_window(startup_warnings, &launch_failed, cx);
     });
@@ -219,6 +220,7 @@ fn initialize_application(cx: &mut App) {
         "starting Magenta"
     );
     cx.set_app_identity("magenta-1", "Magenta");
+
     gpui_kit::init(cx);
     magenta_ui::init_settings(cx);
 }
@@ -277,11 +279,13 @@ const fn exit_code(launch_failed: bool) -> ExitCode {
 
 fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     let window_options = main_window_options(cx);
+
     let provider = Arc::new(OpenAiProvider::new());
     let chat_provider: Arc<dyn ChatProvider> = provider.clone();
     let agent_provider: Arc<dyn AgentProvider> = provider.clone();
     let authenticator: Arc<dyn ProviderAuthenticator> = provider.clone();
     let model_catalog: Arc<dyn ModelCatalog> = provider;
+
     let data_dir = dirs::data_local_dir().ok_or_else(|| MagentaError::StorageInitialize {
         source: magenta_core::StorageError::new(
             magenta_core::StorageErrorKind::Unavailable,
@@ -321,6 +325,7 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     let settings_store: Arc<dyn SettingsStore> = Arc::new(magenta_storage::TomlSettingsStore::new(
         config_dir.join("magenta/settings.toml"),
     ));
+
     let send_message = SendMessage::new(Arc::clone(&chat_provider), Arc::clone(&store));
     let regenerate_provider = Arc::clone(&chat_provider);
     let regenerate_store = Arc::clone(&store);

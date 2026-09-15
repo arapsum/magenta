@@ -456,6 +456,7 @@ impl RunWorkspaceAgent {
             request,
             receiver,
         );
+
         Ok(PendingAgentGeneration {
             conversation: prepared.conversation,
             user_message: prepared.user_message,
