@@ -102,3 +102,10 @@ pub trait WorkspaceAccess: Send + Sync {
 
     fn commit(&self, root: PathBuf, mutation: WorkspaceMutation) -> WorkspaceFuture<String>;
 }
+
+/// A workspace whose writes remain isolated until an explicit final review.
+pub trait WorkspaceSessionAccess: WorkspaceAccess {
+    fn start_session(&self, root: PathBuf, session_id: String) -> WorkspaceFuture<PathBuf>;
+    fn apply_session(&self, root: PathBuf, session_id: String) -> WorkspaceFuture<Vec<String>>;
+    fn discard_session(&self, root: PathBuf, session_id: String) -> WorkspaceFuture<()>;
+}

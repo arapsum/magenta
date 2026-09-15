@@ -63,6 +63,7 @@ fn agent_request_encodes_strict_workspace_tools_and_instructions() {
             mutating: false,
             protected_read: true,
         }],
+        retrieved_context: Vec::new(),
     };
 
     let value = serde_json::to_value(

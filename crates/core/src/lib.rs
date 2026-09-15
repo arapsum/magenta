@@ -24,10 +24,14 @@ mod workspace;
 
 pub use agent::{
     AgentActivity, AgentActivityKind, AgentActivityRecord, AgentApprovalDecision,
-    AgentApprovalRequest, AgentApprovalSubject, AgentContinuation, AgentProvider,
-    AgentProviderEvent, AgentProviderStream, AgentRequest, AgentResumeRequest, AgentRunEvent,
-    AgentRunStream, AgentToolCall, AgentToolDefinition, AgentToolOutput, AgentWorkspaceChange,
-    ConversationMode, WorkspaceChangeKind, WorkspaceChangeState,
+    AgentApprovalRequest, AgentApprovalSubject, AgentContentCache, AgentContinuation,
+    AgentDataFuture, AgentMemory, AgentMemoryStore, AgentProvider, AgentProviderEvent,
+    AgentProviderStream, AgentRequest, AgentResumeRequest, AgentRunEvent, AgentRunStream,
+    AgentSession, AgentSessionState, AgentSessionStore, AgentToolCall, AgentToolDefinition,
+    AgentToolOutput, AgentWorkspaceChange, CachedContent, CodeChunk, CodeIndex,
+    CodeIndexMaintainer, CodeIndexReport, CodeMatch, ConversationMode, EmbeddingProvider,
+    MemoryKind, MemoryMatch, MemoryState, NewAgentMemory, RetrievedContextBlock,
+    RetrievedContextKind, WorkspaceChangeKind, WorkspaceChangeState,
 };
 pub use auth::{
     AuthenticationFuture, AuthorizationSession, ProviderAccount, ProviderAuthenticator,
@@ -70,5 +74,5 @@ pub use storage::{
 };
 pub use workspace::{
     WorkspaceAccess, WorkspaceError, WorkspaceFuture, WorkspaceMutation, WorkspaceOperation,
-    WorkspacePreview,
+    WorkspacePreview, WorkspaceSessionAccess,
 };

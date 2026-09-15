@@ -1,3 +1,12 @@
+mod data;
+
+pub use data::{
+    AgentContentCache, AgentDataFuture, AgentMemory, AgentMemoryStore, AgentSession,
+    AgentSessionState, AgentSessionStore, CachedContent, CodeChunk, CodeIndex, CodeIndexMaintainer,
+    CodeIndexReport, CodeMatch, EmbeddingProvider, MemoryKind, MemoryMatch, MemoryState,
+    NewAgentMemory, RetrievedContextBlock, RetrievedContextKind,
+};
+
 use std::pin::Pin;
 
 use futures_core::Stream;
@@ -8,12 +17,14 @@ use crate::{
     MessageId, ModelId, ProviderError, ProviderId, WorkspaceCommand, WorkspaceCommandOutputStream,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AgentRequest {
     pub generation: GenerationConfig,
     pub messages: Vec<Message>,
     pub instructions: String,
     pub tools: Vec<AgentToolDefinition>,
+    /// Ranked, project-scoped context selected independently from chat history.
+    pub retrieved_context: Vec<RetrievedContextBlock>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -140,6 +151,7 @@ pub enum WorkspaceChangeKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorkspaceChangeState {
     Proposed,
+    Staged,
     Committed,
     Rejected,
     Failed,
