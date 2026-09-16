@@ -1,109 +1,13 @@
-use std::collections::HashMap;
+use super::*;
 
-use futures_util::{
-    StreamExt as _,
-    io::{AsyncBufReadExt as _, BufReader},
-};
-use http_client::StatusCode;
-use magenta_core::{
-    AgentContinuation, AgentProvider, AgentProviderEvent, AgentProviderStream, AgentRequest,
-    AgentResumeRequest, AgentToolCall, AssistantTextPhase, GenerationOutcome, ProviderError,
-    ProviderErrorKind,
-};
-
-use super::{
-    OpenAiProvider, StreamEvent, assistant_text_phase,
-    wire::{ResponsePayload, ResponsesRequest, reasoning_summary_parts},
-};
-
-impl AgentProvider for OpenAiProvider {
-    fn start(&self, request: AgentRequest) -> AgentProviderStream {
-        let provider = self.clone();
-        Box::pin(async_stream::try_stream! {
-            let wire_request = ResponsesRequest::from_agent_request(&request).map_err(|message| {
-                super::provider_error(
-                    ProviderErrorKind::InvalidRequest,
-                    super::OpenAiProviderError::Protocol(message),
-                )
-            })?;
-            let stream = provider.agent_stream_inner(
-                wire_request,
-                request.generation.model.0,
-                request.generation.effort,
-            ).await?;
-            futures_util::pin_mut!(stream);
-            while let Some(event) = stream.next().await {
-                yield event?;
-            }
-        })
-    }
-
-    fn resume(&self, request: AgentResumeRequest) -> AgentProviderStream {
-        let provider = self.clone();
-        Box::pin(async_stream::try_stream! {
-            let wire_request = ResponsesRequest::from_resume(
-                &request,
-                &request.continuation.model.0,
-                &request.continuation.effort,
-            ).map_err(|message| {
-                super::provider_error(
-                    ProviderErrorKind::InvalidRequest,
-                    super::OpenAiProviderError::Protocol(message),
-                )
-            })?;
-            let stream = provider.agent_stream_inner(
-                wire_request,
-                request.continuation.model.0,
-                request.continuation.effort,
-            ).await?;
-            futures_util::pin_mut!(stream);
-            while let Some(event) = stream.next().await {
-                yield event?;
-            }
-        })
-    }
-}
-
-impl OpenAiProvider {
-    async fn agent_stream_inner(
-        &self,
-        request: ResponsesRequest,
-        model: String,
-        effort: magenta_core::EffortLevel,
-    ) -> Result<
-        impl futures_util::Stream<Item = Result<AgentProviderEvent, ProviderError>>,
-        ProviderError,
-    > {
-        let input = request.input.as_array().cloned().ok_or_else(|| {
-            super::provider_error(
-                ProviderErrorKind::InvalidRequest,
-                super::OpenAiProviderError::Protocol(
-                    "agent request input must be an array".to_owned(),
-                ),
-            )
-        })?;
-        let mut access_token = self.auth.access_token().await?;
-        let mut response = self.send_responses(&access_token, &request).await?;
-        if response.status() == StatusCode::UNAUTHORIZED {
-            access_token = self.auth.force_refresh(&access_token).await?;
-            response = self.send_responses(&access_token, &request).await?;
-        }
-        if !response.status().is_success() {
-            return Err(self.http_error(response).await);
-        }
-
-        Ok(agent_response_stream(response, model, effort, input))
-    }
-}
-
-fn agent_response_stream(
+pub(super) fn agent_response_stream(
     response: http_client::Response<http_client::AsyncBody>,
     model: String,
     effort: magenta_core::EffortLevel,
     input: Vec<serde_json::Value>,
 ) -> impl futures_util::Stream<Item = Result<AgentProviderEvent, ProviderError>> {
     async_stream::try_stream! {
-        let mut decoder = super::sse::EventDecoder::default();
+        let mut decoder = super::super::sse::EventDecoder::default();
         let mut reader = BufReader::new(response.into_body());
         let mut line = String::new();
         let mut state = AgentStreamState::with_input(input);
@@ -113,9 +17,9 @@ fn agent_response_stream(
         loop {
             line.clear();
             let count = reader.read_line(&mut line).await.map_err(|error| {
-                super::provider_error(
+                super::super::provider_error(
                     ProviderErrorKind::Transport,
-                    super::OpenAiProviderError::Transport(error.to_string()),
+                    super::super::OpenAiProviderError::Transport(error.to_string()),
                 )
             })?;
             if count == 0 {
@@ -123,9 +27,9 @@ fn agent_response_stream(
             }
             if let Some(event) = decoder.push_line(&line) {
                 if terminal {
-                    Err::<(), _>(super::provider_error(
+                    Err::<(), _>(super::super::provider_error(
                         ProviderErrorKind::Protocol,
-                        super::OpenAiProviderError::Protocol(
+                        super::super::OpenAiProviderError::Protocol(
                             "received data after the agent step completed".to_owned(),
                         ),
                     ))?;
@@ -155,9 +59,9 @@ fn agent_response_stream(
         }
 
         if !terminal {
-            Err::<(), _>(super::provider_error(
+            Err::<(), _>(super::super::provider_error(
                 ProviderErrorKind::Protocol,
-                super::OpenAiProviderError::IncompleteStream,
+                super::super::OpenAiProviderError::IncompleteStream,
             ))?;
         }
     }
@@ -222,9 +126,9 @@ fn decode_agent_event(
     state: &mut AgentStreamState,
 ) -> Result<Option<StreamOutput>, ProviderError> {
     let event = serde_json::from_str::<StreamEvent>(data).map_err(|error| {
-        super::provider_error(
+        super::super::provider_error(
             ProviderErrorKind::Protocol,
-            super::OpenAiProviderError::Protocol(error.to_string()),
+            super::super::OpenAiProviderError::Protocol(error.to_string()),
         )
     })?;
     state.observe(&event);
@@ -316,9 +220,9 @@ fn decode_agent_completion(
     state: &mut AgentStreamState,
 ) -> Result<Option<StreamOutput>, ProviderError> {
     let response = event.response.as_ref().ok_or_else(|| {
-        super::provider_error(
+        super::super::provider_error(
             ProviderErrorKind::Protocol,
-            super::OpenAiProviderError::Protocol(
+            super::super::OpenAiProviderError::Protocol(
                 "agent completion did not contain a response payload".to_owned(),
             ),
         )
@@ -328,22 +232,22 @@ fn decode_agent_completion(
     let calls = function_calls(&output)?;
     if calls.is_empty() {
         return Ok(Some(StreamOutput::Completed(GenerationOutcome::new(
-            super::parse_finish_reason(response),
-            super::usage(response),
+            super::super::parse_finish_reason(response),
+            super::super::usage(response),
         ))));
     }
 
     let continuation = state.continuation_items(output);
     let payload = serde_json::to_vec(&continuation).map_err(|error| {
-        super::provider_error(
+        super::super::provider_error(
             ProviderErrorKind::Protocol,
-            super::OpenAiProviderError::Protocol(error.to_string()),
+            super::super::OpenAiProviderError::Protocol(error.to_string()),
         )
     })?;
     Ok(Some(StreamOutput::AgentTools {
         calls,
         continuation: AgentContinuation {
-            provider: super::auth::openai_provider(),
+            provider: super::super::auth::openai_provider(),
             model: magenta_core::ModelId::new(model),
             effort: effort.clone(),
             payload,
@@ -363,11 +267,11 @@ fn agent_stream_error(event: &StreamEvent) -> ProviderError {
         })
         .map_or_else(
             || "the provider reported an unspecified error".to_owned(),
-            super::response_error_detail,
+            super::super::response_error_detail,
         );
-    super::provider_error(
+    super::super::provider_error(
         ProviderErrorKind::Protocol,
-        super::OpenAiProviderError::StreamFailed(error),
+        super::super::OpenAiProviderError::StreamFailed(error),
     )
 }
 
@@ -607,9 +511,9 @@ struct CapturedItem {
 }
 
 fn protocol_error(message: &str) -> ProviderError {
-    super::provider_error(
+    super::super::provider_error(
         ProviderErrorKind::Protocol,
-        super::OpenAiProviderError::Protocol(message.to_owned()),
+        super::super::OpenAiProviderError::Protocol(message.to_owned()),
     )
 }
 
@@ -639,5 +543,5 @@ enum StreamOutput {
 }
 
 #[cfg(test)]
-#[path = "../../test/openai/agent.rs"]
+#[path = "../../../test/openai/agent.rs"]
 mod tests;
