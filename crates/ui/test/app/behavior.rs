@@ -206,7 +206,7 @@ fn collapsed_sidebar_workbench_fills_a_wide_window(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn failed_finalization_retains_response_until_retry_before_navigation(cx: &mut TestAppContext) {
+fn failed_finalization_remains_retryable_after_navigation(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     ports.fail_save.store(true, Ordering::SeqCst);
     let (window, view) = setup(cx, ports.clone());
@@ -236,11 +236,16 @@ fn failed_finalization_retains_response_until_retry_before_navigation(cx: &mut T
     window
         .update(cx, |_, window, cx| {
             view.update(cx, |main, cx| {
-                assert_eq!(main.unsaved.as_ref(), Some(&response));
+                assert_eq!(
+                    main.response_runs.message_for_save(MessageId(7)).as_ref(),
+                    Some(&response)
+                );
+                assert!(main.response_runs.has_unsaved_for(Some(ConversationId(1))));
                 assert_eq!(main.operation, Operation::Idle);
                 main.navigate(None, window, cx);
-                assert_eq!(main.active_conversation, Some(ConversationId(1)));
+                assert_eq!(main.active_conversation, None);
                 assert!(!main.request_close(window, cx));
+                main.active_conversation = Some(ConversationId(1));
             });
         })
         .unwrap();
@@ -252,8 +257,8 @@ fn failed_finalization_retains_response_until_retry_before_navigation(cx: &mut T
         .unwrap();
     cx.run_until_parked();
     view.read_with(cx, |main, _| {
-        assert!(main.unsaved.is_none());
-        assert!(main.active_conversation.is_none());
+        assert!(!main.response_runs.has_unsaved_for(Some(ConversationId(1))));
+        assert_eq!(main.active_conversation, Some(ConversationId(1)));
     });
     assert_eq!(ports.saves.lock().as_slice(), &[response.clone(), response]);
 }
