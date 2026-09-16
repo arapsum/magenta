@@ -1,4 +1,4 @@
-use gpui_kit::component::{accordion::Accordion, shimmer::ShimmerText};
+use gpui_kit::component::{accordion::Accordion, shimmer::ShimmerText, spinner::Spinner};
 
 use super::super::*;
 
@@ -141,29 +141,14 @@ impl ConversationView {
         view: &Entity<Self>,
     ) -> AnyElement {
         let message_id = message.id;
-        let mut entries = message.assistant_trace.entries.clone();
-        entries.sort_by_key(|entry| entry.sequence);
+        let mut rows = v_flex()
+            .w_full()
+            .gap(px(2.))
+            .flex_col_reverse()
+            .max_h(TRACE_VIEWPORT_MAX_HEIGHT)
+            .overflow_y_scrollbar();
 
-        let entry_keys = entries
-            .iter()
-            .map(|entry| entry.key.clone())
-            .collect::<Vec<_>>();
-        let entry_view = view.clone();
-        let mut rows = Accordion::new(("assistant-trace-entries", message_id.0))
-            .multiple(true)
-            .bordered(false)
-            .small()
-            .on_toggle_click(move |open_indices, _, cx| {
-                entry_view.update(cx, |view, cx| {
-                    for (index, key) in entry_keys.iter().enumerate() {
-                        view.trace_entry_overrides
-                            .insert((message_id, key.clone()), open_indices.contains(&index));
-                    }
-                    cx.notify();
-                });
-            });
-
-        for entry in entries {
+        for entry in trace_entries_for_timeline(message) {
             let default_open = entry.kind == AssistantTraceKind::ReasoningSummary;
             let open = self
                 .trace_entry_overrides
@@ -172,12 +157,62 @@ impl ConversationView {
                 .unwrap_or(default_open);
             let title = Self::render_trace_entry_title(&entry, cx);
             let detail = Self::render_trace_entry_detail(&entry, cx);
-            rows = rows.item(|item| {
-                item.open(open)
-                    .title(title)
-                    .hover(|this| this.bg(cx.theme().accent.opacity(0.35)))
-                    .child(detail)
+            let entry_key = entry.key.clone();
+            let entry_view = view.clone();
+            let disclosure_label = if open {
+                format!("Collapse {} details", entry.title)
+            } else {
+                format!("Expand {} details", entry.title)
+            };
+            let disclosure = Button::new(format!(
+                "assistant-trace-entry-{}-{}",
+                message_id.0, entry.key
+            ))
+            .ghost()
+            .xsmall()
+            .compact()
+            .w_full()
+            .toggled(open)
+            .accessibility_label(disclosure_label)
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap(px(7.))
+                    .child(title)
+                    .child(
+                        Icon::new(if open {
+                            IconName::ChevronUp
+                        } else {
+                            IconName::ChevronDown
+                        })
+                        .xsmall()
+                        .text_color(cx.theme().muted_foreground),
+                    ),
+            )
+            .on_click(move |_, _, cx| {
+                entry_view.update(cx, |view, cx| {
+                    view.trace_entry_overrides
+                        .insert((message_id, entry_key.clone()), !open);
+                    cx.notify();
+                });
             });
+            let row = v_flex()
+                .w_full()
+                .flex_none()
+                .child(disclosure)
+                .when(open, |this| {
+                    this.child(
+                        div()
+                            .w_full()
+                            .pl(px(26.))
+                            .pr(px(8.))
+                            .pb(px(6.))
+                            .child(detail),
+                    )
+                })
+                .hover(|this| this.bg(cx.theme().accent.opacity(0.35)));
+            rows = rows.child(row);
         }
 
         let trace_view = view.clone();
@@ -193,11 +228,6 @@ impl ConversationView {
             });
         accordion = accordion.item(|item| {
             item.open(trace_open)
-                .icon(
-                    Icon::new(IconName::LoaderCircle)
-                        .small()
-                        .text_color(cx.theme().muted_foreground),
-                )
                 .title(self.render_trace_header(message, cx, view))
                 .hover(|this| this.bg(cx.theme().accent.opacity(0.45)))
                 .child(v_flex().w_full().gap(px(4.)).child(rows))
@@ -227,6 +257,9 @@ impl ConversationView {
         h_flex()
             .items_center()
             .gap(px(8.))
+            .when(active && !final_answer_started, |this| {
+                this.child(Spinner::new().xsmall().color(cx.theme().warning))
+            })
             .child(label)
             .when_some(elapsed, |this, elapsed| {
                 this.child(
@@ -252,17 +285,11 @@ impl ConversationView {
 
     fn render_trace_entry_title(entry: &AssistantTraceEntry, cx: &App) -> AnyElement {
         let status = trace_status_label(entry.status);
-        let icon = match entry.kind {
-            AssistantTraceKind::ReasoningSummary => Icon::new(IconName::LoaderCircle),
-            AssistantTraceKind::Tool => Icon::empty().path("icons/agent-wrench.svg"),
-        };
+        let icon = render_trace_entry_indicator(entry, cx);
         h_flex()
             .items_center()
             .gap(px(7.))
-            .child(
-                icon.xsmall()
-                    .text_color(trace_status_color(entry.status, cx)),
-            )
+            .child(icon)
             .child(
                 div()
                     .min_w_0()
@@ -380,6 +407,47 @@ impl ConversationView {
                 .into_any_element(),
         )
     }
+}
+
+const TRACE_VIEWPORT_MAX_HEIGHT: gpui_kit::Pixels = px(260.);
+
+fn trace_entries_for_timeline(message: &Message) -> Vec<AssistantTraceEntry> {
+    let mut entries = message.assistant_trace.entries.clone();
+    entries.sort_by_key(|entry| entry.sequence);
+    entries.reverse();
+    entries
+}
+
+fn render_trace_entry_indicator(entry: &AssistantTraceEntry, cx: &App) -> AnyElement {
+    if matches!(
+        entry.status,
+        AssistantTraceStatus::Streaming
+            | AssistantTraceStatus::Requested
+            | AssistantTraceStatus::Running
+    ) {
+        return Spinner::new()
+            .xsmall()
+            .color(trace_status_color(entry.status, cx))
+            .into_any_element();
+    }
+
+    let icon = match (entry.kind, entry.status) {
+        (AssistantTraceKind::ReasoningSummary, AssistantTraceStatus::Completed) => {
+            Icon::new(IconName::CircleCheck)
+        }
+        (
+            AssistantTraceKind::ReasoningSummary,
+            AssistantTraceStatus::Failed
+            | AssistantTraceStatus::Rejected
+            | AssistantTraceStatus::Stopped,
+        ) => Icon::new(IconName::CircleX),
+        (AssistantTraceKind::ReasoningSummary, _) => Icon::new(IconName::LoaderCircle),
+        (AssistantTraceKind::Tool, _) => Icon::empty().path("icons/agent-wrench.svg"),
+    };
+
+    icon.xsmall()
+        .text_color(trace_status_color(entry.status, cx))
+        .into_any_element()
 }
 
 const fn trace_status_label(status: AssistantTraceStatus) -> &'static str {
