@@ -38,6 +38,14 @@ pub struct ConversationSummary {
     pub mode: magenta_core::ConversationMode,
     pub workspace_root: Option<std::path::PathBuf>,
     pub provider: magenta_core::ProviderId,
+    pub activity: Option<ConversationActivity>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConversationActivity {
+    Running,
+    AwaitingApproval,
+    Unsaved,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,6 +94,7 @@ pub fn demo_conversations() -> Vec<ConversationSummary> {
         mode: magenta_core::ConversationMode::Chat,
         workspace_root: None,
         provider: magenta_core::ProviderId::new("openai"),
+        activity: None,
     })
     .collect()
 }
@@ -129,6 +138,7 @@ impl From<magenta_core::ConversationSummary> for ConversationSummary {
             mode: summary.mode,
             workspace_root: summary.workspace_root,
             provider: summary.provider,
+            activity: None,
         }
     }
 }

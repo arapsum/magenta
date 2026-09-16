@@ -1,14 +1,16 @@
+mod generation;
 mod math;
 
 use super::*;
 
+#[allow(dead_code)]
 impl ConversationView {
     pub(crate) fn load_page(
         &mut self,
         loaded: magenta_core::ConversationPage,
         cx: &mut Context<'_, Self>,
     ) {
-        self.cancel_generation(cx);
+        self.reset_local_generation();
         self.live_commands.clear();
         self.trace_disclosure_overrides.clear();
         self.trace_entry_overrides.clear();
@@ -40,6 +42,76 @@ impl ConversationView {
                 offset_in_item: px(0.),
             });
         } else {
+            self.list_state.scroll_to_end();
+        }
+        cx.notify();
+    }
+
+    /// Projects the coordinator's live state over the currently loaded page.
+    ///
+    /// The coordinator owns the stream and keeps producing snapshots while the
+    /// conversation is hidden. This method only updates the render projection;
+    /// it never starts or stops provider work.
+    pub(crate) fn apply_live_run(&mut self, snapshot: LiveRunSnapshot, cx: &mut Context<'_, Self>) {
+        if self
+            .conversation
+            .as_ref()
+            .is_some_and(|conversation| conversation.id != snapshot.conversation.id)
+        {
+            return;
+        }
+
+        self.conversation = Some(snapshot.conversation);
+        for live in snapshot.messages {
+            self.origins
+                .insert(live.message.id, live.generation.clone());
+            let index = live
+                .replaces
+                .and_then(|id| self.messages.iter().position(|item| item.message.id == id))
+                .or_else(|| {
+                    self.messages
+                        .iter()
+                        .position(|item| item.message.id == live.message.id)
+                });
+
+            if let Some(index) = index {
+                let created_at = self.messages[index].created_at;
+                let sequence = live.sequence.or(self.messages[index].sequence);
+                let omitted_context_messages = if live.omitted_context_messages == 0 {
+                    self.messages[index].omitted_context_messages
+                } else {
+                    live.omitted_context_messages
+                };
+                let mut rendered = Self::rendered_message(live.message, cx);
+                rendered.created_at = created_at;
+                rendered.sequence = sequence;
+                rendered.omitted_context_messages = omitted_context_messages;
+                self.messages[index] = rendered;
+            } else {
+                let mut rendered = Self::rendered_message(live.message, cx);
+                rendered.sequence = live.sequence;
+                rendered.created_at = live.created_at;
+                rendered.omitted_context_messages = live.omitted_context_messages;
+                self.messages.push(rendered);
+            }
+        }
+
+        self.streaming_message = snapshot.streaming_message;
+        self.generation_progress = snapshot.generation_progress;
+        self.generation_clock_task.take();
+        self.agent_controller = snapshot.agent_controller;
+        self.pending_agent_approval = snapshot.pending_agent_approval;
+        self.live_commands = snapshot.live_commands;
+        self.queue_math_for_messages(0..self.messages.len(), cx);
+        self.list_state
+            .reset_with_uniform_height(self.messages.len(), px(96.));
+        self.list_state
+            .set_follow_mode(if self.streaming_message.is_some() {
+                FollowMode::Tail
+            } else {
+                FollowMode::Normal
+            });
+        if self.streaming_message.is_some() {
             self.list_state.scroll_to_end();
         }
         cx.notify();
@@ -205,7 +277,7 @@ impl ConversationView {
     }
 
     pub(crate) fn load(&mut self, thread: ConversationThread, cx: &mut Context<'_, Self>) {
-        self.cancel_generation(cx);
+        self.reset_local_generation();
         self.live_commands.clear();
         self.trace_disclosure_overrides.clear();
         self.trace_entry_overrides.clear();
@@ -230,7 +302,7 @@ impl ConversationView {
     }
 
     pub(crate) fn clear(&mut self, cx: &mut Context<'_, Self>) {
-        self.cancel_generation(cx);
+        self.reset_local_generation();
         self.live_commands.clear();
         self.trace_disclosure_overrides.clear();
         self.trace_entry_overrides.clear();
@@ -245,6 +317,17 @@ impl ConversationView {
         self.attachment_preview = None;
         self.list_state.reset(0);
         cx.notify();
+    }
+
+    fn reset_local_generation(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+        self.generation_task.take();
+        self.generation_clock_task.take();
+        self.streaming_message = None;
+        self.generation_progress = None;
+        self.agent_controller = None;
+        self.pending_agent_approval = None;
+        self.live_commands.clear();
     }
 
     pub(crate) fn set_generation(
@@ -286,141 +369,6 @@ impl ConversationView {
 
     pub(crate) const fn is_streaming(&self) -> bool {
         self.streaming_message.is_some()
-    }
-
-    pub(crate) fn start_generation(
-        &mut self,
-        user_message: Message,
-        assistant_message: Message,
-        provider_id: ProviderId,
-        stream: GenerationStream,
-        window: &Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        self.cancel_generation(cx);
-        let user = Self::rendered_message(user_message, cx);
-        if let Some(conversation) = &self.conversation {
-            self.origins
-                .insert(assistant_message.id, conversation.generation.clone());
-        }
-        let assistant = Self::rendered_message(assistant_message, cx);
-        let old_count = self.messages.len();
-        let assistant_id = assistant.message.id;
-        self.messages.push(user);
-        self.messages.push(assistant);
-        if self.trim_oldest_to_limit(cx) == 0 {
-            self.list_state.splice(old_count..old_count, 2);
-        } else {
-            self.list_state
-                .reset_with_uniform_height(self.messages.len(), px(96.));
-        }
-        self.list_state.set_follow_mode(FollowMode::Tail);
-        self.list_state.scroll_to_end();
-        self.begin_stream(assistant_id, provider_id, stream, window, cx);
-        cx.notify();
-    }
-
-    pub(crate) fn regenerate(
-        &mut self,
-        assistant_id: MessageId,
-        assistant_message: Message,
-        provider_id: ProviderId,
-        stream: GenerationStream,
-        window: &Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        let Some(index) = self
-            .messages
-            .iter()
-            .position(|message| message.message.id == assistant_id)
-        else {
-            return;
-        };
-
-        self.cancel_generation(cx);
-        if let Some(conversation) = &self.conversation {
-            self.origins
-                .insert(assistant_message.id, conversation.generation.clone());
-        }
-        let new_assistant_id = assistant_message.id;
-        self.messages[index] = Self::rendered_message(assistant_message, cx);
-        self.list_state.remeasure_items(index..index + 1);
-        self.list_state.set_follow_mode(FollowMode::Tail);
-        self.list_state.scroll_to_end();
-        self.begin_stream(new_assistant_id, provider_id, stream, window, cx);
-        cx.notify();
-    }
-
-    pub(crate) fn start_retry(
-        &mut self,
-        pending: magenta_application::PendingRetry,
-        window: &Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        let magenta_application::PendingRetry {
-            conversation,
-            assistant_message,
-            provider_id,
-            stream,
-            assistant_sequence,
-            context_report,
-        } = pending;
-        self.cancel_generation(cx);
-        self.conversation = Some(conversation.clone());
-        self.origins
-            .insert(assistant_message.id, conversation.generation);
-        let assistant = Self::rendered_message(assistant_message, cx);
-        let old_count = self.messages.len();
-        let assistant_id = assistant.message.id;
-        self.messages.push(assistant);
-        self.set_pending_metadata(
-            MessageId(0),
-            magenta_core::MessageSequence(0),
-            assistant_id,
-            assistant_sequence,
-            context_report.omitted_messages,
-            cx,
-        );
-        if self.trim_oldest_to_limit(cx) == 0 {
-            self.list_state.splice(old_count..old_count, 1);
-        } else {
-            self.list_state
-                .reset_with_uniform_height(self.messages.len(), px(96.));
-        }
-        self.list_state.set_follow_mode(FollowMode::Tail);
-        self.list_state.scroll_to_end();
-        self.begin_stream(assistant_id, provider_id, stream, window, cx);
-        cx.notify();
-    }
-
-    pub(crate) fn cancel(&mut self, cx: &mut Context<'_, Self>) {
-        self.cancel_generation(cx);
-    }
-
-    pub(crate) fn interrupt_for_shutdown(
-        &mut self,
-        cx: &mut ConversationContext<'_>,
-    ) -> Option<Message> {
-        let id = self.streaming_message.take()?;
-        self.generation = self.generation.wrapping_add(1);
-        self.generation_task.take();
-        self.clear_agent_state();
-        let progress = self.clear_generation_progress();
-        self.mark_trace_terminal(
-            id,
-            AssistantTraceStatus::Stopped,
-            progress.as_ref().map(GenerationProgress::elapsed),
-        );
-        if let Some(progress) = progress.as_ref() {
-            trace_generation_terminal(progress, "interrupted");
-        }
-        let message = self
-            .messages
-            .iter_mut()
-            .find(|message| message.message.id == id)?;
-        message.message.status = MessageStatus::Stopped;
-        cx.notify();
-        Some(message.message.clone())
     }
 
     pub(crate) fn request_regenerate(&self, message_id: MessageId, cx: &mut Context<'_, Self>) {
@@ -472,6 +420,10 @@ impl ConversationView {
         self.conversation
             .as_ref()
             .map(|conversation| conversation.generation.clone())
+    }
+
+    pub(crate) fn conversation_details(&self) -> Option<Conversation> {
+        self.conversation.clone()
     }
 
     pub(crate) fn is_agent_conversation(&self) -> bool {
@@ -535,27 +487,6 @@ impl ConversationView {
         rendered.created_at = created_at;
         rendered.omitted_context_messages = omitted_context_messages;
         rendered
-    }
-
-    pub(crate) fn set_pending_metadata(
-        &mut self,
-        user_id: MessageId,
-        user_sequence: magenta_core::MessageSequence,
-        assistant_id: MessageId,
-        assistant_sequence: magenta_core::MessageSequence,
-        omitted_context_messages: usize,
-        cx: &mut Context<'_, Self>,
-    ) {
-        for rendered in &mut self.messages {
-            if rendered.message.id == user_id {
-                rendered.sequence = Some(user_sequence);
-            } else if rendered.message.id == assistant_id {
-                rendered.sequence = Some(assistant_sequence);
-                rendered.omitted_context_messages = omitted_context_messages;
-            }
-        }
-        self.newer_cursor = Some(assistant_sequence);
-        cx.notify();
     }
 
     fn release_unloaded_resources(&mut self, cx: &Context<'_, Self>) {

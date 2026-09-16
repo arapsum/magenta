@@ -239,6 +239,7 @@ impl ConversationView {
     fn render_trace_header(&self, message: &Message, cx: &App, view: &Entity<Self>) -> AnyElement {
         let active = Self::trace_is_active(message);
         let final_answer_started = self.trace_is_final_answer_started(message.id);
+        let message_id = message.id;
         let label = if active && !final_answer_started {
             ShimmerText::new("Thinking")
                 .duration(Duration::from_millis(2200))
@@ -276,7 +277,7 @@ impl ConversationView {
                         .xsmall()
                         .label("Stop")
                         .on_click(move |_, _, cx| {
-                            stop_view.update(cx, Self::cancel_generation);
+                            stop_view.update(cx, |view, cx| view.request_stop(message_id, cx));
                         }),
                 )
             })

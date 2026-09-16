@@ -52,6 +52,7 @@ use crate::components::{
     provider_icon,
 };
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct ConversationThread {
     pub conversation: Conversation,
@@ -62,6 +63,7 @@ const MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(780.);
 const COMPOSER_MAX_WIDTH: gpui_kit::Pixels = px(800.);
 const USER_MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(520.);
 const LIST_OVERDRAW: gpui_kit::Pixels = px(640.);
+#[allow(dead_code)]
 const GENERATION_CLOCK_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_RENDERED_MESSAGES: usize = 150;
 
@@ -71,10 +73,11 @@ struct CloseAttachmentPreview;
 
 #[derive(Debug, thiserror::Error)]
 #[error("provider stream ended before completion")]
+#[allow(dead_code)]
 struct IncompleteGeneration;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum GenerationPhase {
+pub enum GenerationPhase {
     Connecting,
     Thinking,
     Responding,
@@ -98,19 +101,20 @@ impl GenerationPhase {
     }
 }
 
-struct GenerationProgress {
-    message_id: MessageId,
-    provider: ProviderId,
-    configuration: Option<GenerationConfig>,
-    phase: GenerationPhase,
-    started_at: Instant,
-    provider_started_at: Option<Instant>,
-    first_text_at: Option<Instant>,
-    final_answer_started: bool,
+#[derive(Clone)]
+pub struct GenerationProgress {
+    pub(crate) message_id: MessageId,
+    pub(crate) provider: ProviderId,
+    pub(crate) configuration: Option<GenerationConfig>,
+    pub(crate) phase: GenerationPhase,
+    pub(crate) started_at: Instant,
+    pub(crate) provider_started_at: Option<Instant>,
+    pub(crate) first_text_at: Option<Instant>,
+    pub(crate) final_answer_started: bool,
 }
 
 impl GenerationProgress {
-    fn new(
+    pub(crate) fn new(
         message_id: MessageId,
         provider: ProviderId,
         configuration: Option<GenerationConfig>,
@@ -142,10 +146,15 @@ impl GenerationProgress {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum ConversationViewEvent {
     GenerationStarted,
     GenerationFinished(Message),
+    StopGeneration(MessageId),
+    AgentApproval(MessageId, magenta_core::AgentApprovalDecision),
+    ApplyWorkspaceReview(MessageId),
+    DiscardWorkspaceReview(MessageId),
     LoadEarlier,
     LoadNewer,
     ReturnToLatest,
@@ -160,10 +169,31 @@ pub enum ConversationViewEvent {
 }
 
 #[derive(Clone, Debug)]
-struct LiveCommand {
-    stdout: String,
-    stderr: String,
-    result: Option<WorkspaceCommandResult>,
+pub struct LiveCommand {
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+    pub(crate) result: Option<WorkspaceCommandResult>,
+}
+
+#[derive(Clone)]
+pub struct LiveRunMessage {
+    pub(crate) message: Message,
+    pub(crate) sequence: Option<magenta_core::MessageSequence>,
+    pub(crate) created_at: Timestamp,
+    pub(crate) generation: GenerationConfig,
+    pub(crate) omitted_context_messages: usize,
+    pub(crate) replaces: Option<MessageId>,
+}
+
+#[derive(Clone)]
+pub struct LiveRunSnapshot {
+    pub(crate) conversation: Conversation,
+    pub(crate) messages: Vec<LiveRunMessage>,
+    pub(crate) streaming_message: Option<MessageId>,
+    pub(crate) generation_progress: Option<GenerationProgress>,
+    pub(crate) agent_controller: Option<AgentApprovalController>,
+    pub(crate) pending_agent_approval: Option<(MessageId, AgentApprovalRequest)>,
+    pub(crate) live_commands: HashMap<(MessageId, String), LiveCommand>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -222,6 +252,7 @@ pub struct ConversationView {
     attachment_preview: Option<AttachmentPreview>,
 }
 
+#[allow(dead_code)]
 type ConversationContext<'a> = Context<'a, ConversationView>;
 
 impl EventEmitter<ConversationViewEvent> for ConversationView {}

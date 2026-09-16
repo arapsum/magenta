@@ -249,7 +249,8 @@ impl MainView {
                 )
             })
             .when(
-                self.unsaved.is_some() && self.operation == history::Operation::Idle,
+                self.response_runs.has_unsaved_for(self.active_conversation)
+                    && self.operation == history::Operation::Idle,
                 |this| {
                     this.child(
                         h_flex()

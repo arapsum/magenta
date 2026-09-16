@@ -4,6 +4,7 @@ mod finder;
 mod history;
 mod projects;
 mod render;
+mod runs;
 mod settings_window;
 #[cfg(test)]
 #[path = "../../test/app/mod.rs"]
@@ -87,6 +88,7 @@ pub struct MainView {
     retry_target: Option<MessageId>,
     authenticator: Arc<dyn ProviderAuthenticator>,
     model_catalog: Arc<dyn ModelCatalog>,
+    response_runs: runs::ResponseRunCoordinator,
     history: ConversationHistory,
     projects: Option<ProjectCatalog>,
     storage_ready: StorageState,
@@ -100,7 +102,6 @@ pub struct MainView {
     load_generation: u64,
     loading_conversation: Option<ConversationId>,
     deferred_navigation: Option<history::Navigation>,
-    unsaved: Option<magenta_core::Message>,
     close_requested: CloseState,
     active_conversation: Option<ConversationId>,
     pending_deletion: Option<PendingDeletion>,
@@ -277,6 +278,7 @@ impl MainView {
             authenticator: services.authenticator,
             model_catalog: services.model_catalog,
             history,
+            response_runs: runs::ResponseRunCoordinator::default(),
             projects: services.projects,
             storage_ready: StorageState::Loading,
             history_error: None,
@@ -289,7 +291,6 @@ impl MainView {
             load_generation: 0,
             loading_conversation: None,
             deferred_navigation: None,
-            unsaved: None,
             close_requested: CloseState::Open,
             active_conversation: None,
             pending_deletion: None,
@@ -351,7 +352,7 @@ impl MainView {
                             main.submit(request, window, cx);
                         }
                     }
-                    PromptComposerEvent::Cancel => main.cancel_generation(cx),
+                    PromptComposerEvent::Cancel => main.stop_active_run(window, cx),
                     PromptComposerEvent::WorkspaceSelected(root) => {
                         main.register_project(root.clone(), window, cx);
                     }
@@ -469,6 +470,18 @@ impl MainView {
                 }
                 ConversationViewEvent::GenerationFinished(message) => {
                     main.save_response(message.clone(), window, cx);
+                }
+                ConversationViewEvent::StopGeneration(message_id) => {
+                    main.stop_run(*message_id, window, cx);
+                }
+                ConversationViewEvent::AgentApproval(message_id, decision) => {
+                    main.decide_agent_approval(*message_id, *decision, cx);
+                }
+                ConversationViewEvent::ApplyWorkspaceReview(message_id) => {
+                    main.apply_workspace_review(*message_id, window, cx);
+                }
+                ConversationViewEvent::DiscardWorkspaceReview(message_id) => {
+                    main.discard_workspace_review(*message_id, window, cx);
                 }
                 ConversationViewEvent::LoadEarlier => main.load_earlier(window, cx),
                 ConversationViewEvent::LoadNewer => main.load_newer(window, cx),

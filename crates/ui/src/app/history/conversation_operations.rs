@@ -12,7 +12,7 @@ impl MainView {
         window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if !self.can_write(cx) {
+        if !self.can_edit_history() {
             return;
         }
         let history = self.history.clone();
@@ -47,7 +47,7 @@ impl MainView {
         window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if !self.can_write(cx) {
+        if !self.can_edit_history() {
             return;
         }
         let history = self.history.clone();
@@ -94,7 +94,7 @@ impl MainView {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if !self.can_write(cx) {
+        if !self.can_edit_history() || self.response_runs.blocks_deletion(id) {
             return;
         }
         let Some(title) = self.sidebar.read(cx).title_for(id) else {
@@ -122,7 +122,7 @@ impl MainView {
     }
 
     pub(crate) fn confirm_pending_deletion(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
-        if !self.can_write(cx) {
+        if !self.can_edit_history() {
             return;
         }
         let Some(pending) = self.pending_deletion.take() else {
@@ -137,7 +137,7 @@ impl MainView {
         window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if !self.can_write(cx) {
+        if !self.can_edit_history() || self.response_runs.blocks_deletion(id) {
             return;
         }
         let history = self.history.clone();

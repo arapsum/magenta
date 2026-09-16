@@ -4,9 +4,7 @@ mod operations;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::{Context, Window};
 use magenta_application::{SendMessageInput, SendTarget};
-use magenta_core::{
-    AttachmentDraft, ConversationId, ConversationMode, ConversationSearchResult, MessageStatus,
-};
+use magenta_core::{AttachmentDraft, ConversationId, ConversationMode, ConversationSearchResult};
 
 use super::{AccountState, CloseState, MainView, StorageState};
 use crate::{
@@ -19,7 +17,6 @@ use crate::{
 pub(super) enum Operation {
     Idle,
     Preparing,
-    Saving,
     Pinning,
     Renaming,
     Deleting,
@@ -33,6 +30,12 @@ pub(super) enum Navigation {
 }
 
 impl MainView {
+    pub(super) fn can_edit_history(&self) -> bool {
+        self.storage_ready.is_ready()
+            && self.operation == Operation::Idle
+            && self.loading_conversation.is_none()
+    }
+
     pub(super) fn load_history(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
         if self.history_task.is_some() {
             return;
@@ -70,7 +73,7 @@ impl MainView {
         }));
     }
 
-    fn refresh_summaries(&mut self, window: &Window, cx: &Context<'_, Self>) {
+    pub(crate) fn refresh_summaries(&mut self, window: &Window, cx: &Context<'_, Self>) {
         let history = self.history.clone();
         self.history_task = Some(cx.spawn_in(window, async move |view, window| {
             let result = history.summaries().await;
@@ -111,10 +114,6 @@ impl MainView {
         self.load_task.take();
         self.page_task.take();
         self.loading_conversation = None;
-        if self.conversation.read(cx).is_streaming() {
-            self.cancel_generation(cx);
-            return;
-        }
         self.continue_navigation(window, cx);
     }
 
@@ -135,10 +134,6 @@ impl MainView {
         self.load_task.take();
         self.page_task.take();
         self.loading_conversation = None;
-        if self.conversation.read(cx).is_streaming() {
-            self.cancel_generation(cx);
-            return;
-        }
         self.continue_navigation(window, cx);
     }
 
@@ -149,8 +144,9 @@ impl MainView {
         }
     }
 
-    fn continue_navigation(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
-        if self.operation != Operation::Idle || self.unsaved.is_some() {
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn continue_navigation(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
+        if self.operation != Operation::Idle {
             return;
         }
         let Some(id) = self.deferred_navigation.take() else {
@@ -202,6 +198,8 @@ impl MainView {
                 main.loading_conversation = None;
                 match result {
                     Ok(loaded) => {
+                        let loaded = main.response_runs.overlay_page(loaded);
+                        main.active_conversation = Some(id);
                         main.history_error = None;
                         let workspace_root = loaded.conversation.workspace_root.clone();
                         let project = workspace_root
@@ -217,12 +215,18 @@ impl MainView {
                         });
                         main.conversation
                             .update(cx, |view, cx| view.load_page(loaded, cx));
+                        if let Some(run) = main
+                            .response_runs
+                            .run_for_conversation(id)
+                            .map(super::runs::ResponseRun::assistant_id)
+                        {
+                            main.sync_run(run, cx);
+                        }
                         if let Some((_, message_id)) = target {
                             main.conversation.update(cx, |view, cx| {
                                 view.scroll_to_message(message_id, cx);
                             });
                         }
-                        main.active_conversation = Some(id);
                         main.sidebar.update(cx, |sidebar, cx| {
                             sidebar.set_active(Some(id), cx);
                             sidebar.set_active_project(
@@ -403,8 +407,9 @@ impl MainView {
     fn can_write(&self, cx: &Context<'_, Self>) -> bool {
         self.storage_ready.is_ready()
             && self.operation == Operation::Idle
-            && self.unsaved.is_none()
             && self.loading_conversation.is_none()
+            && !self.response_runs.has_active_for(self.active_conversation)
+            && !self.response_runs.has_unsaved_for(self.active_conversation)
             && !self.conversation.read(cx).is_streaming()
             && !self.conversation.read(cx).is_viewing_older_messages()
     }
@@ -413,25 +418,33 @@ impl MainView {
         let ready = self.can_write(cx);
         self.composer
             .update(cx, |composer, cx| composer.set_storage_ready(ready, cx));
+        let history_actions = self.storage_ready.is_ready()
+            && self.operation == Operation::Idle
+            && self.loading_conversation.is_none();
         self.sidebar.update(cx, |sidebar, cx| {
-            sidebar.set_history_actions_enabled(ready, cx);
+            sidebar.set_history_actions_enabled(history_actions, cx);
         });
     }
 
-    pub(super) fn request_close(
-        &mut self,
-        _window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) -> bool {
-        if self.unsaved.is_some() && self.operation == Operation::Idle {
-            return false;
-        }
-        if self.conversation.read(cx).is_streaming() {
+    pub(super) fn request_close(&mut self, window: &Window, cx: &mut Context<'_, Self>) -> bool {
+        let active_runs = self
+            .response_runs
+            .runs
+            .values()
+            .filter(|run| run.is_active())
+            .map(super::runs::ResponseRun::assistant_id)
+            .collect::<Vec<_>>();
+        if !active_runs.is_empty() {
             self.close_requested = CloseState::Requested;
-            self.cancel_generation(cx);
+            for message_id in active_runs {
+                self.stop_run(message_id, window, cx);
+            }
             return false;
         }
-        if self.operation != Operation::Idle {
+        if self.operation != Operation::Idle
+            || self.response_runs.has_blocking_work()
+            || self.operation_task.is_some()
+        {
             self.close_requested = CloseState::Requested;
             return false;
         }
@@ -440,26 +453,26 @@ impl MainView {
 
     pub(super) fn prepare_shutdown(
         &mut self,
-        cx: &mut Context<'_, Self>,
+        _cx: &mut Context<'_, Self>,
     ) -> impl std::future::Future<Output = ()> + use<> {
-        let task = self.operation_task.take();
+        // A pending preparation must not create a new run after shutdown has begun.
+        self.operation_task.take();
         let history = self.history.clone();
-        let interrupted = self
-            .conversation
-            .update(cx, super::ConversationView::interrupt_for_shutdown);
-        let unsaved = if self.operation == Operation::Idle {
-            self.unsaved.take()
-        } else {
-            None
-        };
+
+        self.response_runs.stop_all_active();
+
+        let messages = self.response_runs.shutdown_messages();
+        let save_tasks = self.response_runs.take_save_tasks();
+        let control_tasks = self.response_runs.take_control_tasks();
+
         async move {
-            if let Some(task) = task {
+            for task in save_tasks {
                 task.await;
             }
-            if let Some(mut message) = interrupted.or(unsaved) {
-                if message.status == MessageStatus::Streaming {
-                    message.status = MessageStatus::Stopped;
-                }
+            for task in control_tasks {
+                task.await;
+            }
+            for message in messages {
                 if let Err(error) = history.finalize(message).await {
                     tracing::error!(
                         kind = ?error.kind,

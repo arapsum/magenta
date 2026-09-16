@@ -194,6 +194,12 @@ impl ConversationView {
         decision: AgentApprovalDecision,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.generation_task.is_none() {
+            if let Some((message_id, _)) = self.pending_agent_approval.as_ref() {
+                cx.emit(ConversationViewEvent::AgentApproval(*message_id, decision));
+            }
+            return;
+        }
         let Some((_, approval)) = self.pending_agent_approval.take() else {
             return;
         };

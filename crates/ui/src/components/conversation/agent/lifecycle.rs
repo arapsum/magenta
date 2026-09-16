@@ -1,7 +1,22 @@
 use super::*;
 
 impl ConversationView {
-    pub(crate) fn apply_workspace_review(&mut self, window: &Window, cx: &Context<'_, Self>) {
+    pub(crate) fn apply_workspace_review(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
+        if self.generation_task.is_none() {
+            if let Some(message_id) = self
+                .messages
+                .iter()
+                .find(|message| {
+                    self.agent_controller.as_ref().is_some_and(|controller| {
+                        controller.is_workspace_review_for(message.message.id)
+                    })
+                })
+                .map(|message| message.message.id)
+            {
+                cx.emit(ConversationViewEvent::ApplyWorkspaceReview(message_id));
+            }
+            return;
+        }
         let Some(controller) = self.agent_controller.clone() else {
             return;
         };
@@ -19,7 +34,22 @@ impl ConversationView {
         }));
     }
 
-    pub(crate) fn discard_workspace_review(&mut self, window: &Window, cx: &Context<'_, Self>) {
+    pub(crate) fn discard_workspace_review(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
+        if self.generation_task.is_none() {
+            if let Some(message_id) = self
+                .messages
+                .iter()
+                .find(|message| {
+                    self.agent_controller.as_ref().is_some_and(|controller| {
+                        controller.is_workspace_review_for(message.message.id)
+                    })
+                })
+                .map(|message| message.message.id)
+            {
+                cx.emit(ConversationViewEvent::DiscardWorkspaceReview(message_id));
+            }
+            return;
+        }
         let Some(controller) = self.agent_controller.clone() else {
             return;
         };

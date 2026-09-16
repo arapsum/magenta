@@ -80,7 +80,6 @@ impl MainView {
         if !self.storage_ready.is_ready() {
             return;
         }
-        self.cancel_generation(cx);
         self.clear_workbench_session(cx);
         self.active_conversation = None;
         self.conversation.update(cx, super::ConversationView::clear);

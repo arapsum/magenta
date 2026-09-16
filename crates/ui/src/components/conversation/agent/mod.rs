@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use futures_util::StreamExt as _;
 use magenta_application::PendingAgentGeneration;
 use magenta_core::{

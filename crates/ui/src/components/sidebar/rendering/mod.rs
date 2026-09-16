@@ -1,4 +1,6 @@
 use super::*;
+use crate::components::provider_icon;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::{linear_color_stop, linear_gradient};
 
 impl SidebarView {
@@ -200,7 +202,24 @@ impl SidebarView {
                             .text_size(px(13.5))
                             .when(selected, gpui_kit::component::StyledExt::font_medium)
                             .child(conversation.title.clone()),
-                    ),
+                    )
+                    .when_some(conversation.activity, |this, activity| {
+                        this.child(match activity {
+                            ConversationActivity::Running => Spinner::new()
+                                .xsmall()
+                                .color(cx.theme().warning)
+                                .into_any_element(),
+                            ConversationActivity::AwaitingApproval => Icon::empty()
+                                .path("icons/agent-shield-check.svg")
+                                .xsmall()
+                                .text_color(cx.theme().warning)
+                                .into_any_element(),
+                            ConversationActivity::Unsaved => Icon::new(IconName::CircleX)
+                                .xsmall()
+                                .text_color(cx.theme().danger)
+                                .into_any_element(),
+                        })
+                    }),
             )
             .on_click(move |_, _, cx| {
                 view.update(cx, |_, cx| Self::select_conversation(id, cx));

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use super::*;
 
 impl ConversationView {
@@ -376,6 +378,14 @@ impl ConversationView {
             ));
         }
         cx.notify();
+    }
+
+    pub(crate) fn request_stop(&mut self, assistant_id: MessageId, cx: &mut Context<'_, Self>) {
+        if self.generation_task.is_some() {
+            self.cancel_generation(cx);
+        } else if self.streaming_message == Some(assistant_id) {
+            cx.emit(ConversationViewEvent::StopGeneration(assistant_id));
+        }
     }
 
     pub(super) fn clear_generation_progress(&mut self) -> Option<GenerationProgress> {

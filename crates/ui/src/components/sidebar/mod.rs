@@ -15,10 +15,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{
-    app::OpenConversationFinder,
-    components::{provider_icon, sidebar::state::DisclosureState},
-};
+use crate::{app::OpenConversationFinder, components::sidebar::state::DisclosureState};
 use gpui_kit::base::{Align, Placement, PopoverState, Positioner, actions::Cancel};
 use gpui_kit::component::{
     ActiveTheme as _, Collapsible, Disableable as _, ElementExt as _, Icon, IconName,
@@ -38,7 +35,9 @@ use gpui_kit::{
 };
 use magenta_core::ProviderAccount;
 
-pub use model::{ConversationId, ConversationPeriod, ConversationSummary, SidebarEvent};
+pub use model::{
+    ConversationActivity, ConversationId, ConversationPeriod, ConversationSummary, SidebarEvent,
+};
 pub(super) use profile::{ProfileDetails, profile_details};
 
 use self::model::title_matches;
@@ -420,10 +419,36 @@ impl SidebarView {
         summaries: Vec<magenta_core::ConversationSummary>,
         cx: &mut Context<'_, Self>,
     ) {
-        self.conversations = summaries.into_iter().map(Into::into).collect();
+        let activities = self
+            .conversations
+            .iter()
+            .map(|conversation| (conversation.id, conversation.activity))
+            .collect::<std::collections::HashMap<_, _>>();
+        self.conversations = summaries
+            .into_iter()
+            .map(Into::into)
+            .map(|mut conversation: ConversationSummary| {
+                conversation.activity = activities.get(&conversation.id).copied().flatten();
+                conversation
+            })
+            .collect();
         self.history_status = None;
         self.history_failed = false;
         cx.notify();
+    }
+
+    pub(crate) fn set_run_indicator(
+        &mut self,
+        id: ConversationId,
+        activity: Option<ConversationActivity>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if let Some(conversation) = self.conversations.iter_mut().find(|item| item.id == id)
+            && conversation.activity != activity
+        {
+            conversation.activity = activity;
+            cx.notify();
+        }
     }
 
     pub(crate) fn set_history_loading(&mut self, failed: bool, cx: &mut Context<'_, Self>) {

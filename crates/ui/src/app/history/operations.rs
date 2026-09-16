@@ -5,13 +5,10 @@ use magenta_application::{
 };
 use magenta_core::{ConversationId, GenerationConfig, Message, MessageId};
 
-use super::{AccountState, CloseState, MainView, Operation};
+use super::{AccountState, MainView, Operation};
 use crate::{
     MagentaError,
-    components::{
-        agent_workbench::AgentWorkbench, conversation::ConversationThread,
-        prompt_input::PromptComposer,
-    },
+    components::{agent_workbench::AgentWorkbench, prompt_input::PromptComposer},
 };
 
 impl MainView {
@@ -99,54 +96,29 @@ impl MainView {
         window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
-        let user_id = pending.user_message.id;
-        let assistant_id = pending.assistant_message.id;
-        let user_sequence = pending.user_sequence;
-        let assistant_sequence = pending.assistant_sequence;
-        let omitted = pending.context_report.omitted_messages;
         let id = pending.conversation.id;
-        let provider = pending.conversation.generation.provider.clone();
         let conversation = pending.conversation.clone();
-        if self.active_conversation.is_none() {
-            self.conversation.update(cx, |view, cx| {
-                view.load(
-                    ConversationThread {
-                        conversation: pending.conversation,
-                        messages: Vec::new(),
-                    },
+        let show_run = self.active_conversation == Some(id)
+            || (self.active_conversation.is_none() && self.deferred_navigation.is_none());
+        let assistant_id = self.response_runs.start_chat(pending, window, cx);
+        if show_run {
+            self.active_conversation = Some(id);
+            self.sidebar
+                .update(cx, |sidebar, cx| sidebar.set_active(Some(id), cx));
+            self.composer.update(cx, |composer, cx| {
+                composer.set_configuration(&conversation.generation, cx);
+                composer.set_conversation_context(
+                    conversation.mode.clone(),
+                    conversation.workspace_root.clone(),
                     cx,
                 );
             });
-        } else {
-            self.conversation.update(cx, |view, cx| {
-                view.set_generation(conversation.generation.clone(), cx);
-            });
+            self.sync_run(assistant_id, cx);
         }
-        self.active_conversation = Some(id);
-        self.sidebar
-            .update(cx, |sidebar, cx| sidebar.set_active(Some(id), cx));
-        self.conversation.update(cx, |view, cx| {
-            view.start_generation(
-                pending.user_message,
-                pending.assistant_message,
-                provider,
-                pending.stream,
-                window,
-                cx,
-            );
-            view.set_pending_metadata(
-                user_id,
-                user_sequence,
-                assistant_id,
-                assistant_sequence,
-                omitted,
-                cx,
-            );
-        });
+        self.operation = Operation::Idle;
+        self.update_composer_availability(cx);
         self.refresh_summaries(window, cx);
-        if self.deferred_navigation.is_some() || self.close_requested.is_requested() {
-            self.cancel_generation(cx);
-        }
+        self.continue_navigation(window, cx);
     }
 
     pub(super) fn start_agent_pending(
@@ -157,31 +129,27 @@ impl MainView {
     ) {
         let id = pending.conversation.id;
         let conversation = pending.conversation.clone();
-        if self.active_conversation.is_none() {
-            self.conversation.update(cx, |view, cx| {
-                view.load(
-                    ConversationThread {
-                        conversation: conversation.clone(),
-                        messages: Vec::new(),
-                    },
+        let show_run = self.active_conversation == Some(id)
+            || (self.active_conversation.is_none() && self.deferred_navigation.is_none());
+        let assistant_id = self.response_runs.start_agent(pending, window, cx);
+        if show_run {
+            self.active_conversation = Some(id);
+            self.sidebar
+                .update(cx, |sidebar, cx| sidebar.set_active(Some(id), cx));
+            self.composer.update(cx, |composer, cx| {
+                composer.set_configuration(&conversation.generation, cx);
+                composer.set_conversation_context(
+                    conversation.mode.clone(),
+                    conversation.workspace_root.clone(),
                     cx,
                 );
             });
-        } else {
-            self.conversation.update(cx, |view, cx| {
-                view.set_generation(conversation.generation.clone(), cx);
-            });
+            self.sync_run(assistant_id, cx);
         }
-        self.active_conversation = Some(id);
-        self.sidebar
-            .update(cx, |sidebar, cx| sidebar.set_active(Some(id), cx));
-        self.conversation.update(cx, |view, cx| {
-            view.start_agent_generation(pending, window, cx);
-        });
+        self.operation = Operation::Idle;
+        self.update_composer_availability(cx);
         self.refresh_summaries(window, cx);
-        if self.deferred_navigation.is_some() || self.close_requested.is_requested() {
-            self.cancel_generation(cx);
-        }
+        self.continue_navigation(window, cx);
     }
 
     pub(crate) fn regenerate(
@@ -211,32 +179,18 @@ impl MainView {
                 main.operation = Operation::Idle;
                 match result {
                     Ok(pending) => {
-                        let assistant_id = pending.assistant_message.id;
-                        let assistant_sequence = pending.assistant_sequence;
-                        let omitted = pending.context_report.omitted_messages;
-                        main.conversation.update(cx, |view, cx| {
-                            view.regenerate(
-                                pending.target_message_id,
-                                pending.assistant_message,
-                                pending.provider_id,
-                                pending.stream,
-                                window,
-                                cx,
-                            );
-                            view.set_pending_metadata(
-                                MessageId(0),
-                                magenta_core::MessageSequence(0),
-                                assistant_id,
-                                assistant_sequence,
-                                omitted,
-                                cx,
-                            );
-                        });
-                        let navigation_pending = main.deferred_navigation.is_some();
-                        let close_requested = main.close_requested.is_requested();
-                        if navigation_pending || close_requested {
-                            main.cancel_generation(cx);
-                        }
+                        let Some(conversation) = main.conversation.read(cx).conversation_details()
+                        else {
+                            return;
+                        };
+                        let assistant_id = main.response_runs.start_regeneration(
+                            pending,
+                            conversation,
+                            window,
+                            cx,
+                        );
+                        main.sync_run(assistant_id, cx);
+                        main.continue_navigation(window, cx);
                     }
                     Err(source) => {
                         Self::present_storage_error(
@@ -292,9 +246,9 @@ impl MainView {
                 match result {
                     Ok(pending) => {
                         main.composer.update(cx, PromptComposer::clear_model_retry);
-                        main.conversation.update(cx, |view, cx| {
-                            view.start_retry(pending, window, cx);
-                        });
+                        let assistant_id = main.response_runs.start_retry(pending, window, cx);
+                        main.sync_run(assistant_id, cx);
+                        main.continue_navigation(window, cx);
                     }
                     Err(source) => {
                         Self::present_storage_error(
@@ -343,8 +297,10 @@ impl MainView {
                 match result {
                     Ok(pending) => {
                         main.composer.update(cx, PromptComposer::clear_model_retry);
-                        main.conversation
-                            .update(cx, |view, cx| view.start_agent_retry(pending, window, cx));
+                        let assistant_id =
+                            main.response_runs.start_agent_retry(pending, window, cx);
+                        main.sync_run(assistant_id, cx);
+                        main.continue_navigation(window, cx);
                     }
                     Err(source) => {
                         Self::present_storage_error(
@@ -376,11 +332,6 @@ impl MainView {
             operation = "conversation.prepare_continuation",
             "prepared a manual continuation after a failed agent response"
         );
-    }
-
-    pub(crate) fn cancel_generation(&self, cx: &mut Context<'_, Self>) {
-        self.conversation
-            .update(cx, super::super::ConversationView::cancel);
     }
 
     pub(super) fn generate_conversation_title(
@@ -429,48 +380,18 @@ impl MainView {
         window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
+        let Some(conversation) = self.conversation.read(cx).conversation_details() else {
+            return;
+        };
+        let message_id = message.id;
+        self.response_runs.insert_terminal(message, conversation);
         self.composer
             .update(cx, |composer, cx| composer.set_generating(false, cx));
-        self.operation = Operation::Saving;
-        self.unsaved = Some(message.clone());
-        self.update_composer_availability(cx);
-        let history = self.history.clone();
-        self.operation_task = Some(cx.spawn_in(window, async move |view, window| {
-            let result = history.finalize(message).await;
-            _ = view.update_in(window, |main, window, cx| {
-                main.operation_task = None;
-                main.operation = Operation::Idle;
-                match result {
-                    Ok(()) => {
-                        main.unsaved = None;
-                        main.refresh_summaries(window, cx);
-                        main.continue_navigation(window, cx);
-                        if main.close_requested.is_requested() {
-                            window.remove_window();
-                        }
-                    }
-                    Err(source) => {
-                        main.close_requested = CloseState::Open;
-                        let error = MagentaError::StorageWrite { source };
-                        tracing::error!(
-                            code = error.presentation().code,
-                            operation = "response.save",
-                            "response could not be saved; keeping the recovery banner visible"
-                        );
-                    }
-                }
-                main.update_composer_availability(cx);
-                cx.notify();
-            });
-        }));
+        self.sync_run(message_id, cx);
+        self.retry_unsaved_run(window, cx);
     }
 
     pub(crate) fn retry_save(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
-        if self.operation != Operation::Idle {
-            return;
-        }
-        if let Some(message) = self.unsaved.clone() {
-            self.save_response(message, window, cx);
-        }
+        self.retry_unsaved_run(window, cx);
     }
 }
