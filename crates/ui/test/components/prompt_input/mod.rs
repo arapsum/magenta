@@ -188,6 +188,40 @@ fn composer_requires_content_model_and_effort(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn work_mode_remains_ready_when_submission_availability_recovers(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
+
+    window
+        .update(cx, |composer, window, cx| {
+            composer.set_agent_capability(AgentCapability::Commands, cx);
+            composer.set_storage_ready(true, cx);
+            composer.set_models(vec![model("gpt-5.4", EffortLevel::Medium)], cx);
+            composer.set_conversation_context(
+                ConversationMode::Agent,
+                Some(std::env::temp_dir()),
+                cx,
+            );
+            composer.select_mode(ConversationMode::Agent, window, cx);
+            composer.input.update(cx, |input, cx| {
+                input.set_value("Create a workspace", window, cx);
+            });
+
+            assert!(composer.is_ready(cx));
+
+            composer.set_submission_ready(false, cx);
+            assert!(!composer.is_ready(cx));
+
+            composer.set_submission_ready(true, cx);
+            assert!(composer.is_ready(cx));
+        })
+        .expect("the work-mode composer test window should remain open");
+}
+
+#[gpui_kit::test]
 fn request_trims_prompt_and_preserves_configuration(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let window = cx.open_window(

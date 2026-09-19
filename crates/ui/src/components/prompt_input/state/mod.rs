@@ -104,6 +104,7 @@ pub struct PromptComposer {
     pub(super) agent_capability: AgentCapability,
     pub(super) generating: bool,
     storage_ready: bool,
+    submission_ready: bool,
     pub(super) attachments: Vec<ReferenceImage>,
     chat_draft: ModeDraft,
     work_draft: ModeDraft,

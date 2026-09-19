@@ -12,8 +12,12 @@ impl PromptComposer {
                     .workspace_root
                     .as_deref()
                     .is_some_and(std::path::Path::is_dir));
+
+        let content_ready = self.retry_target.is_some() || self.has_content(cx);
+
         self.storage_ready
-            && (self.retry_target.is_some() || self.has_content(cx))
+            && self.submission_ready
+            && content_ready
             && self.model.is_some()
             && self.effort.is_some()
             && workspace_ready

@@ -40,6 +40,7 @@ impl PromptComposer {
             agent_capability: AgentCapability::Unavailable,
             generating: false,
             storage_ready: true,
+            submission_ready: true,
             attachments: Vec::new(),
             chat_draft: ModeDraft::default(),
             work_draft: ModeDraft::default(),
@@ -155,6 +156,11 @@ impl PromptComposer {
 
     pub(crate) fn set_storage_ready(&mut self, ready: bool, cx: &mut Context<'_, Self>) {
         self.storage_ready = ready;
+        cx.notify();
+    }
+
+    pub(crate) fn set_submission_ready(&mut self, ready: bool, cx: &mut Context<'_, Self>) {
+        self.submission_ready = ready;
         cx.notify();
     }
 

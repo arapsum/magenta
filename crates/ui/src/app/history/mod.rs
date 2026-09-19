@@ -417,9 +417,12 @@ impl MainView {
     }
 
     pub(super) fn update_composer_availability(&self, cx: &mut Context<'_, Self>) {
-        let ready = self.can_write(cx);
-        self.composer
-            .update(cx, |composer, cx| composer.set_storage_ready(ready, cx));
+        let can_write = self.can_write(cx);
+        let storage_ready = self.storage_ready.is_ready();
+        self.composer.update(cx, |composer, cx| {
+            composer.set_storage_ready(storage_ready, cx);
+            composer.set_submission_ready(can_write, cx);
+        });
         let history_actions = self.storage_ready.is_ready()
             && self.operation == Operation::Idle
             && self.loading_conversation.is_none();
