@@ -3,7 +3,87 @@ use super::{
     commands::{normalize_command_cwd, parse_command},
     parse_operation, tool_definitions,
 };
-use magenta_core::{AgentToolCall, WorkspaceCommand, WorkspaceOperation, WorkspacePreview};
+use futures_util::{StreamExt as _, stream};
+use magenta_core::{
+    AgentProvider, AgentProviderStream, AgentRequest, AgentResumeRequest, AgentToolCall,
+    Conversation, ConversationId, ConversationMode, EffortLevel, GenerationConfig, ModelId,
+    ProviderId, WorkspaceAccess, WorkspaceCommand, WorkspaceFuture, WorkspaceMutation,
+    WorkspaceOperation, WorkspacePreview,
+};
+use std::{path::PathBuf, sync::Arc};
+
+struct NoopAgentProvider;
+
+impl AgentProvider for NoopAgentProvider {
+    fn start(&self, _: AgentRequest) -> AgentProviderStream {
+        Box::pin(stream::empty())
+    }
+
+    fn resume(&self, _: AgentResumeRequest) -> AgentProviderStream {
+        Box::pin(stream::empty())
+    }
+}
+
+struct PreviewWorkspace;
+
+impl WorkspaceAccess for PreviewWorkspace {
+    fn prepare(
+        &self,
+        _: PathBuf,
+        operation: WorkspaceOperation,
+        _: bool,
+    ) -> WorkspaceFuture<WorkspacePreview> {
+        Box::pin(async move {
+            Ok(WorkspacePreview {
+                path: operation.path().to_owned(),
+                summary: "create a file".to_owned(),
+                output: String::new(),
+                diff: Some("+hello".to_owned()),
+                protected: false,
+                mutation: Some(WorkspaceMutation {
+                    path: operation.path().to_owned(),
+                    expected_digest: None,
+                    replacement: b"hello".to_vec(),
+                    creates_file: true,
+                    creates_directory: false,
+                }),
+            })
+        })
+    }
+
+    fn commit(&self, _: PathBuf, _: WorkspaceMutation) -> WorkspaceFuture<String> {
+        Box::pin(async { Ok("staged".to_owned()) })
+    }
+}
+
+fn agent_context(root: PathBuf) -> super::super::AgentStreamContext {
+    let store = magenta_storage::SqliteConversationStore::new(root.join("trace.db"));
+
+    super::super::AgentStreamContext {
+        provider: Arc::new(NoopAgentProvider),
+        workspace: Arc::new(PreviewWorkspace),
+        command_runner: None,
+        root: root.clone(),
+        conversation: Conversation {
+            id: ConversationId(1),
+            title: "Workspace test".to_owned(),
+            generation: GenerationConfig::new(
+                ProviderId::new("test"),
+                ModelId::new("model"),
+                EffortLevel::Medium,
+            ),
+            mode: ConversationMode::Agent,
+            workspace_root: Some(root),
+        },
+        trace: crate::trace::AssistantTraceRecorder::new(
+            Arc::new(store),
+            magenta_core::MessageId(1),
+            magenta_core::AssistantTrace::default(),
+        ),
+        review: None,
+        context_services: None,
+    }
+}
 
 #[test]
 fn tool_definitions_expose_only_supported_tools() {
@@ -22,6 +102,7 @@ fn tool_definitions_expose_only_supported_tools() {
             "read_file",
             "apply_patch",
             "create_file",
+            "create_directory",
             "run_command"
         ]
     );
@@ -31,7 +112,12 @@ fn tool_definitions_expose_only_supported_tools() {
             .filter(|definition| definition.mutating)
             .map(|definition| definition.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["apply_patch", "create_file", "run_command"]
+        vec![
+            "apply_patch",
+            "create_file",
+            "create_directory",
+            "run_command"
+        ]
     );
     assert!(
         definitions
@@ -200,4 +286,57 @@ fn run_permission_is_limited_to_unprotected_file_edits() {
         },
         &preview(true),
     ));
+}
+
+#[test]
+fn workspace_mutations_emit_approval_before_waiting_for_a_decision() {
+    let root = tempfile::tempdir().expect("temporary workspace should exist");
+    let call = AgentToolCall {
+        id: "create-1".to_owned(),
+        name: "create_file".to_owned(),
+        arguments: r#"{"path":"notes/todo.md","content":"hello"}"#.to_owned(),
+    };
+    let (_, approvals) = async_channel::unbounded();
+    let permissions = Arc::new(std::sync::Mutex::new(super::AgentRunPermissions::default()));
+    let mut events = super::workspace::execute_workspace_tool(
+        agent_context(root.path().to_path_buf()),
+        call,
+        approvals,
+        ProviderId::new("test"),
+        permissions,
+    );
+
+    let first = smol::block_on(events.next()).expect("proposed change should be emitted");
+    assert!(matches!(
+        first.expect("workspace stream should succeed"),
+        magenta_core::AgentRunEvent::WorkspaceChange(change)
+            if change.state == magenta_core::WorkspaceChangeState::Proposed
+    ));
+
+    let second = smol::block_on(events.next()).expect("approval should be emitted");
+    assert!(matches!(
+        second.expect("workspace stream should succeed"),
+        magenta_core::AgentRunEvent::ApprovalRequired(approval)
+            if approval.request_id == "create-1-approval"
+    ));
+}
+
+#[test]
+fn create_directory_is_offered_and_parsed_without_command_execution() {
+    assert!(
+        tool_definitions(false)
+            .iter()
+            .any(|tool| tool.name == "create_directory" && tool.mutating)
+    );
+    let call = AgentToolCall {
+        id: "directory-1".to_owned(),
+        name: "create_directory".to_owned(),
+        arguments: r#"{"path":"HelloExpress"}"#.to_owned(),
+    };
+    assert_eq!(
+        parse_operation(&call),
+        Ok(WorkspaceOperation::CreateDirectory {
+            path: "HelloExpress".to_owned()
+        })
+    );
 }

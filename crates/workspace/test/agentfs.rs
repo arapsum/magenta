@@ -103,3 +103,145 @@ fn discarded_overlay_never_changes_the_host() {
         assert!(!root.join("new.rs").exists());
     });
 }
+
+#[test]
+fn empty_review_session_does_not_block_the_next_run() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        let workspace = AgentFsWorkspace::new(directory.path().join("sessions")).unwrap();
+
+        workspace
+            .start_session(root.clone(), "run-1".into())
+            .await
+            .unwrap();
+        assert!(
+            !workspace
+                .session_has_changes(root.clone(), "run-1".into())
+                .await
+                .unwrap()
+        );
+        assert!(
+            workspace
+                .ensure_session_available(root.clone())
+                .await
+                .is_err()
+        );
+        workspace
+            .discard_session(root.clone(), "run-1".into())
+            .await
+            .unwrap();
+        workspace
+            .ensure_session_available(root.clone())
+            .await
+            .unwrap();
+        workspace
+            .start_session(root.clone(), "run-2".into())
+            .await
+            .unwrap();
+        assert!(
+            !workspace
+                .session_has_changes(root.clone(), "run-2".into())
+                .await
+                .unwrap()
+        );
+    });
+}
+
+#[test]
+fn a_staged_directory_requires_review_and_applies_as_a_directory() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        let workspace = AgentFsWorkspace::new(directory.path().join("sessions")).unwrap();
+        workspace
+            .start_session(root.clone(), "run-1".into())
+            .await
+            .unwrap();
+
+        let preview = workspace
+            .prepare(
+                root.clone(),
+                WorkspaceOperation::CreateDirectory {
+                    path: "HelloExpress/src".into(),
+                },
+                false,
+            )
+            .await
+            .unwrap();
+        workspace
+            .commit(root.clone(), preview.mutation.unwrap())
+            .await
+            .unwrap();
+        assert!(!root.join("HelloExpress").exists());
+        assert!(
+            workspace
+                .session_has_changes(root.clone(), "run-1".into())
+                .await
+                .unwrap()
+        );
+        assert!(
+            workspace
+                .ensure_session_available(root.clone())
+                .await
+                .is_err()
+        );
+
+        let changes = workspace
+            .apply_session(root.clone(), "run-1".into())
+            .await
+            .unwrap();
+        assert!(changes.contains(&"HelloExpress/src".to_owned()));
+        assert!(root.join("HelloExpress/src").is_dir());
+        workspace
+            .ensure_session_available(root.clone())
+            .await
+            .unwrap();
+        workspace.start_session(root, "run-2".into()).await.unwrap();
+    });
+}
+
+#[test]
+fn a_staged_project_directory_and_file_apply_together() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        let workspace = AgentFsWorkspace::new(directory.path().join("sessions")).unwrap();
+        workspace
+            .start_session(root.clone(), "scaffold".into())
+            .await
+            .unwrap();
+
+        for operation in [
+            WorkspaceOperation::CreateDirectory {
+                path: "HelloExpress/src".into(),
+            },
+            WorkspaceOperation::CreateFile {
+                path: "HelloExpress/src/app.js".into(),
+                content: "module.exports = {};\n".into(),
+            },
+        ] {
+            let preview = workspace
+                .prepare(root.clone(), operation, false)
+                .await
+                .unwrap();
+            workspace
+                .commit(root.clone(), preview.mutation.unwrap())
+                .await
+                .unwrap();
+        }
+
+        assert!(!root.join("HelloExpress").exists());
+        workspace
+            .apply_session(root.clone(), "scaffold".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("HelloExpress/src/app.js")).unwrap(),
+            "module.exports = {};\n"
+        );
+    });
+}

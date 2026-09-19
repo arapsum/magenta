@@ -183,6 +183,7 @@ fn prepare(
             path: relative,
             content,
         } => create_file(&root, relative, content),
+        WorkspaceOperation::CreateDirectory { path: relative } => create_directory(&root, relative),
     }
 }
 
@@ -386,6 +387,7 @@ fn apply_patch(root: &Path, relative: &str, unified_diff: &str) -> io::Result<Wo
             expected_digest: Some(digest),
             replacement: replacement.into_bytes(),
             creates_file: false,
+            creates_directory: false,
         }),
     })
 }
@@ -414,13 +416,55 @@ fn create_file(root: &Path, relative: &str, content: &str) -> io::Result<Workspa
             expected_digest: None,
             replacement: content.as_bytes().to_vec(),
             creates_file: true,
+            creates_directory: false,
+        }),
+    })
+}
+
+fn create_directory(root: &Path, relative: &str) -> io::Result<WorkspacePreview> {
+    if path::protected(relative) {
+        return Err(invalid("creating this directory is not allowed"));
+    }
+    let directory = path::safe_path(root, relative, false)?;
+    if directory.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "path already exists",
+        ));
+    }
+    Ok(WorkspacePreview {
+        path: relative.to_owned(),
+        summary: format!("proposed new directory {relative}"),
+        output: String::new(),
+        diff: None,
+        protected: false,
+        mutation: Some(WorkspaceMutation {
+            path: relative.to_owned(),
+            expected_digest: None,
+            replacement: Vec::new(),
+            creates_file: false,
+            creates_directory: true,
         }),
     })
 }
 
 fn commit(root: &Path, mutation: &WorkspaceMutation) -> io::Result<String> {
     let root = path::canonical_root(root)?;
-    let mut file = path::safe_path(&root, &mutation.path, !mutation.creates_file)?;
+    let mut file = path::safe_path(
+        &root,
+        &mutation.path,
+        !mutation.creates_file && !mutation.creates_directory,
+    )?;
+    if mutation.creates_directory {
+        if file.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "directory already exists",
+            ));
+        }
+        fs::create_dir_all(&file)?;
+        return Ok(format!("created directory {}", mutation.path));
+    }
     if mutation.creates_file {
         let parent = file
             .parent()

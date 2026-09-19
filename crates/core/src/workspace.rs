@@ -24,12 +24,18 @@ pub enum WorkspaceOperation {
         path: String,
         content: String,
     },
+    CreateDirectory {
+        path: String,
+    },
 }
 
 impl WorkspaceOperation {
     #[must_use]
     pub const fn is_mutating(&self) -> bool {
-        matches!(self, Self::ApplyPatch { .. } | Self::CreateFile { .. })
+        matches!(
+            self,
+            Self::ApplyPatch { .. } | Self::CreateFile { .. } | Self::CreateDirectory { .. }
+        )
     }
 
     #[must_use]
@@ -39,7 +45,8 @@ impl WorkspaceOperation {
             | Self::SearchText { path, .. }
             | Self::ReadFile { path, .. }
             | Self::ApplyPatch { path, .. }
-            | Self::CreateFile { path, .. } => path,
+            | Self::CreateFile { path, .. }
+            | Self::CreateDirectory { path } => path,
         }
     }
 
@@ -51,6 +58,7 @@ impl WorkspaceOperation {
             Self::ReadFile { .. } => "read_file",
             Self::ApplyPatch { .. } => "apply_patch",
             Self::CreateFile { .. } => "create_file",
+            Self::CreateDirectory { .. } => "create_directory",
         }
     }
 }
@@ -61,6 +69,7 @@ pub struct WorkspaceMutation {
     pub expected_digest: Option<String>,
     pub replacement: Vec<u8>,
     pub creates_file: bool,
+    pub creates_directory: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,7 +114,9 @@ pub trait WorkspaceAccess: Send + Sync {
 
 /// A workspace whose writes remain isolated until an explicit final review.
 pub trait WorkspaceSessionAccess: WorkspaceAccess {
+    fn ensure_session_available(&self, root: PathBuf) -> WorkspaceFuture<()>;
     fn start_session(&self, root: PathBuf, session_id: String) -> WorkspaceFuture<PathBuf>;
+    fn session_has_changes(&self, root: PathBuf, session_id: String) -> WorkspaceFuture<bool>;
     fn apply_session(&self, root: PathBuf, session_id: String) -> WorkspaceFuture<Vec<String>>;
     fn discard_session(&self, root: PathBuf, session_id: String) -> WorkspaceFuture<()>;
 }

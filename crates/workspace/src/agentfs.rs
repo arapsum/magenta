@@ -67,15 +67,46 @@ impl AgentFsWorkspace {
 }
 
 impl WorkspaceSessionAccess for AgentFsWorkspace {
+    fn ensure_session_available(&self, root: PathBuf) -> WorkspaceFuture<()> {
+        let this = self.clone();
+        Box::pin(smol::unblock(move || {
+            let root = path::canonical_root(&root).map_err(WorkspaceError::new)?;
+            let previous = this.sessions.read().get(&root).cloned();
+            if let Some(previous) = previous {
+                let has_changes = !this
+                    .runtime
+                    .block_on(previous.filesystem.get_delta_paths())
+                    .map_err(WorkspaceError::new)?
+                    .is_empty();
+                let detail = if has_changes {
+                    "workspace has staged changes awaiting review"
+                } else {
+                    "workspace already has an active Work run"
+                };
+                return Err(WorkspaceError::new(std::io::Error::other(detail)));
+            }
+            Ok(())
+        }))
+    }
+
     fn start_session(&self, root: PathBuf, session_id: String) -> WorkspaceFuture<PathBuf> {
         let this = self.clone();
         Box::pin(smol::unblock(move || {
             let root = path::canonical_root(&root).map_err(WorkspaceError::new)?;
 
-            if this.sessions.read().contains_key(&root) {
-                return Err(WorkspaceError::new(std::io::Error::other(
-                    "workspace already has an active review session",
-                )));
+            let previous = this.sessions.read().get(&root).cloned();
+            if let Some(previous) = previous {
+                let has_changes = !this
+                    .runtime
+                    .block_on(previous.filesystem.get_delta_paths())
+                    .map_err(WorkspaceError::new)?
+                    .is_empty();
+                let detail = if has_changes {
+                    "workspace has staged changes awaiting review"
+                } else {
+                    "workspace already has an active Work run"
+                };
+                return Err(WorkspaceError::new(std::io::Error::other(detail)));
             }
 
             std::fs::create_dir_all(this.sessions_directory.as_path())
@@ -110,6 +141,26 @@ impl WorkspaceSessionAccess for AgentFsWorkspace {
         }))
     }
 
+    fn session_has_changes(&self, root: PathBuf, session_id: String) -> WorkspaceFuture<bool> {
+        let this = self.clone();
+        Box::pin(smol::unblock(move || {
+            let root = path::canonical_root(&root).map_err(WorkspaceError::new)?;
+            let session = this.sessions.read().get(&root).cloned().ok_or_else(|| {
+                WorkspaceError::new(std::io::Error::other("no active AgentFS session"))
+            })?;
+            if session.id != session_id {
+                return Err(WorkspaceError::new(std::io::Error::other(
+                    "AgentFS session does not match",
+                )));
+            }
+            Ok(!this
+                .runtime
+                .block_on(session.filesystem.get_delta_paths())
+                .map_err(WorkspaceError::new)?
+                .is_empty())
+        }))
+    }
+
     fn apply_session(&self, root: PathBuf, session_id: String) -> WorkspaceFuture<Vec<String>> {
         let this = self.clone();
         Box::pin(smol::unblock(move || {
@@ -129,6 +180,8 @@ impl WorkspaceSessionAccess for AgentFsWorkspace {
                 .runtime
                 .block_on(session.filesystem.get_delta_paths())
                 .map_err(WorkspaceError::new)?;
+            let mut paths = paths.into_iter().collect::<Vec<_>>();
+            paths.sort_by_key(|path| (path.matches('/').count(), path.clone()));
 
             let originals = session.original_digests.lock().clone();
 
@@ -146,12 +199,32 @@ impl WorkspaceSessionAccess for AgentFsWorkspace {
             let mut changes = Vec::new();
 
             let mut rollback: Vec<(PathBuf, Option<Vec<u8>>)> = Vec::new();
+            let mut created_directories = Vec::new();
 
             let apply_result = (|| -> Result<(), WorkspaceError> {
                 for relative in paths {
                     let relative = relative.trim_start_matches('/').to_owned();
 
                     if relative.is_empty() {
+                        continue;
+                    }
+
+                    let target =
+                        path::safe_path(&root, &relative, false).map_err(WorkspaceError::new)?;
+                    let stats = this
+                        .runtime
+                        .block_on(session.filesystem.fs.stat(&relative))
+                        .map_err(WorkspaceError::new)?;
+                    if stats.as_ref().is_some_and(agentfs_sdk::Stats::is_directory) {
+                        if target.exists() {
+                            return Err(WorkspaceError::new(std::io::Error::new(
+                                std::io::ErrorKind::AlreadyExists,
+                                format!("{relative} appeared after approval"),
+                            )));
+                        }
+                        std::fs::create_dir_all(&target).map_err(WorkspaceError::new)?;
+                        created_directories.push(target);
+                        changes.push(relative);
                         continue;
                     }
 
@@ -162,9 +235,6 @@ impl WorkspaceSessionAccess for AgentFsWorkspace {
                     else {
                         continue;
                     };
-
-                    let target =
-                        path::safe_path(&root, &relative, false).map_err(WorkspaceError::new)?;
 
                     rollback.push((target.clone(), std::fs::read(&target).ok()));
 
@@ -188,6 +258,9 @@ impl WorkspaceSessionAccess for AgentFsWorkspace {
                             let _ = std::fs::remove_file(&target);
                         }
                     }
+                }
+                for directory in created_directories.into_iter().rev() {
+                    let _ = std::fs::remove_dir(&directory);
                 }
                 return Err(error);
             }
@@ -244,6 +317,7 @@ impl WorkspaceAccess for AgentFsWorkspace {
             WorkspaceOperation::ReadFile { .. }
                 | WorkspaceOperation::ApplyPatch { .. }
                 | WorkspaceOperation::CreateFile { .. }
+                | WorkspaceOperation::CreateDirectory { .. }
         ) {
             return self.fallback.prepare(root, operation, allow_protected);
         }
@@ -352,11 +426,12 @@ fn prepare_overlay(
                     expected_digest: Some(digest(source.as_bytes())),
                     replacement: replacement.into_bytes(),
                     creates_file: false,
+                    creates_directory: false,
                 }),
             })
         }
         WorkspaceOperation::CreateFile { content, .. } => {
-            if overlay_read(runtime, session, &relative)?.is_some() {
+            if overlay_kind(runtime, session, &relative)?.is_some() {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::AlreadyExists,
                     "file already exists",
@@ -374,11 +449,43 @@ fn prepare_overlay(
                     expected_digest: None,
                     replacement: content.into_bytes(),
                     creates_file: true,
+                    creates_directory: false,
                 }),
             })
         }
+        WorkspaceOperation::CreateDirectory { .. } => {
+            prepare_overlay_create_directory(runtime, session, relative)
+        }
         _ => unreachable!(),
     }
+}
+
+fn prepare_overlay_create_directory(
+    runtime: &tokio::runtime::Runtime,
+    session: &Session,
+    relative: String,
+) -> std::io::Result<WorkspacePreview> {
+    if overlay_kind(runtime, session, &relative)?.is_some() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "path already exists",
+        ));
+    }
+
+    Ok(WorkspacePreview {
+        path: relative.clone(),
+        summary: format!("proposed new directory {relative}"),
+        output: String::new(),
+        diff: None,
+        protected: false,
+        mutation: Some(WorkspaceMutation {
+            path: relative,
+            expected_digest: None,
+            replacement: Vec::new(),
+            creates_file: false,
+            creates_directory: true,
+        }),
+    })
 }
 
 fn commit_overlay(
@@ -388,6 +495,21 @@ fn commit_overlay(
     mutation: &WorkspaceMutation,
 ) -> std::io::Result<String> {
     let target = path::safe_path(root, &mutation.path, false)?;
+    if mutation.creates_directory {
+        if overlay_kind(runtime, session, &mutation.path)?.is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "path appeared after approval",
+            ));
+        }
+        session
+            .original_digests
+            .lock()
+            .entry(mutation.path.clone())
+            .or_insert(None);
+        overlay_mkdir(runtime, session, &mutation.path)?;
+        return Ok(format!("staged directory {} in AgentFS", mutation.path));
+    }
     let current = overlay_read(runtime, session, &mutation.path)?;
     let actual = current.as_deref().map(digest);
 
@@ -448,6 +570,63 @@ fn overlay_read(
             .map_err(io_other)?;
 
         Ok(Some(bytes))
+    })
+}
+
+fn overlay_kind(
+    runtime: &tokio::runtime::Runtime,
+    session: &Session,
+    relative: &str,
+) -> std::io::Result<Option<bool>> {
+    runtime.block_on(async {
+        let mut inode = 1_i64;
+        let mut kind = None;
+        for component in Path::new(relative).components() {
+            let name = component.as_os_str().to_string_lossy();
+            let Some(stats) = session
+                .overlay
+                .lookup(inode, &name)
+                .await
+                .map_err(io_other)?
+            else {
+                return Ok(None);
+            };
+            inode = stats.ino;
+            kind = Some(stats.is_directory());
+        }
+        Ok(kind)
+    })
+}
+
+fn overlay_mkdir(
+    runtime: &tokio::runtime::Runtime,
+    session: &Session,
+    relative: &str,
+) -> std::io::Result<()> {
+    runtime.block_on(async {
+        let mut inode = 1_i64;
+        for component in Path::new(relative).components() {
+            let name = component.as_os_str().to_string_lossy();
+            inode = if let Some(stats) = session
+                .overlay
+                .lookup(inode, &name)
+                .await
+                .map_err(io_other)?
+            {
+                if !stats.is_directory() {
+                    return Err(std::io::Error::other("directory parent is not a directory"));
+                }
+                stats.ino
+            } else {
+                session
+                    .overlay
+                    .mkdir(inode, &name, 0o755, 0, 0)
+                    .await
+                    .map_err(io_other)?
+                    .ino
+            };
+        }
+        Ok(())
     })
 }
 

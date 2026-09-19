@@ -1,64 +1,85 @@
 use super::*;
 
-pub(super) async fn execute_workspace_tool(
-    context: &AgentStreamContext,
+pub(super) fn execute_workspace_tool(
+    context: AgentStreamContext,
     call: AgentToolCall,
-    approvals: &Receiver<ApprovalResponse>,
-    provider_id: &ProviderId,
-    permissions: &AgentRunPermissionsHandle,
-) -> Result<Vec<AgentRunEvent>, magenta_core::ProviderError> {
-    let mut prepared = match prepare_tool(&context.workspace, &context.root, &call).await {
-        Ok(prepared) => prepared,
-        Err(error) => {
-            let output = failed_output(&call.id, &error);
-            return Ok(vec![AgentRunEvent::ToolResult(output)]);
-        }
-    };
+    approvals: Receiver<ApprovalResponse>,
+    provider_id: ProviderId,
+    permissions: AgentRunPermissionsHandle,
+) -> magenta_core::AgentRunStream {
+    Box::pin(async_stream::try_stream! {
+        let mut prepared = match prepare_tool(&context.workspace, &context.root, &call).await {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                let output = failed_output(&call.id, &error);
+                yield AgentRunEvent::ToolResult(output);
+                return;
+            }
+        };
 
-    apply_content_cache(context, &mut prepared).await;
+        apply_content_cache(&context, &mut prepared).await;
 
-    let mut events = Vec::new();
-    let mut preview = prepared.preview;
-    let proposed_change = workspace_change(&call, &preview, WorkspaceChangeState::Proposed);
-    if let Some(change) = proposed_change.clone() {
-        events.push(AgentRunEvent::WorkspaceChange(change));
-    }
-
-    if prepared.operation.is_mutating() || preview.protected {
-        let approval = workspace_approval(&call, &prepared.operation, &preview);
-        if let Some(approval_events) =
-            request_workspace_approval(&call, &approval, proposed_change, approvals, permissions)
-                .await?
-        {
-            events.extend(approval_events);
-            return Ok(events);
+        let mut preview = prepared.preview;
+        let proposed_change = workspace_change(&call, &preview, WorkspaceChangeState::Proposed);
+        if let Some(change) = proposed_change.clone() {
+            yield AgentRunEvent::WorkspaceChange(change);
         }
 
-        if preview.protected {
-            preview = match context
-                .workspace
-                .prepare(context.root.clone(), prepared.operation.clone(), true)
-                .await
-            {
-                Ok(preview) => preview,
-                Err(error) => {
-                    let detail = workspace_error_detail(&error);
-                    let output = failed_output(&call.id, &detail);
-                    events.push(AgentRunEvent::ToolResult(output));
-                    return Ok(events);
+        if prepared.operation.is_mutating() || preview.protected {
+            let approval = workspace_approval(&call, &prepared.operation, &preview);
+            if !workspace_approval_granted(&approval, &permissions) {
+                yield AgentRunEvent::ApprovalRequired(approval.clone());
+            }
+            let approval_events = request_workspace_approval(
+                &call,
+                &approval,
+                proposed_change,
+                &approvals,
+                &permissions,
+            )
+            .await?;
+            if let Some(approval_events) = approval_events {
+                for event in approval_events {
+                    yield event;
                 }
-            };
-        }
-    }
+                return;
+            }
 
-    let (output, change) = finish_tool(context, &prepared.call, preview)
-        .await
-        .map_err(|error| agent_error(provider_id, &error))?;
-    if let Some(change) = change {
-        events.push(AgentRunEvent::WorkspaceChange(change));
-    }
-    events.push(AgentRunEvent::ToolResult(output));
-    Ok(events)
+            if preview.protected {
+                preview = match context
+                    .workspace
+                    .prepare(context.root.clone(), prepared.operation.clone(), true)
+                    .await
+                {
+                    Ok(preview) => preview,
+                    Err(error) => {
+                        let detail = workspace_error_detail(&error);
+                        let output = failed_output(&call.id, &detail);
+                        yield AgentRunEvent::ToolResult(output);
+                        return;
+                    }
+                };
+            }
+        }
+
+        let (output, change) = finish_tool(&context, &prepared.call, preview)
+            .await
+            .map_err(|error| agent_error(&provider_id, &error))?;
+        if let Some(change) = change {
+            yield AgentRunEvent::WorkspaceChange(change);
+        }
+        yield AgentRunEvent::ToolResult(output);
+    })
+}
+
+fn workspace_approval_granted(
+    approval: &AgentApprovalRequest,
+    permissions: &AgentRunPermissionsHandle,
+) -> bool {
+    approval.can_approve_for_run
+        && permissions
+            .lock()
+            .is_ok_and(|permissions| permissions.approve_workspace_edits)
 }
 
 async fn request_workspace_approval(
@@ -68,11 +89,7 @@ async fn request_workspace_approval(
     approvals: &Receiver<ApprovalResponse>,
     permissions: &AgentRunPermissionsHandle,
 ) -> Result<Option<Vec<AgentRunEvent>>, magenta_core::ProviderError> {
-    let granted_for_run = approval.can_approve_for_run
-        && permissions
-            .lock()
-            .is_ok_and(|permissions| permissions.approve_workspace_edits);
-    if granted_for_run {
+    if workspace_approval_granted(approval, permissions) {
         return Ok(None);
     }
 
@@ -257,7 +274,9 @@ pub(super) const fn can_approve_for_run(
     !preview.protected
         && matches!(
             operation,
-            WorkspaceOperation::ApplyPatch { .. } | WorkspaceOperation::CreateFile { .. }
+            WorkspaceOperation::ApplyPatch { .. }
+                | WorkspaceOperation::CreateFile { .. }
+                | WorkspaceOperation::CreateDirectory { .. }
         )
 }
 
@@ -270,7 +289,7 @@ fn workspace_change(
     Some(AgentWorkspaceChange {
         call_id: call.id.clone(),
         path: mutation.path.clone(),
-        kind: if mutation.creates_file {
+        kind: if mutation.creates_file || mutation.creates_directory {
             WorkspaceChangeKind::Create
         } else {
             WorkspaceChangeKind::Modify

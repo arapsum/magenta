@@ -112,8 +112,15 @@ pub fn agent_stream(
                 if let AgentRunEvent::ToolResult(output) = &event {
                     outputs.push(output.clone());
                 }
+
+                let approval_event = matches!(&event, AgentRunEvent::ApprovalRequired(_));
+                if approval_event {
+                    yield event.clone();
+                }
                 context.trace.observe_agent(&event).await;
-                yield event;
+                if !approval_event {
+                    yield event;
+                }
             }
 
             provider_stream = context.provider.resume(AgentResumeRequest {

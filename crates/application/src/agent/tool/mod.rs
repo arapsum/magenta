@@ -57,16 +57,15 @@ pub fn execute_tools(
                 continue;
             }
 
-            for event in workspace::execute_workspace_tool(
-                &context,
+            let mut events = workspace::execute_workspace_tool(
+                context.clone(),
                 call,
-                &approvals,
-                &provider_id,
-                &permissions,
-            )
-            .await?
-            {
-                yield event;
+                approvals.clone(),
+                provider_id.clone(),
+                permissions.clone(),
+            );
+            while let Some(event) = futures_util::StreamExt::next(&mut events).await {
+                yield event?;
             }
         }
     })
@@ -136,6 +135,9 @@ pub fn parse_operation(call: &AgentToolCall) -> Result<WorkspaceOperation, Strin
         "create_file" => Ok(WorkspaceOperation::CreateFile {
             path: string("path")?,
             content: string("content")?,
+        }),
+        "create_directory" => Ok(WorkspaceOperation::CreateDirectory {
+            path: string("path")?,
         }),
         name => Err(format!("unknown workspace tool {name}")),
     }

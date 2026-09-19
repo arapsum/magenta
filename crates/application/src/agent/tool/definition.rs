@@ -9,6 +9,7 @@ pub(super) fn tool_definitions(commands_available: bool) -> Vec<AgentToolDefinit
         read_file(),
         apply_patch(),
         create_file(),
+        create_directory(),
     ];
     if commands_available {
         definitions.push(run_command());
@@ -135,6 +136,21 @@ fn create_file() -> AgentToolDefinition {
                 "content": {"type": "string"}
             },
             "required": ["path", "content"],
+            "additionalProperties": false
+        }),
+        true,
+        false,
+    )
+}
+
+fn create_directory() -> AgentToolDefinition {
+    definition(
+        "create_directory",
+        "Propose a new directory in the selected workspace, including missing parent directories. It must not already exist.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
             "additionalProperties": false
         }),
         true,

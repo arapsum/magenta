@@ -23,6 +23,29 @@ fn creating_a_file_can_materialize_missing_parent_directories() {
 }
 
 #[test]
+fn creating_an_empty_directory_is_a_reviewable_mutation() {
+    let workspace = tempfile::tempdir().unwrap();
+    let operation = WorkspaceOperation::CreateDirectory {
+        path: "HelloExpress/src".to_owned(),
+    };
+    let preview = prepare(workspace.path(), &operation, false).unwrap();
+    assert!(
+        preview
+            .mutation
+            .as_ref()
+            .is_some_and(|mutation| mutation.creates_directory)
+    );
+    assert!(!workspace.path().join("HelloExpress").exists());
+    let mutation = preview.mutation.unwrap();
+    assert_eq!(
+        commit(workspace.path(), &mutation).unwrap(),
+        "created directory HelloExpress/src"
+    );
+    assert!(workspace.path().join("HelloExpress/src").is_dir());
+    assert!(prepare(workspace.path(), &operation, false).is_err());
+}
+
+#[test]
 fn browser_lists_direct_children_and_reads_supported_documents() {
     smol::block_on(async {
         let directory = tempfile::tempdir().expect("workspace should exist");
