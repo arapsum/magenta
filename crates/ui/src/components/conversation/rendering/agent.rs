@@ -141,12 +141,7 @@ impl ConversationView {
         view: &Entity<Self>,
     ) -> AnyElement {
         let message_id = message.id;
-        let mut rows = v_flex()
-            .w_full()
-            .gap(px(2.))
-            .flex_col_reverse()
-            .max_h(TRACE_VIEWPORT_MAX_HEIGHT)
-            .overflow_y_scrollbar();
+        let mut rows = v_flex().w_full().gap_1().flex_col_reverse().py_1().pr_1();
 
         for entry in trace_entries_for_timeline(message) {
             let default_open = entry.kind == AssistantTraceKind::ReasoningSummary;
@@ -155,14 +150,15 @@ impl ConversationView {
                 .get(&(message_id, entry.key.clone()))
                 .copied()
                 .unwrap_or(default_open);
+            let entry_title = trace_entry_title(&entry);
             let title = Self::render_trace_entry_title(&entry, cx);
-            let detail = Self::render_trace_entry_detail(&entry, cx);
+            let detail = Self::render_trace_entry_detail(message_id, &entry, cx);
             let entry_key = entry.key.clone();
             let entry_view = view.clone();
             let disclosure_label = if open {
-                format!("Collapse {} details", entry.title)
+                format!("Collapse {entry_title} details")
             } else {
-                format!("Expand {} details", entry.title)
+                format!("Expand {entry_title} details")
             };
             let disclosure = Button::new(format!(
                 "assistant-trace-entry-{}-{}",
@@ -200,21 +196,23 @@ impl ConversationView {
             let row = v_flex()
                 .w_full()
                 .flex_none()
+                .pl_3()
+                .border_l_1()
+                .border_color(trace_status_color(entry.status, cx).opacity(0.34))
                 .child(disclosure)
                 .when(open, |this| {
-                    this.child(
-                        div()
-                            .w_full()
-                            .pl(px(26.))
-                            .pr(px(8.))
-                            .pb(px(6.))
-                            .child(detail),
-                    )
-                })
-                .hover(|this| this.bg(cx.theme().accent.opacity(0.35)));
+                    this.child(div().w_full().pl_2().pr_2().pb_2().child(detail))
+                });
             rows = rows.child(row);
         }
 
+        let trace_viewport = div()
+            .id(("assistant-trace-viewport", message_id.0))
+            .debug_selector(|| "assistant-trace-viewport".to_owned())
+            .w_full()
+            .max_h(TRACE_VIEWPORT_MAX_HEIGHT)
+            .overflow_y_scrollbar()
+            .child(rows);
         let trace_view = view.clone();
         let trace_open = self.trace_is_open(message);
         let mut accordion = Accordion::new(("assistant-trace", message_id.0))
@@ -229,8 +227,8 @@ impl ConversationView {
         accordion = accordion.item(|item| {
             item.open(trace_open)
                 .title(self.render_trace_header(message, cx, view))
-                .hover(|this| this.bg(cx.theme().accent.opacity(0.45)))
-                .child(v_flex().w_full().gap(px(4.)).child(rows))
+                .hover(|this| this.bg(cx.theme().accent.opacity(0.24)))
+                .child(v_flex().w_full().gap_1().child(trace_viewport))
         });
 
         accordion.into_any_element()
@@ -242,7 +240,10 @@ impl ConversationView {
         let message_id = message.id;
         let label = if active && !final_answer_started {
             ShimmerText::new("Thinking")
+                .id(("assistant-trace-thinking", message.id.0))
                 .duration(Duration::from_millis(2200))
+                .spread(0.38)
+                .font_medium()
                 .into_any_element()
         } else {
             let text = match message.status {
@@ -250,38 +251,46 @@ impl ConversationView {
                 MessageStatus::Failed => "Thinking failed",
                 _ => "Thought",
             };
-            div().child(text).into_any_element()
+            div().font_medium().child(text).into_any_element()
         };
         let elapsed = self.trace_elapsed(message);
         let stop_view = view.clone();
 
-        h_flex()
+        let leading = h_flex()
             .items_center()
-            .gap(px(8.))
+            .gap_2()
             .when(active && !final_answer_started, |this| {
-                this.child(Spinner::new().xsmall().color(cx.theme().warning))
+                this.child(Spinner::new().xsmall().color(cx.theme().primary))
             })
             .child(label)
             .when_some(elapsed, |this, elapsed| {
                 this.child(
                     div()
-                        .text_size(px(11.))
+                        .text_size(rems(0.6875))
                         .text_color(cx.theme().muted_foreground)
                         .child(format_elapsed(elapsed)),
                 )
             })
-            .when(active, |this| {
-                this.child(
-                    Button::new(("stop-assistant-trace", message.id.0))
-                        .ghost()
-                        .xsmall()
-                        .label("Stop")
-                        .on_click(move |_, _, cx| {
-                            stop_view.update(cx, |view, cx| view.request_stop(message_id, cx));
-                        }),
-                )
-            })
-            .into_any_element()
+            .into_any_element();
+
+        let mut header = h_flex()
+            .w_full()
+            .items_center()
+            .justify_between()
+            .child(leading);
+        if active {
+            header = header.child(
+                Button::new(("stop-assistant-trace", message.id.0))
+                    .ghost()
+                    .xsmall()
+                    .compact()
+                    .label("Stop")
+                    .on_click(move |_, _, cx| {
+                        stop_view.update(cx, |view, cx| view.request_stop(message_id, cx));
+                    }),
+            );
+        }
+        header.into_any_element()
     }
 
     fn render_trace_entry_title(entry: &AssistantTraceEntry, cx: &App) -> AnyElement {
@@ -289,28 +298,37 @@ impl ConversationView {
         let icon = render_trace_entry_indicator(entry, cx);
         h_flex()
             .items_center()
-            .gap(px(7.))
+            .gap_1()
             .child(icon)
             .child(
                 div()
                     .min_w_0()
                     .flex_1()
-                    .text_size(px(12.))
-                    .child(entry.title.clone()),
+                    .text_size(rems(0.8125))
+                    .child(trace_entry_title(entry)),
             )
             .child(
                 div()
-                    .text_size(px(11.))
-                    .text_color(trace_status_color(entry.status, cx))
+                    .text_size(rems(0.6875))
+                    .font_medium()
+                    .text_color(trace_status_color(entry.status, cx).opacity(0.9))
                     .child(status),
             )
             .into_any_element()
     }
 
-    fn render_trace_entry_detail(entry: &AssistantTraceEntry, cx: &App) -> AnyElement {
+    fn render_trace_entry_detail(
+        message_id: MessageId,
+        entry: &AssistantTraceEntry,
+        cx: &App,
+    ) -> AnyElement {
+        if entry.kind == AssistantTraceKind::ReasoningSummary {
+            return render_reasoning_summary(message_id, entry, cx);
+        }
+
         v_flex()
             .w_full()
-            .gap(px(6.))
+            .gap_2()
             .when(!entry.input.is_empty(), |this| {
                 this.child(trace_detail_block("Input", &entry.input, cx))
             })
@@ -320,7 +338,7 @@ impl ConversationView {
             .when(entry.input.is_empty() && entry.output.is_empty(), |this| {
                 this.child(
                     div()
-                        .text_size(px(11.))
+                        .text_size(rems(0.6875))
                         .text_color(cx.theme().muted_foreground)
                         .child("No details available yet."),
                 )
@@ -410,13 +428,48 @@ impl ConversationView {
     }
 }
 
-const TRACE_VIEWPORT_MAX_HEIGHT: gpui_kit::Pixels = px(260.);
+const TRACE_VIEWPORT_MAX_HEIGHT: gpui_kit::Rems = rems(16.25);
 
 fn trace_entries_for_timeline(message: &Message) -> Vec<AssistantTraceEntry> {
     let mut entries = message.assistant_trace.entries.clone();
     entries.sort_by_key(|entry| entry.sequence);
     entries.reverse();
     entries
+}
+
+fn trace_entry_title(entry: &AssistantTraceEntry) -> String {
+    if entry.kind == AssistantTraceKind::ReasoningSummary
+        && entry.title.eq_ignore_ascii_case("thinking")
+    {
+        "Reasoning".to_owned()
+    } else {
+        entry.title.clone()
+    }
+}
+
+fn render_reasoning_summary(
+    message_id: MessageId,
+    entry: &AssistantTraceEntry,
+    cx: &App,
+) -> AnyElement {
+    if entry.output.is_empty() {
+        return div()
+            .text_size(rems(0.6875))
+            .text_color(cx.theme().muted_foreground)
+            .child("No summary available yet.")
+            .into_any_element();
+    }
+
+    TextView::markdown(
+        format!("assistant-trace-summary-{}-{}", message_id.0, entry.key),
+        entry.output.clone(),
+    )
+    .selectable(true)
+    .style(conversation_text_style(cx))
+    .text_size(rems(0.8125))
+    .line_height(rems(1.25))
+    .text_color(cx.theme().foreground.opacity(0.9))
+    .into_any_element()
 }
 
 fn render_trace_entry_indicator(entry: &AssistantTraceEntry, cx: &App) -> AnyElement {
@@ -481,24 +534,26 @@ fn trace_status_color(status: AssistantTraceStatus, cx: &App) -> gpui_kit::Hsla 
 fn trace_detail_block(label: &str, value: &str, cx: &App) -> AnyElement {
     v_flex()
         .w_full()
-        .gap(px(3.))
+        .gap_1()
         .child(
             div()
-                .text_size(px(10.))
+                .text_size(rems(0.6875))
                 .text_color(cx.theme().muted_foreground)
                 .child(label.to_owned()),
         )
         .child(
             div()
                 .w_full()
-                .max_h(px(220.))
+                .max_h(rems(10.))
                 .overflow_y_scrollbar()
-                .p(px(8.))
-                .rounded(px(8.))
+                .p_2()
+                .rounded(cx.theme().radius)
                 .bg(crate::components::visual::surface(
                     crate::components::visual::SurfaceLevel::Recessed,
                     cx,
                 ))
+                .border_1()
+                .border_color(cx.theme().border.opacity(0.48))
                 .font_family(cx.theme().mono_font_family.clone())
                 .text_size(cx.theme().mono_font_size)
                 .child(value.to_owned()),

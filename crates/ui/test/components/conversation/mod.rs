@@ -14,8 +14,8 @@ use futures_util::{Stream, stream};
 use gpui_kit::component::Root;
 use gpui_kit::{TestAppContext, size};
 use magenta_core::{
-    ConversationId, ConversationMode, EffortLevel, FinishReason, GenerationConfig, ModelId,
-    TokenUsage,
+    AssistantTrace, AssistantTraceEntry, AssistantTraceKind, AssistantTraceStatus, ConversationId,
+    ConversationMode, EffortLevel, FinishReason, GenerationConfig, ModelId, TokenUsage,
 };
 
 use super::*;
@@ -286,7 +286,7 @@ fn message(id: u64, role: MessageRole, status: MessageStatus) -> Message {
         attachments: Vec::new(),
         generation_outcome: None,
         failure: None,
-        assistant_trace: Default::default(),
+        assistant_trace: AssistantTrace::default(),
     }
 }
 
@@ -332,6 +332,52 @@ fn loading_a_fixture_keeps_the_conversation_in_the_view(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
+fn expanded_trace_viewport_keeps_its_content_visible(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
+        let composer = cx.new(|cx| PromptComposer::new(window, cx));
+        ConversationView::new(composer, window, cx)
+    });
+
+    window
+        .update(cx, |view, _, cx| {
+            let mut assistant = message(2, MessageRole::Assistant, MessageStatus::Complete);
+            assistant.content = "The answer".to_owned();
+            assistant.assistant_trace = AssistantTrace {
+                entries: vec![AssistantTraceEntry {
+                    key: "reasoning:item-1:0".to_owned(),
+                    sequence: 0,
+                    kind: AssistantTraceKind::ReasoningSummary,
+                    status: AssistantTraceStatus::Completed,
+                    title: "Thinking".to_owned(),
+                    tool_name: None,
+                    input: String::new(),
+                    output: "A compact reasoning summary.".to_owned(),
+                    started_at: None,
+                    finished_at: None,
+                }],
+                thinking_duration_ms: Some(1_200),
+            };
+            view.load(
+                ConversationThread {
+                    conversation: conversation(),
+                    messages: vec![assistant],
+                },
+                cx,
+            );
+        })
+        .expect("the conversation test window should remain open");
+    cx.run_until_parked();
+
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    let viewport = visual
+        .debug_bounds("assistant-trace-viewport")
+        .expect("the expanded trace viewport should be rendered");
+    assert!(viewport.size.height > px(0.));
+}
+
+#[gpui_kit::test]
 fn user_messages_keep_prose_literal_and_isolate_fenced_code(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
@@ -350,7 +396,7 @@ fn user_messages_keep_prose_literal_and_isolate_fenced_code(cx: &mut TestAppCont
                 attachments: Vec::new(),
                 generation_outcome: None,
                 failure: None,
-                assistant_trace: Default::default(),
+                assistant_trace: AssistantTrace::default(),
             };
             let rendered = ConversationView::rendered_message(message, cx);
 

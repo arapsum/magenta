@@ -220,7 +220,7 @@ fn failed_finalization_remains_retryable_after_navigation(cx: &mut TestAppContex
         attachments: Vec::new(),
         generation_outcome: None,
         failure: None,
-        assistant_trace: Default::default(),
+        assistant_trace: AssistantTrace::default(),
     };
     window
         .update(cx, |_, window, cx| {

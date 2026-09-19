@@ -70,6 +70,20 @@ fn trace_entries_render_newest_first_for_reverse_timeline() {
 }
 
 #[test]
+fn reasoning_rows_use_a_distinct_summary_label() {
+    let entry = trace_entry(
+        "reasoning:item-1:0",
+        0,
+        AssistantTraceKind::ReasoningSummary,
+        AssistantTraceStatus::Completed,
+        "Thinking",
+        None,
+    );
+
+    assert_eq!(trace_entry_title(&entry), "Reasoning");
+}
+
+#[test]
 fn active_trace_entries_keep_the_timeline_open_by_default() {
     let message = Message {
         status: MessageStatus::Streaming,
@@ -86,7 +100,7 @@ fn active_trace_entries_keep_the_timeline_open_by_default() {
         },
         ..message(AssistantTrace::default())
     };
-    assert!(message.status == MessageStatus::Streaming);
+    assert_eq!(message.status, MessageStatus::Streaming);
     assert!(
         message
             .assistant_trace
