@@ -13,7 +13,8 @@ mod tests;
 use std::{sync::Arc, time::Duration};
 
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, box_shadow,
+    ActiveTheme as _, FocusTrapElement as _, Icon, IconName, Selectable as _, Sizable as _,
+    StyledExt as _, box_shadow,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -108,6 +109,8 @@ pub struct MainView {
     account_state: AccountState,
     finder_open: PanelState,
     finder_input: Entity<InputState>,
+    finder_focus_handle: FocusHandle,
+    finder_return_focus: Option<FocusHandle>,
     finder_selected: usize,
     finder_results: Vec<ConversationSearchResult>,
     finder_search_status: FinderSearchStatus,
@@ -154,6 +157,26 @@ fn configure_agent_composer(
     composer.update(cx, |composer, cx| {
         composer.set_agent_capability(capability, cx);
     });
+}
+
+fn bind_main_keys(cx: &mut Context<'_, MainView>) {
+    cx.bind_keys([
+        KeyBinding::new(OPEN_FINDER_KEY, OpenConversationFinder, None),
+        KeyBinding::new("escape", CloseConversationFinder, None),
+        KeyBinding::new("down", SelectNextFinderResult, Some("ConversationFinder")),
+        KeyBinding::new("up", SelectPreviousFinderResult, Some("ConversationFinder")),
+        KeyBinding::new("enter", ConfirmFinderResult, Some("ConversationFinder")),
+        KeyBinding::new(
+            "enter",
+            ConfirmConversationDeletion,
+            Some("DeleteConversationDialog"),
+        ),
+        KeyBinding::new(
+            "escape",
+            CancelConversationDeletion,
+            Some("DeleteConversationDialog"),
+        ),
+    ]);
 }
 
 #[derive(Clone, Debug)]
@@ -234,25 +257,10 @@ impl MainView {
                 cx.new(|cx| AgentWorkbench::new(catalog, repository, window, cx))
             });
         let finder_input = cx.new(|cx| InputState::new(window, cx).placeholder("Search chats…"));
+        let finder_focus_handle = cx.focus_handle();
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
-        cx.bind_keys([
-            KeyBinding::new(OPEN_FINDER_KEY, OpenConversationFinder, None),
-            KeyBinding::new("escape", CloseConversationFinder, None),
-            KeyBinding::new("down", SelectNextFinderResult, Some("ConversationFinder")),
-            KeyBinding::new("up", SelectPreviousFinderResult, Some("ConversationFinder")),
-            KeyBinding::new("enter", ConfirmFinderResult, Some("ConversationFinder")),
-            KeyBinding::new(
-                "enter",
-                ConfirmConversationDeletion,
-                Some("DeleteConversationDialog"),
-            ),
-            KeyBinding::new(
-                "escape",
-                CancelConversationDeletion,
-                Some("DeleteConversationDialog"),
-            ),
-        ]);
+        bind_main_keys(cx);
         composer.update(cx, |composer, cx| composer.set_storage_ready(false, cx));
         configure_agent_composer(&composer, services.agent.as_ref(), cx);
         let subscriptions = Self::subscribe_to_children(
@@ -297,6 +305,8 @@ impl MainView {
             account_state: AccountState::Restoring,
             finder_open: PanelState::Closed,
             finder_input,
+            finder_focus_handle,
+            finder_return_focus: None,
             finder_selected: 0,
             finder_results: Vec::new(),
             finder_search_status: FinderSearchStatus::Idle,

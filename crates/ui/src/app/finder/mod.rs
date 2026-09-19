@@ -119,6 +119,9 @@ impl MainView {
         }
     }
     pub(crate) fn open_finder(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if !self.finder_open.is_open() {
+            self.finder_return_focus = window.focused(cx);
+        }
         self.finder_open = PanelState::Open;
         self.finder_selected = 0;
         self.finder_results.clear();
@@ -147,7 +150,10 @@ impl MainView {
         self.finder_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
         });
-        if !self.sidebar.read(cx).is_collapsed() && window.viewport_size().width >= px(696.) {
+        if let Some(return_focus) = self.finder_return_focus.take() {
+            return_focus.focus(window, cx);
+        } else if !self.sidebar.read(cx).is_collapsed() && window.viewport_size().width >= px(696.)
+        {
             self.sidebar
                 .update(cx, |sidebar, cx| sidebar.focus_finder_launcher(window, cx));
         } else {
@@ -190,23 +196,44 @@ impl MainView {
         let has_snippet = !result.snippet.is_empty();
         let snippet = highlighted_text(result.snippet.clone(), result.snippet_highlights.clone());
         let selected_result = result;
-        h_flex()
-            .id(("finder-conversation", id.0))
+        let content = Self::finder_conversation_content(title, snippet, has_snippet, updated, cx);
+        Button::new(("finder-conversation", id.0))
+            .ghost()
+            .small()
             .debug_selector(move || format!("finder-conversation-{}", id.0))
             .role(Role::ListBoxOption)
-            .aria_label(accessibility_label)
-            .aria_selected(selected)
-            .cursor_pointer()
+            .selected(selected)
+            .accessibility_label(accessibility_label)
             .w_full()
             .min_h(if has_snippet { px(58.) } else { px(40.) })
             .px(px(10.))
-            .gap(px(12.))
+            .justify_start()
             .rounded(px(8.))
             .when(selected, |this| {
                 this.bg(cx.theme().accent)
                     .text_color(cx.theme().accent_foreground)
             })
-            .hover(|this| this.bg(cx.theme().accent))
+            .focus_visible(|this| this.border_1().border_color(cx.theme().ring))
+            .child(content)
+            .on_click(move |_, window, cx| {
+                view.update(cx, |main, cx| {
+                    main.select_finder_result(selected_result.clone(), window, cx);
+                });
+            })
+            .into_any_element()
+    }
+
+    fn finder_conversation_content(
+        title: StyledText,
+        snippet: StyledText,
+        has_snippet: bool,
+        updated: SharedString,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        h_flex()
+            .w_full()
+            .items_center()
+            .gap(px(12.))
             .child(
                 div()
                     .relative()
@@ -270,11 +297,6 @@ impl MainView {
                     .text_color(cx.theme().muted_foreground.opacity(0.8))
                     .child(updated),
             )
-            .on_click(move |_, window, cx| {
-                view.update(cx, |main, cx| {
-                    main.select_finder_result(selected_result.clone(), window, cx);
-                });
-            })
             .into_any_element()
     }
 
@@ -283,45 +305,51 @@ impl MainView {
         view: Entity<Self>,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        h_flex()
-            .id("finder-new-chat")
+        Button::new("finder-new-chat")
+            .ghost()
+            .small()
             .role(Role::ListBoxOption)
-            .aria_label("New chat")
-            .aria_selected(selected)
-            .cursor_pointer()
+            .selected(selected)
+            .accessibility_label("New chat")
             .w_full()
             .h(px(40.))
             .px(px(10.))
-            .gap(px(12.))
+            .justify_start()
             .rounded(px(8.))
             .when(selected, |this| {
                 this.bg(cx.theme().accent)
                     .text_color(cx.theme().accent_foreground)
             })
-            .hover(|this| this.bg(cx.theme().accent))
+            .focus_visible(|this| this.border_1().border_color(cx.theme().ring))
             .child(
-                Icon::new(IconName::Plus)
-                    .xsmall()
-                    .text_color(cx.theme().muted_foreground),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .font_medium()
-                    .text_size(px(13.))
-                    .child("New chat"),
-            )
-            .child(
-                div()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_size(px(11.))
-                    .text_color(cx.theme().muted_foreground.opacity(0.8))
-                    .child(if cfg!(target_os = "macos") {
-                        "⌘N"
-                    } else {
-                        "Ctrl N"
-                    }),
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap(px(12.))
+                    .child(
+                        Icon::new(IconName::Plus)
+                            .xsmall()
+                            .text_color(cx.theme().muted_foreground),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .font_medium()
+                            .text_size(px(13.))
+                            .child("New chat"),
+                    )
+                    .child(
+                        div()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_size(px(11.))
+                            .text_color(cx.theme().muted_foreground.opacity(0.8))
+                            .child(if cfg!(target_os = "macos") {
+                                "⌘N"
+                            } else {
+                                "Ctrl N"
+                            }),
+                    ),
             )
             .on_click(move |_, window, cx| {
                 view.update(cx, |main, cx| {
@@ -469,6 +497,8 @@ impl MainView {
                     .child(h_flex().gap(px(5.)).child(keycap("↑↓")).child("Navigate"))
                     .child(h_flex().gap(px(5.)).child(keycap("↵")).child("Open")),
             )
+            .track_focus(&self.finder_focus_handle)
+            .focus_trap("conversation-finder-trap", &self.finder_focus_handle)
             .into_any_element()
     }
 

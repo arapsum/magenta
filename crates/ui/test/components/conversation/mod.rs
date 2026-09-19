@@ -71,12 +71,12 @@ fn attachment_preview_can_be_opened_and_dismissed(cx: &mut TestAppContext) {
     });
 
     window
-        .update(cx, |view, _, cx| {
+        .update(cx, |view, window, cx| {
             view.attachment_preview = Some(AttachmentPreview {
                 path: PathBuf::from("reference.png"),
                 name: "Reference image".to_owned(),
             });
-            view.close_attachment_preview(cx);
+            view.close_attachment_preview(window, cx);
             assert!(view.attachment_preview.is_none());
         })
         .expect("the conversation test window should remain open");

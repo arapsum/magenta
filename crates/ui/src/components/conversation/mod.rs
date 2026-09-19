@@ -15,7 +15,8 @@ use std::{
 
 use futures_util::StreamExt as _;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _, box_shadow,
+    ActiveTheme as _, Disableable as _, FocusTrapElement as _, Icon, IconName, Sizable as _,
+    StyledExt as _, box_shadow,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     h_flex,
@@ -24,7 +25,7 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FollowMode,
+    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, FollowMode,
     InteractiveElement as _, IntoElement, ListAlignment, ListSizingBehavior, ListState,
     MouseButton, ObjectFit, ParentElement as _, Render, Role, StatefulInteractiveElement as _,
     Styled as _, StyledImage as _, Task, Window, div, img, linear_color_stop, linear_gradient,
@@ -250,6 +251,8 @@ pub struct ConversationView {
     math_cache: Arc<MathCache>,
     math_tasks: HashMap<FormulaKey, Task<()>>,
     attachment_preview: Option<AttachmentPreview>,
+    attachment_preview_focus: FocusHandle,
+    attachment_preview_return_focus: Option<FocusHandle>,
 }
 
 #[allow(dead_code)]

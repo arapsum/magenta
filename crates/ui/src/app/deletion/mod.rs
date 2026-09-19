@@ -80,6 +80,7 @@ impl MainView {
             .bg(cx.theme().popover)
             .shadow_lg()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .focus_trap("delete-conversation-trap", focus_handle)
             .child(Self::delete_confirmation_copy(title, cx))
             .child(Self::delete_confirmation_actions(cx))
             .into_any_element()

@@ -138,56 +138,62 @@ impl ConversationView {
 
         let multiple = message.attachments.len() > 1;
         let muted_foreground = cx.theme().muted_foreground;
-        let tiles = message
-            .attachments
-            .iter()
-            .enumerate()
-            .map(|(index, attachment)| {
-                let path = attachment.path.clone();
-                let name = attachment.name.clone();
-                let preview_path = path.clone();
-                let preview_name = name;
-                let preview_view = view.clone();
+        let tiles = message.attachments.iter().map(|attachment| {
+            let path = attachment.path.clone();
+            let name = attachment.name.clone();
+            let preview_path = path.clone();
+            let preview_name = name.clone();
+            let preview_view = view.clone();
 
-                div()
-                    .id(format!("message-attachment-{}-{index}", message.id.0))
-                    .relative()
-                    .size(if multiple { px(116.) } else { px(320.) })
-                    .h(if multiple { px(116.) } else { px(220.) })
-                    .overflow_hidden()
-                    .rounded(px(10.))
-                    .border_1()
-                    .border_color(cx.theme().input.opacity(0.72))
-                    .bg(cx.theme().secondary)
-                    .cursor_pointer()
-                    .on_click(move |_, _, cx| {
-                        preview_view.update(cx, |conversation, cx| {
-                            conversation.attachment_preview = Some(AttachmentPreview {
-                                path: preview_path.clone(),
-                                name: preview_name.clone(),
-                            });
-                            cx.notify();
-                        });
-                    })
-                    .child(
-                        img(path)
+            Button::new(format!(
+                "message-attachment-{}-{}",
+                message.id.0,
+                path.to_string_lossy()
+            ))
+            .ghost()
+            .p_0()
+            .relative()
+            .size(if multiple { px(116.) } else { px(320.) })
+            .h(if multiple { px(116.) } else { px(220.) })
+            .overflow_hidden()
+            .rounded(px(10.))
+            .border_1()
+            .border_color(cx.theme().input.opacity(0.72))
+            .bg(cx.theme().secondary)
+            .accessibility_label(format!("Open image {name}"))
+            .tooltip(format!("Open {name}"))
+            .focus_visible(|this| this.border_color(cx.theme().ring))
+            .on_click(move |_, window, cx| {
+                let return_focus = window.focused(cx);
+                preview_view.update(cx, |conversation, cx| {
+                    conversation.attachment_preview_return_focus = return_focus;
+                    conversation.attachment_preview = Some(AttachmentPreview {
+                        path: preview_path.clone(),
+                        name: preview_name.clone(),
+                    });
+                    conversation.attachment_preview_focus.focus(window, cx);
+                    cx.notify();
+                });
+            })
+            .child(
+                img(path)
+                    .size_full()
+                    .object_fit(ObjectFit::Cover)
+                    .with_fallback(move || {
+                        v_flex()
                             .size_full()
-                            .object_fit(ObjectFit::Cover)
-                            .with_fallback(move || {
-                                v_flex()
-                                    .size_full()
-                                    .items_center()
-                                    .justify_center()
-                                    .gap(px(5.))
-                                    .text_size(px(11.))
-                                    .text_color(muted_foreground)
-                                    .child(Icon::new(IconName::GalleryVerticalEnd).small())
-                                    .child("Image unavailable")
-                                    .into_any_element()
-                            }),
-                    )
-                    .into_any_element()
-            });
+                            .items_center()
+                            .justify_center()
+                            .gap(px(5.))
+                            .text_size(px(11.))
+                            .text_color(muted_foreground)
+                            .child(Icon::new(IconName::GalleryVerticalEnd).small())
+                            .child("Image unavailable")
+                            .into_any_element()
+                    }),
+            )
+            .into_any_element()
+        });
 
         Some(
             div()
@@ -201,8 +207,15 @@ impl ConversationView {
         )
     }
 
-    pub(super) fn close_attachment_preview(&mut self, cx: &mut Context<'_, Self>) {
+    pub(super) fn close_attachment_preview(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         if self.attachment_preview.take().is_some() {
+            if let Some(return_focus) = self.attachment_preview_return_focus.take() {
+                return_focus.focus(window, cx);
+            }
             cx.notify();
         }
     }
@@ -223,8 +236,8 @@ impl ConversationView {
                 .inset_0()
                 .key_context("AttachmentPreview")
                 .on_action(
-                    cx.listener(|conversation, _: &CloseAttachmentPreview, _, cx| {
-                        conversation.close_attachment_preview(cx);
+                    cx.listener(|conversation, _: &CloseAttachmentPreview, window, cx| {
+                        conversation.close_attachment_preview(window, cx);
                     }),
                 )
                 .child(
@@ -232,9 +245,9 @@ impl ConversationView {
                         .absolute()
                         .inset_0()
                         .bg(cx.theme().background.opacity(0.82))
-                        .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                             backdrop_view.update(cx, |conversation, cx| {
-                                conversation.close_attachment_preview(cx);
+                                conversation.close_attachment_preview(window, cx);
                             });
                         }),
                 )
@@ -243,6 +256,7 @@ impl ConversationView {
                     preview_name,
                     close_view,
                     muted_foreground,
+                    &self.attachment_preview_focus,
                     cx,
                 ))
                 .into_any_element(),
@@ -254,6 +268,7 @@ impl ConversationView {
         name: String,
         view: Entity<Self>,
         muted_foreground: gpui_kit::Hsla,
+        focus_handle: &FocusHandle,
         cx: &App,
     ) -> AnyElement {
         div()
@@ -277,6 +292,8 @@ impl ConversationView {
                     .bg(cx.theme().popover)
                     .shadow_lg()
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .track_focus(focus_handle)
+                    .focus_trap("attachment-preview-trap", focus_handle)
                     .child(
                         h_flex()
                             .h(px(38.))
@@ -299,9 +316,9 @@ impl ConversationView {
                                     .small()
                                     .icon(IconName::Close)
                                     .tooltip("Close preview")
-                                    .on_click(move |_, _, cx| {
+                                    .on_click(move |_, window, cx| {
                                         view.update(cx, |conversation, cx| {
-                                            conversation.close_attachment_preview(cx);
+                                            conversation.close_attachment_preview(window, cx);
                                         });
                                     }),
                             ),

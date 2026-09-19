@@ -273,6 +273,8 @@ impl ConversationView {
             math_cache: Arc::new(MathCache::default()),
             math_tasks: HashMap::new(),
             attachment_preview: None,
+            attachment_preview_focus: cx.focus_handle(),
+            attachment_preview_return_focus: None,
         }
     }
 
@@ -315,6 +317,7 @@ impl ConversationView {
         self.has_newer = false;
         self.page_load = PageLoadState::Idle;
         self.attachment_preview = None;
+        self.attachment_preview_return_focus = None;
         self.list_state.reset(0);
         cx.notify();
     }

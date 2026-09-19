@@ -463,49 +463,50 @@ impl SidebarView {
         } else {
             "Ctrl K"
         };
-        h_flex()
-            .id("sidebar-search-chats")
+        Button::new("sidebar-search-chats")
+            .ghost()
             .track_focus(&self.finder_launcher_focus)
-            .role(Role::Button)
-            .aria_label("Search chats")
-            .tab_stop(true)
-            .cursor_pointer()
+            .accessibility_label("Search chats")
             .w_full()
-            .h(px(32.))
-            .px(px(10.))
-            .gap(px(7.))
+            .h_8()
             .rounded(px(8.))
             .border_1()
             .border_color(cx.theme().input.opacity(0.72))
             .bg(cx.theme().popover.opacity(0.62))
             .text_color(cx.theme().muted_foreground)
-            .hover(|this| this.bg(cx.theme().sidebar_accent.opacity(0.58)))
-            .child(Icon::new(IconName::Search).xsmall())
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .text_size(px(13.))
-                    .child("Search chats"),
-            )
             .child(
                 h_flex()
-                    .h(px(18.))
-                    .min_w(if cfg!(target_os = "macos") {
-                        px(24.)
-                    } else {
-                        px(38.)
-                    })
-                    .justify_center()
-                    .px(px(5.))
-                    .rounded(px(5.))
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().sidebar)
-                    .text_size(px(10.))
-                    .text_color(cx.theme().muted_foreground)
-                    .child(finder_shortcut),
+                    .w_full()
+                    .items_center()
+                    .gap(px(7.))
+                    .child(Icon::new(IconName::Search).xsmall())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(px(13.))
+                            .child("Search chats"),
+                    )
+                    .child(
+                        h_flex()
+                            .h(px(18.))
+                            .min_w(if cfg!(target_os = "macos") {
+                                px(24.)
+                            } else {
+                                px(38.)
+                            })
+                            .justify_center()
+                            .px(px(5.))
+                            .rounded(px(5.))
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().sidebar)
+                            .text_size(px(10.))
+                            .text_color(cx.theme().muted_foreground)
+                            .child(finder_shortcut),
+                    ),
             )
+            .focus_visible(|this| this.border_color(cx.theme().ring))
             .on_click(move |_, window, cx| {
                 window.dispatch_action(Box::new(OpenConversationFinder), cx);
             })
