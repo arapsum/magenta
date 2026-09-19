@@ -22,9 +22,9 @@ pub fn surface(level: SurfaceLevel, cx: &App) -> Hsla {
     }
 
     match level {
-        SurfaceLevel::Recessed => gpui_kit::rgb(0x10_0C12).into(),
-        SurfaceLevel::Raised => gpui_kit::rgb(0x17_1119).into(),
-        SurfaceLevel::Floating => gpui_kit::rgb(0x20_1620).into(),
+        SurfaceLevel::Recessed => cx.theme().background,
+        SurfaceLevel::Raised => cx.theme().secondary,
+        SurfaceLevel::Floating => cx.theme().popover,
     }
 }
 
