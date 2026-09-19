@@ -28,7 +28,11 @@ impl SidebarView {
                                     .gap(px(8.))
                                     .child(Icon::new(IconName::Folder).xsmall())
                                     .child(
-                                        div().text_size(px(13.)).font_medium().child("Projects"),
+                                        div()
+                                            .text_size(px(13.))
+                                            .line_height(px(18.))
+                                            .font_medium()
+                                            .child("Projects"),
                                     ),
                             )
                             .tooltip(if expanded {
@@ -69,6 +73,7 @@ impl SidebarView {
                         .px(px(8.))
                         .pb(px(4.))
                         .text_size(px(12.))
+                        .line_height(px(16.))
                         .text_color(cx.theme().muted_foreground)
                         .child("Add a workspace for agent conversations."),
                 )
@@ -231,6 +236,7 @@ impl SidebarView {
                             .whitespace_nowrap()
                             .text_ellipsis()
                             .text_size(px(13.))
+                            .line_height(px(18.))
                             .when(active, gpui_kit::component::StyledExt::font_medium)
                             .child(project.name.clone()),
                     ),

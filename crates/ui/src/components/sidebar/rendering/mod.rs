@@ -200,6 +200,7 @@ impl SidebarView {
                             .whitespace_nowrap()
                             .text_ellipsis()
                             .text_size(px(13.5))
+                            .line_height(px(18.))
                             .when(selected, gpui_kit::component::StyledExt::font_medium)
                             .child(conversation.title.clone()),
                     )
@@ -366,6 +367,7 @@ impl SidebarView {
                     .items_center()
                     .px(px(8.))
                     .text_size(px(11.))
+                    .line_height(px(16.))
                     .font_medium()
                     .text_color(cx.theme().muted_foreground.opacity(0.78))
                     .child(title)
@@ -386,7 +388,14 @@ impl SidebarView {
                             .items_center()
                             .gap(px(8.))
                             .child(Icon::empty().path("icons/conversation-pin.svg").xsmall())
-                            .child(div().flex_1().text_size(px(13.)).font_medium().child(title))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_size(px(13.))
+                                    .line_height(px(18.))
+                                    .font_medium()
+                                    .child(title),
+                            )
                             .child(
                                 Icon::new(if expanded {
                                     IconName::ChevronDown
@@ -412,7 +421,13 @@ impl SidebarView {
         cx: &App,
     ) -> AnyElement {
         if let Some(status) = self.history_status {
-            content = content.child(div().p(px(9.)).text_size(px(12.)).child(status));
+            content = content.child(
+                div()
+                    .p(px(9.))
+                    .text_size(px(12.))
+                    .line_height(px(16.))
+                    .child(status),
+            );
             if self.history_failed {
                 let retry_view = view;
                 content = content.child(
@@ -432,6 +447,7 @@ impl SidebarView {
                     div()
                         .p(px(9.))
                         .text_size(px(12.))
+                        .line_height(px(16.))
                         .text_color(cx.theme().muted_foreground)
                         .child("Your conversations will appear here."),
                 )
