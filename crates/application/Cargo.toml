@@ -10,12 +10,12 @@ futures-util.workspace = true
 magenta-core.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+smol.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true
 magenta-storage.workspace = true
-smol.workspace = true
 tempfile.workspace = true
 
 [[test]]

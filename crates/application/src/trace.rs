@@ -12,9 +12,8 @@ use magenta_core::{
 
 #[derive(Clone)]
 pub(crate) struct AssistantTraceRecorder {
-    store: Arc<dyn ConversationStore>,
-    message_id: MessageId,
     state: Arc<Mutex<TraceState>>,
+    persist_sender: async_channel::Sender<AssistantTrace>,
 }
 
 struct TraceState {
@@ -28,13 +27,20 @@ impl AssistantTraceRecorder {
         message_id: MessageId,
         initial: AssistantTrace,
     ) -> Self {
+        let (persist_sender, persist_receiver) = async_channel::unbounded();
+        smol::spawn(async move {
+            while let Ok(trace) = persist_receiver.recv().await {
+                let _ = store.upsert_assistant_trace(message_id, trace).await;
+            }
+        })
+        .detach();
+
         Self {
-            store,
-            message_id,
             state: Arc::new(Mutex::new(TraceState {
                 trace: initial,
                 started_at: Instant::now(),
             })),
+            persist_sender,
         }
     }
 
@@ -297,10 +303,7 @@ impl AssistantTraceRecorder {
         };
 
         if persist {
-            let _ = self
-                .store
-                .upsert_assistant_trace(self.message_id, trace)
-                .await;
+            let _ = self.persist_sender.send(trace).await;
         }
     }
 }
