@@ -78,6 +78,7 @@ impl MainView {
         );
         if self.response_runs.fail(assistant_id, error).is_some() {
             self.sync_run(assistant_id, cx);
+            self.finish_interrupted_workspace_review(assistant_id, window, cx);
             self.save_run(assistant_id, window, cx);
         }
     }
@@ -90,8 +91,41 @@ impl MainView {
     ) {
         if self.response_runs.stop(assistant_id).is_some() {
             self.sync_run(assistant_id, cx);
+            self.finish_interrupted_workspace_review(assistant_id, window, cx);
             self.save_run(assistant_id, window, cx);
         }
+    }
+
+    fn finish_interrupted_workspace_review(
+        &mut self,
+        message_id: MessageId,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) {
+        let Some(controller) = self.response_runs.controller_for(message_id) else {
+            return;
+        };
+        let weak = cx.weak_entity();
+        let task = cx.spawn_in(window, async move |_, window| {
+            let result = controller.finish_workspace_review().await;
+            _ = weak.update_in(window, |main, _window, cx| {
+                main.response_runs.control_tasks.remove(&message_id);
+                match result {
+                    Ok(()) => {
+                        if !controller.has_pending_workspace_review() {
+                            main.response_runs.set_controller(message_id, None);
+                            main.response_runs.remove_after_review(message_id);
+                        }
+                    }
+                    Err(error) => {
+                        tracing::error!(message_id = message_id.0, %error, "could not finish Work session");
+                    }
+                }
+                main.sync_run(message_id, cx);
+                cx.notify();
+            });
+        });
+        self.response_runs.control_tasks.insert(message_id, task);
     }
 
     pub(crate) fn stop_active_run(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
@@ -216,6 +250,7 @@ impl MainView {
                         main.close_requested = super::super::CloseState::Open;
                         tracing::error!(
                             kind = ?source.kind,
+                            error = %source.source,
                             message_id = message_id.0,
                             operation = "response.save",
                             "response could not be saved; retaining per-message recovery state"

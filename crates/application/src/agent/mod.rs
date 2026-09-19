@@ -2,7 +2,10 @@ mod run;
 mod stream;
 mod tool;
 
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use async_channel::Sender;
 use magenta_core::{
@@ -81,15 +84,30 @@ impl AgentApprovalController {
     }
 
     #[must_use]
-    pub const fn has_pending_workspace_review(&self) -> bool {
-        self.review.is_some()
+    pub fn has_pending_workspace_review(&self) -> bool {
+        self.review
+            .as_ref()
+            .is_some_and(AgentReviewHandle::is_pending)
     }
 
     #[must_use]
     pub fn is_workspace_review_for(&self, message_id: magenta_core::MessageId) -> bool {
         self.review
             .as_ref()
-            .is_some_and(|review| review.assistant_message_id == message_id)
+            .is_some_and(|review| review.is_pending() && review.assistant_message_id == message_id)
+    }
+
+    /// Closes an empty session after a failed or stopped Work run, or retains
+    /// staged changes for review.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `AgentFS` session cannot be inspected or closed.
+    pub async fn finish_workspace_review(&self) -> Result<(), magenta_core::WorkspaceError> {
+        if let Some(review) = &self.review {
+            review.finish().await?;
+        }
+        Ok(())
     }
 
     /// Applies all staged changes in the pending workspace review.
@@ -109,6 +127,7 @@ impl AgentApprovalController {
             .workspace
             .apply_session(review.root.clone(), review.session_id.clone())
             .await?;
+        review.pending.store(false, Ordering::Release);
 
         let _ = review
             .store
@@ -136,6 +155,7 @@ impl AgentApprovalController {
             .workspace
             .discard_session(review.root.clone(), review.session_id.clone())
             .await?;
+        review.pending.store(false, Ordering::Release);
 
         let _ = review
             .store
@@ -156,10 +176,34 @@ pub struct AgentReviewHandle {
     root: std::path::PathBuf,
     session_id: String,
     assistant_message_id: magenta_core::MessageId,
+    pending: Arc<AtomicBool>,
 }
 
 impl AgentReviewHandle {
-    pub(crate) async fn awaiting_review(&self) {
+    fn is_pending(&self) -> bool {
+        self.pending.load(Ordering::Acquire)
+    }
+
+    pub(crate) async fn finish(&self) -> Result<(), magenta_core::WorkspaceError> {
+        if !self
+            .workspace
+            .session_has_changes(self.root.clone(), self.session_id.clone())
+            .await?
+        {
+            self.workspace
+                .discard_session(self.root.clone(), self.session_id.clone())
+                .await?;
+            self.pending.store(false, Ordering::Release);
+            let _ = self
+                .store
+                .set_session_state(
+                    self.root.clone(),
+                    self.session_id.clone(),
+                    AgentSessionState::Discarded,
+                )
+                .await;
+            return Ok(());
+        }
         let _ = self
             .store
             .set_session_state(
@@ -168,6 +212,7 @@ impl AgentReviewHandle {
                 AgentSessionState::AwaitingReview,
             )
             .await;
+        Ok(())
     }
 }
 
@@ -236,7 +281,9 @@ fn agent_instructions(root: &std::path::Path) -> String {
             "workspace root. Keep the requested outcome in focus, reuse prior results, and ",
             "do not repeat an identical read or command unless a mutation changed its inputs. ",
             "Inspect existing files before editing them, but create explicitly requested new ",
-            "files directly. Each run has a guarded safety ceiling of 64 continuation rounds ",
+            "files or directories directly. Use create_directory for requested folders and ",
+            "create_file for project files; do not substitute shell instructions when command ",
+            "execution is unavailable. Each run has a guarded safety ceiling of 64 continuation rounds ",
             "and 256 requested tool calls. Never repeat an identical non-empty tool-call batch ",
             "without making progress. Do not request Git operations, deletion, renaming, ",
             "background processes, or network access.",

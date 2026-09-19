@@ -55,6 +55,12 @@ impl ResponseRunCoordinator {
             .is_some_and(ResponseRun::is_unsaved)
     }
 
+    pub(crate) fn has_unfinalized_for(&self, conversation_id: Option<ConversationId>) -> bool {
+        conversation_id
+            .and_then(|id| self.run_for_conversation(id))
+            .is_some_and(|run| run.save_state != RunSaveState::Saved)
+    }
+
     pub(crate) fn blocks_deletion(&self, conversation_id: ConversationId) -> bool {
         self.run_for_conversation(conversation_id)
             .is_some_and(|run| {

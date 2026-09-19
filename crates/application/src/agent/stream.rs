@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use async_channel::Receiver;
 use futures_util::StreamExt as _;
 use magenta_core::{
-    AgentProviderEvent, AgentRequest, AgentResumeRequest, AgentRunEvent, AgentRunStream,
-    AgentToolCall,
+    AgentContinuation, AgentProviderEvent, AgentRequest, AgentResumeRequest, AgentRunEvent,
+    AgentRunStream, AgentToolCall,
 };
 
 use super::{
@@ -32,50 +32,20 @@ pub fn agent_stream(
             let mut continuation = None;
 
             while let Some(event) = provider_stream.next().await {
-                match event? {
-                    AgentProviderEvent::Started => {
-                        if !first_started {
-                            first_started = true;
-                            yield AgentRunEvent::Started;
-                        }
-                    }
-                    AgentProviderEvent::TextDelta(delta) => {
-                        let event = AgentRunEvent::TextDelta(delta);
-                        context.trace.observe_agent(&event).await;
-                        yield event;
-                    }
-                    AgentProviderEvent::TextDeltaWithPhase { delta, phase } => {
-                        let event = AgentRunEvent::TextDeltaWithPhase { delta, phase };
-                        context.trace.observe_agent(&event).await;
-                        yield event;
-                    }
-                    AgentProviderEvent::ReasoningSummaryStarted { key, title } => {
-                        let event = AgentRunEvent::ReasoningSummaryStarted { key, title };
-                        context.trace.observe_agent(&event).await;
-                        yield event;
-                    }
-                    AgentProviderEvent::ReasoningSummaryDelta { key, delta } => {
-                        let event = AgentRunEvent::ReasoningSummaryDelta { key, delta };
-                        context.trace.observe_agent(&event).await;
-                        yield event;
-                    }
-                    AgentProviderEvent::ReasoningSummaryCompleted { key, text } => {
-                        let event = AgentRunEvent::ReasoningSummaryCompleted { key, text };
-                        context.trace.observe_agent(&event).await;
-                        yield event;
-                    }
-                    AgentProviderEvent::ToolCall { call, continuation: next } => {
-                        calls.push(call.clone());
+                match observe_provider_event(&context, event?, &mut first_started).await {
+                    ProviderEventAction::Ignore => {}
+                    ProviderEventAction::Event(event) => yield event,
+                    ProviderEventAction::ToolCall { call, next } => {
+                        calls.push(call);
                         continuation = Some(next);
                     }
-                    AgentProviderEvent::Completed(outcome) => {
-                        if let Some(review) = &context.review {
-                            review.awaiting_review().await;
-                        }
-                        let event = AgentRunEvent::Completed(outcome);
+                    ProviderEventAction::Completed(event) => {
                         context.trace.observe_agent(&event).await;
                         yield event;
                         return;
+                    }
+                    ProviderEventAction::Failure(detail) => {
+                        Err::<(), _>(agent_error(&provider_id, &detail))?;
                     }
                 }
             }
@@ -131,6 +101,65 @@ pub fn agent_stream(
             });
         }
     })
+}
+
+enum ProviderEventAction {
+    Ignore,
+    Event(AgentRunEvent),
+    ToolCall {
+        call: AgentToolCall,
+        next: AgentContinuation,
+    },
+    Completed(AgentRunEvent),
+    Failure(String),
+}
+
+async fn observe_provider_event(
+    context: &AgentStreamContext,
+    event: AgentProviderEvent,
+    first_started: &mut bool,
+) -> ProviderEventAction {
+    let event = match event {
+        AgentProviderEvent::Started => {
+            if *first_started {
+                return ProviderEventAction::Ignore;
+            }
+            *first_started = true;
+            AgentRunEvent::Started
+        }
+        AgentProviderEvent::TextDelta(delta) => AgentRunEvent::TextDelta(delta),
+        AgentProviderEvent::TextDeltaWithPhase { delta, phase } => {
+            AgentRunEvent::TextDeltaWithPhase { delta, phase }
+        }
+        AgentProviderEvent::ReasoningSummaryStarted { key, title } => {
+            AgentRunEvent::ReasoningSummaryStarted { key, title }
+        }
+        AgentProviderEvent::ReasoningSummaryDelta { key, delta } => {
+            AgentRunEvent::ReasoningSummaryDelta { key, delta }
+        }
+        AgentProviderEvent::ReasoningSummaryCompleted { key, text } => {
+            AgentRunEvent::ReasoningSummaryCompleted { key, text }
+        }
+        AgentProviderEvent::ToolCall { call, continuation } => {
+            return ProviderEventAction::ToolCall {
+                call,
+                next: continuation,
+            };
+        }
+        AgentProviderEvent::Completed(outcome) => {
+            if let Some(review) = &context.review
+                && let Err(error) = review.finish().await
+            {
+                return ProviderEventAction::Failure(format!(
+                    "could not finish AgentFS review session: {error}"
+                ));
+            }
+            return ProviderEventAction::Completed(AgentRunEvent::Completed(outcome));
+        }
+    };
+
+    context.trace.observe_agent(&event).await;
+    ProviderEventAction::Event(event)
 }
 
 #[derive(Default)]

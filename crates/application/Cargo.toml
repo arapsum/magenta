@@ -21,3 +21,7 @@ tempfile.workspace = true
 [[test]]
 name = "persisted_workflows"
 path = "test/persisted_workflows.rs"
+
+[[test]]
+name = "work_regeneration"
+path = "test/work_regeneration.rs"

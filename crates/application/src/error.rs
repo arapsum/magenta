@@ -1,4 +1,4 @@
-use magenta_core::{ProviderError, StorageError};
+use magenta_core::{ProviderError, StorageError, WorkspaceError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SendMessageError {
@@ -8,6 +8,8 @@ pub enum SendMessageError {
     Storage(#[from] StorageError),
     #[error("the selected workspace is unavailable")]
     WorkspaceUnavailable,
+    #[error("the workspace review session is unavailable")]
+    WorkspaceSession(#[source] WorkspaceError),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -24,6 +26,8 @@ pub enum RetryMessageError {
     AgentContinuation,
     #[error("the agent workspace is unavailable")]
     WorkspaceUnavailable,
+    #[error("the workspace review session is unavailable")]
+    WorkspaceSession(#[source] WorkspaceError),
 }
 
 #[derive(Debug, thiserror::Error)]

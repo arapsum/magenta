@@ -1,9 +1,10 @@
 use super::reading::{ensure_idle, read_context, read_conversation};
 use super::{
-    AgentRunId, AssistantTrace, Attachment, BeginTurn, Connection, Conversation, ConversationId,
-    ConversationMode, GenerationConfig, Message, MessageId, MessageRole, MessageSequence,
-    MessageStatus, PathBuf, PreparedTurn, Result, StorageError, StorageErrorKind, Transaction,
-    TransactionBehavior, as_i64, as_u64, db, mode_name, params, scalar_i64, select_context,
+    AgentRunId, AssistantTrace, Attachment, BeginTurn, Connection, ContextBudgetReport,
+    Conversation, ConversationId, ConversationMode, GenerationConfig, Message, MessageId,
+    MessageRole, MessageSequence, MessageStatus, PathBuf, PreparedTurn, Result, StorageError,
+    StorageErrorKind, Transaction, TransactionBehavior, as_i64, as_u64, db, mode_name, params,
+    scalar_i64, select_context,
 };
 
 pub(super) async fn begin_turn(
@@ -183,21 +184,20 @@ async fn begin_turn_conversation(
     })
 }
 
-pub(super) async fn regenerate(
-    connection: &mut Connection,
+struct RegenerationContext {
+    sequence: i64,
+    user_message: Message,
+    context: Vec<Message>,
+    context_report: ContextBudgetReport,
+}
+
+async fn read_regeneration_context(
+    transaction: &Transaction<'_>,
     id: ConversationId,
     target: MessageId,
+    conversation: &Conversation,
     overhead: u64,
-) -> Result<PreparedTurn> {
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .await
-        .map_err(db)?;
-
-    ensure_idle(&transaction, id).await?;
-
-    let conversation = read_conversation(&transaction, id).await?;
-
+) -> Result<RegenerationContext> {
     let mut statement = transaction
         .prepare("SELECT sequence,role FROM messages WHERE conversation_id=?1 AND id=?2")
         .await
@@ -227,7 +227,7 @@ pub(super) async fn regenerate(
     drop(rows);
     drop(statement);
 
-    let previous = read_context(&transaction, id, sequence).await?;
+    let previous = read_context(transaction, id, sequence).await?;
     let user_message = previous
         .iter()
         .rev()
@@ -238,6 +238,36 @@ pub(super) async fn regenerate(
     let (context, context_report) =
         select_context(&previous, conversation.generation.limits, overhead)
             .map_err(|error| StorageError::new(StorageErrorKind::ContextTooLarge, error))?;
+
+    Ok(RegenerationContext {
+        sequence,
+        user_message,
+        context,
+        context_report,
+    })
+}
+
+pub(super) async fn regenerate(
+    connection: &mut Connection,
+    id: ConversationId,
+    target: MessageId,
+    overhead: u64,
+) -> Result<PreparedTurn> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .await
+        .map_err(db)?;
+
+    ensure_idle(&transaction, id).await?;
+
+    let conversation = read_conversation(&transaction, id).await?;
+
+    let RegenerationContext {
+        sequence,
+        user_message,
+        context,
+        context_report,
+    } = read_regeneration_context(&transaction, id, target, &conversation, overhead).await?;
 
     let generation = serde_json::to_string(&conversation.generation).map_err(super::invalid)?;
 
@@ -262,6 +292,17 @@ pub(super) async fn regenerate(
         )
         .await
         .map_err(db)?;
+
+    if conversation.mode == ConversationMode::Agent {
+        transaction
+            .execute(
+                "UPDATE agent_runs SET status='running',started_at=?1,finished_at=NULL \
+                 WHERE assistant_message_id=?2",
+                params![super::now()?, as_i64(target.0)?],
+            )
+            .await
+            .map_err(db)?;
+    }
 
     transaction
         .execute(

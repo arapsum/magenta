@@ -12,11 +12,11 @@ use std::{
 use crate::{attachments, failure, invalid, now, records, unavailable};
 use magenta_core::{
     AgentRunId, AssistantTrace, AssistantTraceEntry, AssistantTraceKind, AssistantTraceStatus,
-    Attachment, BeginTurn, Conversation, ConversationId, ConversationMode, ConversationPage,
-    ConversationSearchResult, ConversationStore, ConversationSummary, GenerationConfig, Message,
-    MessageId, MessagePage, MessageRole, MessageSequence, MessageStatus, PreparedTurn, Project,
-    ProjectStore, StorageError, StorageErrorKind, StorageFuture, StoredMessage, Timestamp,
-    select_context,
+    Attachment, BeginTurn, ContextBudgetReport, Conversation, ConversationId, ConversationMode,
+    ConversationPage, ConversationSearchResult, ConversationStore, ConversationSummary,
+    GenerationConfig, Message, MessageId, MessagePage, MessageRole, MessageSequence, MessageStatus,
+    PreparedTurn, Project, ProjectStore, StorageError, StorageErrorKind, StorageFuture,
+    StoredMessage, Timestamp, select_context,
 };
 use rusqlite::OptionalExtension;
 use turso::{
@@ -34,6 +34,7 @@ mod turns;
 type Result<T> = std::result::Result<T, StorageError>;
 const SCHEMA_VERSION: i64 = 2;
 const PAGE_SIZE: usize = 50;
+const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 const SCHEMA: &str = r"
 CREATE TABLE IF NOT EXISTS _magenta_schema(component TEXT PRIMARY KEY, version INTEGER NOT NULL);
@@ -106,6 +107,8 @@ impl TursoAppStore {
             .map_err(db)?;
 
         let connection = database.connect().map_err(db)?;
+
+        connection.busy_timeout(BUSY_TIMEOUT).map_err(db)?;
 
         connection
             .execute("PRAGMA foreign_keys = ON", ())

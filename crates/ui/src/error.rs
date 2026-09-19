@@ -215,6 +215,12 @@ impl MagentaError {
                     title: "Workspace unavailable",
                     message: "Choose the conversation workspace again, then prepare a continuation.",
                 },
+                RetryMessageError::WorkspaceSession(_) => ErrorPresentation {
+                    code: "MAG-RETRY-AGENT-SESSION",
+                    severity: ErrorSeverity::Warning,
+                    title: "Workspace is busy",
+                    message: "Finish the current Work run, or apply or discard its staged changes, before retrying.",
+                },
             },
         }
     }
@@ -280,6 +286,12 @@ const fn send_message_presentation(source: &SendMessageError) -> ErrorPresentati
             severity: ErrorSeverity::Warning,
             title: "Workspace unavailable",
             message: "Choose an existing workspace directory before starting agent mode.",
+        },
+        SendMessageError::WorkspaceSession(_) => ErrorPresentation {
+            code: "MAG-WORKSPACE-SESSION",
+            severity: ErrorSeverity::Warning,
+            title: "Workspace is busy",
+            message: "Finish the current Work run, or apply or discard its staged changes, before sending another Work message.",
         },
         SendMessageError::Storage(error) => match error.kind {
             StorageErrorKind::TooManyAttachments => ErrorPresentation {

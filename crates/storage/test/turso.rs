@@ -75,6 +75,91 @@ fn local_turso_app_store_persists_conversations_and_projects() {
 }
 
 #[test]
+fn local_turso_agent_regeneration_can_finalize_a_replaced_answer() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("workspace");
+        std::fs::create_dir(&root).unwrap();
+        let store = TursoAppStore::new(directory.path().join("magenta.db"));
+        store.initialize().await.unwrap();
+        let pending = store
+            .begin_turn(BeginTurn {
+                conversation_id: None,
+                title: "Work".into(),
+                prompt: "Create a folder".into(),
+                attachments: Vec::new(),
+                generation: generation(),
+                mode: ConversationMode::Agent,
+                workspace_root: Some(root),
+                request_overhead_tokens: 0,
+            })
+            .await
+            .unwrap();
+        let mut first = pending.assistant_message;
+        first.content = "First answer".into();
+        first.status = MessageStatus::Complete;
+        store.finalize(first.clone()).await.unwrap();
+
+        let regenerated = store
+            .begin_regeneration(pending.conversation.id, first.id, 0)
+            .await
+            .unwrap();
+        let mut replacement = regenerated.assistant_message;
+        replacement.content = "Replacement answer".into();
+        replacement.status = MessageStatus::Complete;
+        store.finalize(replacement).await.unwrap();
+    });
+}
+
+#[test]
+fn local_turso_finalize_waits_for_a_concurrent_trace_writer() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("magenta.db");
+        let store = TursoAppStore::new(path.clone());
+        store.initialize().await.unwrap();
+        let pending = store
+            .begin_turn(BeginTurn {
+                conversation_id: None,
+                title: "Concurrent writes".into(),
+                prompt: "Work".into(),
+                attachments: Vec::new(),
+                generation: generation(),
+                mode: ConversationMode::Agent,
+                workspace_root: Some(directory.path().to_path_buf()),
+                request_overhead_tokens: 0,
+            })
+            .await
+            .unwrap();
+        let mut assistant = pending.assistant_message;
+        assistant.content = "Finished".into();
+        assistant.status = MessageStatus::Complete;
+
+        let database = Builder::new_local(&path.to_string_lossy())
+            .build()
+            .await
+            .unwrap();
+        let mut connection = database.connect().unwrap();
+        let transaction = connection
+            .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+            .await
+            .unwrap();
+        transaction
+            .execute(
+                "UPDATE messages SET thinking_duration_ms=1 WHERE id=?1",
+                [i64::try_from(assistant.id.0).unwrap()],
+            )
+            .await
+            .unwrap();
+
+        let finalize = smol::spawn(async move { store.finalize(assistant).await });
+        smol::Timer::after(std::time::Duration::from_millis(150)).await;
+        transaction.commit().await.unwrap();
+        finalize.await.unwrap();
+    });
+}
+
+#[test]
 fn project_database_separates_memory_code_and_sessions_by_root() {
     smol::block_on(async {
         let directory = tempfile::tempdir().unwrap();

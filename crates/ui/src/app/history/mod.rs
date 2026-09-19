@@ -409,7 +409,9 @@ impl MainView {
             && self.operation == Operation::Idle
             && self.loading_conversation.is_none()
             && !self.response_runs.has_active_for(self.active_conversation)
-            && !self.response_runs.has_unsaved_for(self.active_conversation)
+            && !self
+                .response_runs
+                .has_unfinalized_for(self.active_conversation)
             && !self.conversation.read(cx).is_streaming()
             && !self.conversation.read(cx).is_viewing_older_messages()
     }

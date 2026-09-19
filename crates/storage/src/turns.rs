@@ -356,7 +356,7 @@ pub fn regenerate(
         .execute(
             r"
                 UPDATE messages
-                SET content = '', status = 'streaming', outcome = NULL, thinking_duration_ms = NULL,
+                SET content = '', status = 'streaming', outcome = NULL, failure = NULL, thinking_duration_ms = NULL,
                     generation = ?1,
                     omitted_context_messages = ?2
                 WHERE id = ?3
@@ -375,6 +375,16 @@ pub fn regenerate(
             [target.0],
         )
         .map_err(database_error)?;
+
+    if conversation.mode == ConversationMode::Agent {
+        transaction
+            .execute(
+                "UPDATE agent_runs SET status='running', started_at=?1, finished_at=NULL \
+                 WHERE assistant_message_id=?2",
+                params![now()?, target.0],
+            )
+            .map_err(database_error)?;
+    }
 
     transaction
         .execute(

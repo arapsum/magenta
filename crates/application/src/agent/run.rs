@@ -9,6 +9,9 @@ use super::{
     WorkspaceAccess, WorkspaceCommandRunner, WorkspaceSessionAccess, agent_instructions,
     estimate_agent_overhead, instructions_with_context, stream, title_from_prompt, tool,
 };
+use crate::RegenerateMessageInput;
+
+static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl RunWorkspaceAgent {
     #[must_use]
@@ -83,6 +86,12 @@ impl RunWorkspaceAgent {
         if !input.workspace_root.is_dir() {
             return Err(SendMessageError::WorkspaceUnavailable);
         }
+        if let Some((workspace, _)) = &self.workspace_sessions {
+            workspace
+                .ensure_session_available(input.workspace_root.clone())
+                .await
+                .map_err(SendMessageError::WorkspaceSession)?;
+        }
 
         self.prepare_agent_context(&input.workspace_root, &prompt)
             .await;
@@ -117,7 +126,15 @@ impl RunWorkspaceAgent {
             })
             .await?;
 
-        let review = self.start_review(&input.workspace_root, &prepared).await;
+        let review = match self.start_review(&input.workspace_root, &prepared).await {
+            Ok(review) => review,
+            Err(error) => {
+                let mut assistant = prepared.assistant_message.clone();
+                assistant.status = magenta_core::MessageStatus::Failed;
+                let _ = self.store.finalize(assistant).await;
+                return Err(SendMessageError::WorkspaceSession(error));
+            }
+        };
         let (sender, receiver) = async_channel::unbounded();
 
         let controller = AgentApprovalController {
@@ -219,6 +236,12 @@ impl RunWorkspaceAgent {
         if !workspace_root.is_dir() {
             return Err(RetryMessageError::WorkspaceUnavailable);
         }
+        if let Some((workspace, _)) = &self.workspace_sessions {
+            workspace
+                .ensure_session_available(workspace_root.clone())
+                .await
+                .map_err(RetryMessageError::WorkspaceSession)?;
+        }
 
         if let Some(indexer) = &self.code_indexer {
             let _ = indexer.refresh(workspace_root.clone()).await;
@@ -240,13 +263,77 @@ impl RunWorkspaceAgent {
             )
             .await?;
 
+        self.start_existing_run(prepared, workspace_root, instructions)
+            .await
+    }
+
+    /// Regenerates a Work response through the agent provider and workspace tools.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the target, workspace, or review session is unavailable.
+    pub async fn regenerate(
+        &self,
+        input: RegenerateMessageInput,
+    ) -> Result<PendingAgentGeneration, RetryMessageError> {
+        let loaded = self.store.load(input.conversation_id).await?;
+        if loaded.conversation.mode != ConversationMode::Agent {
+            return Err(RetryMessageError::AgentContinuation);
+        }
+        let workspace_root = loaded
+            .conversation
+            .workspace_root
+            .clone()
+            .ok_or(RetryMessageError::WorkspaceUnavailable)?;
+        if !workspace_root.is_dir() {
+            return Err(RetryMessageError::WorkspaceUnavailable);
+        }
+        if let Some((workspace, _)) = &self.workspace_sessions {
+            workspace
+                .ensure_session_available(workspace_root.clone())
+                .await
+                .map_err(RetryMessageError::WorkspaceSession)?;
+        }
+        if let Some(indexer) = &self.code_indexer {
+            let _ = indexer.refresh(workspace_root.clone()).await;
+        }
+        let instructions = agent_instructions(&workspace_root);
+        let tools = tool::tool_definitions(self.command_runner.is_some());
+        let prepared = self
+            .store
+            .begin_regeneration(
+                input.conversation_id,
+                input.target_message_id,
+                estimate_agent_overhead(&instructions, &tools),
+            )
+            .await?;
+
+        self.start_existing_run(prepared, workspace_root, instructions)
+            .await
+    }
+
+    async fn start_existing_run(
+        &self,
+        prepared: PreparedTurn,
+        workspace_root: std::path::PathBuf,
+        instructions: String,
+    ) -> Result<PendingAgentGeneration, RetryMessageError> {
         let retrieved_context = self
             .retrieve_context(&workspace_root, &prepared.user_message.content, None)
             .await;
 
         let instructions = instructions_with_context(instructions, &retrieved_context);
+        let tools = tool::tool_definitions(self.command_runner.is_some());
 
-        let review = self.start_review(&workspace_root, &prepared).await;
+        let review = match self.start_review(&workspace_root, &prepared).await {
+            Ok(review) => review,
+            Err(error) => {
+                let mut assistant = prepared.assistant_message.clone();
+                assistant.status = magenta_core::MessageStatus::Failed;
+                let _ = self.store.finalize(assistant).await;
+                return Err(RetryMessageError::WorkspaceSession(error));
+            }
+        };
         let (sender, receiver) = async_channel::unbounded();
 
         let controller = AgentApprovalController {
@@ -370,28 +457,34 @@ impl RunWorkspaceAgent {
         &self,
         root: &std::path::Path,
         prepared: &PreparedTurn,
-    ) -> Option<AgentReviewHandle> {
-        let (workspace, store) = self.workspace_sessions.as_ref()?;
+    ) -> Result<Option<AgentReviewHandle>, magenta_core::WorkspaceError> {
+        let Some((workspace, store)) = self.workspace_sessions.as_ref() else {
+            return Ok(None);
+        };
         let session_id = format!(
-            "conversation-{}-message-{}",
-            prepared.conversation.id.0, prepared.assistant_message.id.0
+            "conversation-{}-message-{}-attempt-{}-{}",
+            prepared.conversation.id.0,
+            prepared.assistant_message.id.0,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(magenta_core::WorkspaceError::new)?
+                .as_nanos(),
+            NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         );
 
         let database_path = workspace
             .start_session(root.to_path_buf(), session_id.clone())
-            .await
-            .ok()?;
+            .await?;
 
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(magenta_core::WorkspaceError::new)?
+            .as_millis();
         let timestamp = magenta_core::Timestamp(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .ok()?
-                .as_millis()
-                .try_into()
-                .ok()?,
+            i64::try_from(millis).map_err(magenta_core::WorkspaceError::new)?,
         );
 
-        if store
+        if let Err(error) = store
             .create_session(
                 root.to_path_buf(),
                 AgentSession {
@@ -404,20 +497,20 @@ impl RunWorkspaceAgent {
                 },
             )
             .await
-            .is_err()
         {
             let _ = workspace
                 .discard_session(root.to_path_buf(), session_id.clone())
                 .await;
-            return None;
+            return Err(magenta_core::WorkspaceError::new(error));
         }
 
-        Some(AgentReviewHandle {
+        Ok(Some(AgentReviewHandle {
             workspace: workspace.clone(),
             store: store.clone(),
             root: root.to_path_buf(),
             session_id,
             assistant_message_id: prepared.assistant_message.id,
-        })
+            pending: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        }))
     }
 }

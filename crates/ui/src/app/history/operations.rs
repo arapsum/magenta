@@ -164,6 +164,10 @@ impl MainView {
         let Some(id) = self.active_conversation else {
             return;
         };
+        if self.conversation.read(cx).is_agent_conversation() {
+            self.regenerate_agent_response(target, id, window, cx);
+            return;
+        }
         let workflow = self.regenerate_message.clone();
         self.operation = Operation::Preparing;
         self.update_composer_availability(cx);
@@ -195,6 +199,49 @@ impl MainView {
                     Err(source) => {
                         Self::present_storage_error(
                             &MagentaError::RegenerateMessage { source },
+                            window,
+                            cx,
+                        );
+                        main.continue_navigation(window, cx);
+                    }
+                }
+                main.update_composer_availability(cx);
+            });
+        }));
+    }
+
+    fn regenerate_agent_response(
+        &mut self,
+        target: MessageId,
+        id: ConversationId,
+        window: &Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(agent) = self.agent.clone() else {
+            return;
+        };
+        self.operation = Operation::Preparing;
+        self.update_composer_availability(cx);
+        self.operation_task = Some(cx.spawn_in(window, async move |view, window| {
+            let result = agent
+                .regenerate(magenta_application::RegenerateMessageInput {
+                    conversation_id: id,
+                    target_message_id: target,
+                })
+                .await;
+            _ = view.update_in(window, |main, window, cx| {
+                main.operation_task = None;
+                main.operation = Operation::Idle;
+                match result {
+                    Ok(pending) => {
+                        let assistant_id =
+                            main.response_runs.start_agent_retry(pending, window, cx);
+                        main.sync_run(assistant_id, cx);
+                        main.continue_navigation(window, cx);
+                    }
+                    Err(source) => {
+                        Self::present_storage_error(
+                            &MagentaError::RetryMessage { source },
                             window,
                             cx,
                         );
