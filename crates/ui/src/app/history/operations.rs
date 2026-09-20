@@ -43,6 +43,7 @@ impl MainView {
                 .active_conversation
                 .map_or(AgentSendTarget::New, AgentSendTarget::Existing),
             prompt: request.prompt.to_string(),
+            command_id: request.command_id.clone(),
             generation: request.generation.clone(),
             workspace_root,
         };

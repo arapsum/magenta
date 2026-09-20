@@ -344,6 +344,7 @@ fn setup_with_projects_at(
                 MainServices {
                     authenticator: ports.clone(),
                     model_catalog: ports.clone(),
+                    command_catalog: Arc::new(StaticCommandCatalog::default()),
                     settings_store: ports.clone(),
                     agent: None,
                     projects: Some(project_catalog),
@@ -380,6 +381,7 @@ fn setup_at(
                 MainServices {
                     authenticator: ports.clone(),
                     model_catalog: ports.clone(),
+                    command_catalog: Arc::new(StaticCommandCatalog::default()),
                     settings_store: ports.clone(),
                     agent: None,
                     projects: None,

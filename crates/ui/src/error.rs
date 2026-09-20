@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use gpui_kit::component::notification::{Notification, NotificationType};
-use magenta_application::{RegenerateMessageError, RetryMessageError, SendMessageError};
+use magenta_application::{
+    CommandResolutionError, RegenerateMessageError, RetryMessageError, SendMessageError,
+};
 use magenta_core::{ProviderError, ProviderId};
 
 /// The errors that can cross Magenta's subsystem boundaries.
@@ -190,6 +192,7 @@ impl MagentaError {
                         ),
                     },
                 },
+                RegenerateMessageError::Command(error) => command_error_presentation(error),
             },
             Self::RetryMessage { source } => match source {
                 RetryMessageError::Storage(error) => match error.kind {
@@ -203,6 +206,7 @@ impl MagentaError {
                         message: "Magenta kept the failed response. Try again or prepare a continuation.",
                     },
                 },
+                RetryMessageError::Command(error) => command_error_presentation(error),
                 RetryMessageError::AgentContinuation => ErrorPresentation {
                     code: "MAG-RETRY-AGENT-CONTINUATION",
                     severity: ErrorSeverity::Warning,
@@ -281,6 +285,7 @@ const fn send_message_presentation(source: &SendMessageError) -> ErrorPresentati
             title: "Add a message or image",
             message: "Write a message or attach an image before sending.",
         },
+        SendMessageError::Command(error) => command_error_presentation(error),
         SendMessageError::WorkspaceUnavailable => ErrorPresentation {
             code: "MAG-WORKSPACE-UNAVAILABLE",
             severity: ErrorSeverity::Warning,
@@ -331,6 +336,29 @@ const fn send_message_presentation(source: &SendMessageError) -> ErrorPresentati
                 title: "Message could not be sent",
                 message: "Magenta could not save this message. Try again.",
             },
+        },
+    }
+}
+
+const fn command_error_presentation(error: &CommandResolutionError) -> ErrorPresentation {
+    match error {
+        CommandResolutionError::Unavailable { .. } => ErrorPresentation {
+            code: "MAG-COMMAND-UNAVAILABLE",
+            severity: ErrorSeverity::Warning,
+            title: "Command unavailable",
+            message: "This command is no longer supplied by the selected provider.",
+        },
+        CommandResolutionError::WrongMode { .. } => ErrorPresentation {
+            code: "MAG-COMMAND-MODE",
+            severity: ErrorSeverity::Warning,
+            title: "Command unavailable in this mode",
+            message: "Switch modes explicitly to use this command.",
+        },
+        CommandResolutionError::MissingSubject { .. } => ErrorPresentation {
+            code: "MAG-COMMAND-SUBJECT",
+            severity: ErrorSeverity::Warning,
+            title: "Add a command subject",
+            message: "This command needs text or an attachment before it can be sent.",
         },
     }
 }

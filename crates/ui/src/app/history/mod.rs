@@ -351,6 +351,7 @@ impl MainView {
                 .active_conversation
                 .map_or(SendTarget::New, SendTarget::Existing),
             prompt: request.prompt.to_string(),
+            command_id: request.command_id.clone(),
             attachments: request
                 .attachments
                 .iter()

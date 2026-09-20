@@ -2,10 +2,12 @@ use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
     path::PathBuf,
+    sync::Arc,
     time::Duration,
 };
 
 use gpui_kit::component::{
+    command::CommandState,
     input::{InputEvent, TextareaState},
     text::TextViewState,
 };
@@ -14,7 +16,8 @@ use gpui_kit::{
     SharedString, Subscription, Task, Window,
 };
 use magenta_core::{
-    ConversationMode, EffortLevel, GenerationConfig, GenerationSettings, MessageId, ModelDescriptor,
+    CommandCatalog, CommandId, ConversationMode, EffortLevel, GenerationConfig, GenerationSettings,
+    MessageId, ModelDescriptor,
 };
 
 use crate::{ErrorPresentation, MagentaError, components::code_fence};
@@ -49,6 +52,7 @@ impl ReferenceImage {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptRequest {
     pub prompt: SharedString,
+    pub command_id: Option<CommandId>,
     pub generation: GenerationConfig,
     pub attachments: Vec<PathBuf>,
     pub mode: ConversationMode,
@@ -74,6 +78,7 @@ pub enum PromptWorkspacePanel {
 struct ModeDraft {
     prompt: String,
     attachments: Vec<ReferenceImage>,
+    command_id: Option<CommandId>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -96,6 +101,19 @@ pub(super) enum GenerationSelectionOrigin {
 pub(super) enum ModelCatalogState {
     NotLoaded,
     Loaded,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) enum CommandPaletteState {
+    #[default]
+    Closed,
+    Open,
+}
+
+impl CommandPaletteState {
+    pub(super) const fn is_open(self) -> bool {
+        matches!(self, Self::Open)
+    }
 }
 
 impl ModelCatalogState {
@@ -167,6 +185,10 @@ pub struct PromptComposer {
     preview_task: Option<Task<()>>,
     preview_generation: u64,
     pub(super) subscriptions: Vec<Subscription>,
+    pub(super) command_catalog: Option<Arc<dyn CommandCatalog>>,
+    pub(super) command_palette: Entity<CommandState>,
+    pub(super) command_palette_state: CommandPaletteState,
+    pub(super) selected_command: Option<CommandId>,
 }
 
 impl EventEmitter<PromptComposerEvent> for PromptComposer {}

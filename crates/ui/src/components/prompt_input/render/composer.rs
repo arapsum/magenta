@@ -2,6 +2,8 @@ use super::*;
 
 impl PromptComposer {
     pub(super) fn render_input_content(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let view = cx.entity();
+
         v_flex()
             .flex_1()
             .min_h_0()
@@ -47,6 +49,12 @@ impl PromptComposer {
                             "Choose a model above, then press Retry to try this response again.",
                         ),
                 )
+            })
+            .when(self.selected_command.is_some(), |this| {
+                this.child(self.command_chip(&view, cx))
+            })
+            .when_some(self.command_palette_element(&view, cx), |this, palette| {
+                this.child(palette)
             })
             .when(!self.attachments.is_empty(), |this| {
                 this.child(self.attachment_strip(cx))

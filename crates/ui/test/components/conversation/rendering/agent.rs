@@ -31,6 +31,7 @@ fn message(trace: AssistantTrace) -> Message {
         id: MessageId::new(1),
         conversation_id: ConversationId::new(1),
         role: MessageRole::Assistant,
+        command_id: None,
         content: String::new(),
         status: MessageStatus::Complete,
         attachments: Vec::new(),

@@ -14,10 +14,12 @@ impl PromptComposer {
                     .is_some_and(std::path::Path::is_dir));
 
         let content_ready = self.retry_target.is_some() || self.has_content(cx);
+        let command_ready = self.command_submission_ready(cx);
 
         self.storage_ready
             && self.submission_ready
             && content_ready
+            && command_ready
             && self.model.is_some()
             && self.effort.is_some()
             && self.active_model_available()
@@ -58,6 +60,7 @@ impl PromptComposer {
         let current = ModeDraft {
             prompt: self.input.read(cx).value().to_string(),
             attachments: std::mem::take(&mut self.attachments),
+            command_id: self.selected_command.take(),
         };
 
         match self.input_mode {
@@ -70,9 +73,11 @@ impl PromptComposer {
             ConversationMode::Chat => &mut self.chat_draft,
             ConversationMode::Agent => &mut self.work_draft,
         };
+        let next_prompt = next.prompt.clone();
+        let next_command = next.command_id.clone();
 
         self.input.update(cx, |input, cx| {
-            input.set_value(&next.prompt, window, cx);
+            input.set_value(&next_prompt, window, cx);
             input.set_placeholder(
                 if mode == ConversationMode::Chat {
                     "Ask Magenta anything…"
@@ -85,6 +90,7 @@ impl PromptComposer {
         });
 
         self.attachments = std::mem::take(&mut next.attachments);
+        self.selected_command = next_command;
         self.input_mode = mode;
         self.restore_generation_for_input_mode();
         self.schedule_code_preview(window, cx);
@@ -158,6 +164,7 @@ impl PromptComposer {
         });
         Some(PromptRequest {
             prompt: self.input.read(cx).value().trim().to_owned().into(),
+            command_id: self.selected_command.clone(),
             generation,
             attachments: if self.mode == ConversationMode::Chat {
                 self.attachments

@@ -242,6 +242,9 @@ impl PromptComposer {
     pub(crate) fn reset_for_new_conversation(&mut self, cx: &mut Context<'_, Self>) {
         self.chat_generation = ModeGenerationState::default();
         self.work_generation = ModeGenerationState::default();
+        self.chat_draft.command_id = None;
+        self.work_draft.command_id = None;
+        self.selected_command = None;
 
         if !self.models.is_empty() {
             self.apply_default_for_mode(&ConversationMode::Chat);

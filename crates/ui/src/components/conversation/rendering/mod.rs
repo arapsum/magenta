@@ -85,6 +85,20 @@ impl ConversationView {
             );
 
         let attachments = Self::render_user_attachments(&message.message, view, cx);
+        let command_badge = message.message.command_id.as_ref().map(|command| {
+            h_flex()
+                .items_center()
+                .px(px(7.))
+                .py(px(3.))
+                .rounded(px(6.))
+                .border_1()
+                .border_color(cx.theme().primary.opacity(0.28))
+                .bg(cx.theme().accent.opacity(0.3))
+                .text_size(px(11.))
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("/{}", command.as_str()))
+                .into_any_element()
+        });
 
         div()
             .w_full()
@@ -92,6 +106,7 @@ impl ConversationView {
             .flex_col()
             .items_end()
             .gap(px(5.))
+            .when_some(command_badge, gpui_kit::ParentElement::child)
             .when_some(attachments, gpui_kit::ParentElement::child)
             .when(!message.message.content.trim().is_empty(), |this| {
                 this.child(

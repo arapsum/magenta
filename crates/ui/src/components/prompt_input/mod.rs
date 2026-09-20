@@ -1,4 +1,5 @@
 mod attachments;
+mod commands;
 mod render;
 mod state;
 #[cfg(test)]

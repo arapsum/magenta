@@ -20,8 +20,9 @@ use magenta_application::{
     ConversationHistory, ProjectCatalog, RegenerateMessage, RunWorkspaceAgent, SendMessage,
 };
 use magenta_core::{
-    AgentProvider, ChatProvider, ConversationStore, ModelCatalog, ProviderAuthenticator,
-    RepositoryAccess, SettingsStore, WorkspaceAccess, WorkspaceSessionAccess,
+    AgentProvider, ChatProvider, CommandCatalog, ConversationStore, ModelCatalog,
+    ProviderAuthenticator, RepositoryAccess, SettingsStore, WorkspaceAccess,
+    WorkspaceSessionAccess,
 };
 use magenta_providers::OpenAiProvider;
 use magenta_workspace::{AgentFsWorkspace, LocalRepository, LocalWorkspace};
@@ -284,6 +285,7 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     let chat_provider: Arc<dyn ChatProvider> = provider.clone();
     let agent_provider: Arc<dyn AgentProvider> = provider.clone();
     let authenticator: Arc<dyn ProviderAuthenticator> = provider.clone();
+    let command_catalog: Arc<dyn CommandCatalog> = provider.clone();
     let model_catalog: Arc<dyn ModelCatalog> = provider;
 
     let data_dir = dirs::data_local_dir().ok_or_else(|| MagentaError::StorageInitialize {
@@ -326,10 +328,12 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
         config_dir.join("magenta/settings.toml"),
     ));
 
-    let send_message = SendMessage::new(Arc::clone(&chat_provider), Arc::clone(&store));
+    let send_message = SendMessage::new(Arc::clone(&chat_provider), Arc::clone(&store))
+        .with_command_catalog(Arc::clone(&command_catalog));
     let regenerate_provider = Arc::clone(&chat_provider);
     let regenerate_store = Arc::clone(&store);
-    let regenerate_message = RegenerateMessage::new(regenerate_provider, regenerate_store);
+    let regenerate_message = RegenerateMessage::new(regenerate_provider, regenerate_store)
+        .with_command_catalog(Arc::clone(&command_catalog));
 
     let local_workspace = Arc::new(LocalWorkspace);
 
@@ -361,6 +365,8 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
         workspace,
         command_runner,
     )
+    .with_repository(Arc::clone(&repository))
+    .with_command_catalog(Arc::clone(&command_catalog))
     .with_agent_context(memory_store, code_index, embeddings, content_cache)
     .with_code_indexer(code_indexer)
     .with_workspace_sessions(workspace_sessions, session_store);
@@ -375,6 +381,7 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
                 MainServices {
                     authenticator: Arc::clone(&authenticator),
                     model_catalog: Arc::clone(&model_catalog),
+                    command_catalog: Arc::clone(&command_catalog),
                     settings_store: Arc::clone(&settings_store),
                     agent: Some(agent),
                     projects: Some(projects),

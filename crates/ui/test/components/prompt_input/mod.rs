@@ -1,12 +1,13 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use gpui_kit::{
     AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
     TestAppContext, Window, div, size,
 };
 use magenta_core::{
+    AgentToolPolicy, CommandCatalog, CommandDescriptor, CommandId, CommandPromptRequirement,
     ConversationMode, EffortLevel, GenerationConfig, GenerationLimits, GenerationPreference,
-    GenerationSettings, ModelDescriptor,
+    GenerationSettings, ModelDescriptor, ProviderId, StaticCommandCatalog,
 };
 
 use super::{AgentCapability, PromptComposer, PromptComposerEvent, is_supported_image};
@@ -49,6 +50,21 @@ fn preference(provider: &str, model: &str, effort: EffortLevel) -> GenerationPre
         magenta_core::ModelId::new(model),
         effort,
     )
+}
+
+fn command_catalog() -> Arc<dyn CommandCatalog> {
+    Arc::new(StaticCommandCatalog::new(HashMap::from([(
+        ProviderId::new("openai"),
+        vec![CommandDescriptor {
+            id: CommandId::new("plan"),
+            label: "Plan".to_owned(),
+            description: "Create an implementation plan".to_owned(),
+            supported_modes: vec![ConversationMode::Agent],
+            prompt_requirement: CommandPromptRequirement::Required,
+            response_instructions: "Use plan sections".to_owned(),
+            agent_tool_policy: AgentToolPolicy::ReadOnly,
+        }],
+    )])))
 }
 
 #[gpui_kit::test]
@@ -427,6 +443,37 @@ fn request_trims_prompt_and_preserves_configuration(cx: &mut TestAppContext) {
             assert!(request.attachments.is_empty());
         })
         .expect("the composer test window should remain open");
+}
+
+#[gpui_kit::test]
+fn typed_commands_extract_subjects_and_survive_mode_switches(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
+
+    window
+        .update(cx, |composer, window, cx| {
+            composer.set_agent_capability(AgentCapability::Files, cx);
+            composer.set_command_catalog(command_catalog(), cx);
+            composer.select_mode(ConversationMode::Agent, window, cx);
+            composer.input.update(cx, |input, cx| {
+                input.set_value("/plan refactor storage", window, cx);
+            });
+            composer.sync_command_input(window, cx);
+
+            assert_eq!(composer.selected_command, Some(CommandId::new("plan")));
+            assert_eq!(composer.input.read(cx).value().as_ref(), "refactor storage");
+            assert!(composer.command_submission_ready(cx));
+
+            composer.select_mode(ConversationMode::Chat, window, cx);
+            assert_eq!(composer.selected_command, None);
+            composer.select_mode(ConversationMode::Agent, window, cx);
+            assert_eq!(composer.selected_command, Some(CommandId::new("plan")));
+            assert_eq!(composer.input.read(cx).value().as_ref(), "refactor storage");
+        })
+        .expect("the command composer test window should remain open");
 }
 
 #[test]

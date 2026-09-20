@@ -32,8 +32,8 @@ use magenta_application::{
     ConversationHistory, ProjectCatalog, RegenerateMessage, RunWorkspaceAgent, SendMessage,
 };
 use magenta_core::{
-    ConversationId, ConversationSearchResult, MessageId, ModelCatalog, ModelDescriptor,
-    ProviderAccount, ProviderAuthenticator, RepositoryAccess, SettingsStore,
+    CommandCatalog, ConversationId, ConversationSearchResult, MessageId, ModelCatalog,
+    ModelDescriptor, ProviderAccount, ProviderAuthenticator, RepositoryAccess, SettingsStore,
 };
 
 use self::settings_window::{AccountSettingsState, SettingsWindow, SettingsWindowEvent};
@@ -141,6 +141,7 @@ struct PendingDeletion {
 pub struct MainServices {
     pub authenticator: Arc<dyn ProviderAuthenticator>,
     pub model_catalog: Arc<dyn ModelCatalog>,
+    pub command_catalog: Arc<dyn CommandCatalog>,
     pub settings_store: Arc<dyn SettingsStore>,
     pub agent: Option<RunWorkspaceAgent>,
     pub projects: Option<ProjectCatalog>,
@@ -268,6 +269,9 @@ impl MainView {
         bind_main_keys(cx);
         composer.update(cx, |composer, cx| composer.set_storage_ready(false, cx));
         configure_agent_composer(&composer, services.agent.as_ref(), cx);
+        composer.update(cx, |composer, cx| {
+            composer.set_command_catalog(Arc::clone(&services.command_catalog), cx);
+        });
         let subscriptions = Self::subscribe_to_children(
             &composer,
             &sidebar,

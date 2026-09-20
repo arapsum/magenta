@@ -215,6 +215,7 @@ fn failed_finalization_remains_retryable_after_navigation(cx: &mut TestAppContex
         id: MessageId(7),
         conversation_id: ConversationId(1),
         role: MessageRole::Assistant,
+        command_id: None,
         content: "A response to preserve".into(),
         status: MessageStatus::Complete,
         attachments: Vec::new(),

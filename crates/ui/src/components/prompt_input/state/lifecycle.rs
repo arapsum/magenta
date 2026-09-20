@@ -9,6 +9,7 @@ impl PromptComposer {
                 .submit_on_enter(true)
         });
         let preview = cx.new(|cx| TextViewState::markdown("", cx));
+        let command_palette = cx.new(|cx| CommandState::new(window, cx));
 
         let subscriptions = vec![cx.subscribe_in(
             &input,
@@ -17,6 +18,7 @@ impl PromptComposer {
                 InputEvent::Change => {
                     composer.inline_error = None;
                     composer.schedule_code_preview(window, cx);
+                    composer.sync_command_input(window, cx);
                 }
                 InputEvent::Focus | InputEvent::Blur => cx.notify(),
                 InputEvent::PressEnter { shift: false, .. } => composer.submit(cx),
@@ -56,6 +58,10 @@ impl PromptComposer {
             preview_task: None,
             preview_generation: 0,
             subscriptions,
+            command_catalog: None,
+            command_palette,
+            command_palette_state: CommandPaletteState::Closed,
+            selected_command: None,
         }
     }
 
@@ -76,6 +82,15 @@ impl PromptComposer {
             self.generating = generating;
             cx.notify();
         }
+    }
+
+    pub(crate) fn set_command_catalog(
+        &mut self,
+        catalog: Arc<dyn CommandCatalog>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.command_catalog = Some(catalog);
+        cx.notify();
     }
 
     pub(crate) fn set_agent_capability(
@@ -191,6 +206,9 @@ impl PromptComposer {
         self.preview_task.take();
         self.clear_code_preview(cx);
         self.attachments.clear();
+        self.selected_command = None;
+        self.chat_draft.command_id = None;
+        self.work_draft.command_id = None;
         self.inline_error = None;
         cx.notify();
     }
