@@ -1,5 +1,6 @@
 mod appearance;
 mod configuration;
+mod models;
 
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
@@ -15,11 +16,12 @@ use gpui_kit::{
     ParentElement as _, Render, Styled as _, Task, Window, WindowHandle, WindowOptions, div,
     prelude::FluentBuilder as _, px, size,
 };
-use magenta_core::{AppSettings, ProviderAccount, ProviderId, SettingsStore};
+use magenta_core::{AppSettings, ModelDescriptor, ProviderAccount, ProviderId, SettingsStore};
 
 use self::{
     appearance::{installed_font_options, mathematics_group, theme_group, typography_group},
     configuration::configuration_group,
+    models::models_page,
 };
 use crate::{
     ErrorPresentation,
@@ -32,6 +34,7 @@ pub enum SettingsWindowEvent {
     BeginLogin,
     SignOut,
     TypographyChanged,
+    GenerationDefaultsChanged,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -44,6 +47,8 @@ pub struct AccountSettingsState {
 pub struct SettingsWindow {
     store: Arc<dyn SettingsStore>,
     account: AccountSettingsState,
+    models: Vec<ModelDescriptor>,
+    model_catalog_loaded: bool,
     save_task: Option<Task<()>>,
     feedback: Option<SettingsFeedback>,
 }
@@ -67,6 +72,8 @@ impl SettingsWindow {
     pub fn open(
         store: Arc<dyn SettingsStore>,
         account: AccountSettingsState,
+        models: Vec<ModelDescriptor>,
+        model_catalog_loaded: bool,
         cx: &mut App,
     ) -> anyhow::Result<(WindowHandle<gpui_kit::component::Root>, Entity<Self>)> {
         let slot = Rc::new(RefCell::new(None));
@@ -75,6 +82,8 @@ impl SettingsWindow {
             let view = cx.new(|_| Self {
                 store,
                 account,
+                models,
+                model_catalog_loaded,
                 save_task: None,
                 feedback: None,
             });
@@ -93,6 +102,18 @@ impl SettingsWindow {
         cx.notify();
     }
 
+    pub fn set_models(&mut self, models: Vec<ModelDescriptor>, cx: &mut Context<'_, Self>) {
+        self.models = models;
+        self.model_catalog_loaded = true;
+        cx.notify();
+    }
+
+    pub fn clear_models(&mut self, cx: &mut Context<'_, Self>) {
+        self.models.clear();
+        self.model_catalog_loaded = false;
+        cx.notify();
+    }
+
     fn update_settings(
         &mut self,
         update: impl FnOnce(&mut AppSettings),
@@ -101,6 +122,17 @@ impl SettingsWindow {
         let saved = settings::update(update, cx);
         self.persist(saved, cx);
         cx.emit(SettingsWindowEvent::TypographyChanged);
+        cx.notify();
+    }
+
+    pub(super) fn update_generation_settings(
+        &mut self,
+        update: impl FnOnce(&mut magenta_core::GenerationSettings),
+        cx: &mut Context<'_, Self>,
+    ) {
+        let saved = settings::update(|settings| update(&mut settings.generation), cx);
+        self.persist(saved, cx);
+        cx.emit(SettingsWindowEvent::GenerationDefaultsChanged);
         cx.notify();
     }
 
@@ -133,6 +165,7 @@ impl SettingsWindow {
                             "Reloaded settings from disk.".to_owned(),
                         ));
                         cx.emit(SettingsWindowEvent::TypographyChanged);
+                        cx.emit(SettingsWindowEvent::GenerationDefaultsChanged);
                     }
                     Err(_) => view.feedback = Some(SettingsFeedback::Error(SETTINGS_ERROR)),
                 }
@@ -179,6 +212,7 @@ impl SettingsWindow {
                             "Restored default settings.".to_owned(),
                         ));
                         cx.emit(SettingsWindowEvent::TypographyChanged);
+                        cx.emit(SettingsWindowEvent::GenerationDefaultsChanged);
                     }
                     Err(_) => view.feedback = Some(SettingsFeedback::Error(SETTINGS_ERROR)),
                 }
@@ -190,7 +224,11 @@ impl SettingsWindow {
 
     fn settings_pages(&self, _: &mut Window, cx: &Context<'_, Self>) -> Vec<SettingPage> {
         let view = cx.entity();
-        vec![Self::appearance_page(&view, cx), self.providers_page(&view)]
+        vec![
+            Self::appearance_page(&view, cx),
+            models_page(&view, &self.models, self.model_catalog_loaded, cx),
+            self.providers_page(&view),
+        ]
     }
 
     fn appearance_page(view: &Entity<Self>, cx: &App) -> SettingPage {

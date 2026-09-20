@@ -106,12 +106,12 @@ impl MainView {
             self.sidebar
                 .update(cx, |sidebar, cx| sidebar.set_active(Some(id), cx));
             self.composer.update(cx, |composer, cx| {
-                composer.set_configuration(&conversation.generation, cx);
                 composer.set_conversation_context(
                     conversation.mode.clone(),
                     conversation.workspace_root.clone(),
                     cx,
                 );
+                composer.set_configuration(&conversation.generation, cx);
             });
             self.sync_run(assistant_id, cx);
         }
@@ -137,12 +137,12 @@ impl MainView {
             self.sidebar
                 .update(cx, |sidebar, cx| sidebar.set_active(Some(id), cx));
             self.composer.update(cx, |composer, cx| {
-                composer.set_configuration(&conversation.generation, cx);
                 composer.set_conversation_context(
                     conversation.mode.clone(),
                     conversation.workspace_root.clone(),
                     cx,
                 );
+                composer.set_configuration(&conversation.generation, cx);
             });
             self.sync_run(assistant_id, cx);
         }

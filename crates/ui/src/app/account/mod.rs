@@ -37,13 +37,11 @@ impl MainView {
         let catalog = Arc::clone(&self.model_catalog);
         self.model_task = Some(cx.spawn_in(window, async move |view, window| {
             let result = catalog.models().await;
-            _ = view.update_in(window, |main, _, cx| {
+            _ = view.update_in(window, |main, window, cx| {
                 main.model_task = None;
                 match result {
                     Ok(models) => {
-                        main.composer.update(cx, |composer, cx| {
-                            composer.set_models(models, cx);
-                        });
+                        main.set_model_catalog(models, window, cx);
                     }
                     Err(error) => {
                         tracing::warn!(
@@ -117,9 +115,7 @@ impl MainView {
         self.model_task.take();
         let authenticator = Arc::clone(&self.authenticator);
         self.set_account_state(AccountState::SignedOut, cx);
-        self.composer.update(cx, |composer, cx| {
-            composer.set_models(Vec::new(), cx);
-        });
+        self.clear_model_catalog(cx);
         self.account_task = Some(cx.spawn_in(window, async move |view, window| {
             let result = authenticator.sign_out().await;
             _ = view.update_in(window, |main, _, cx| {
@@ -191,16 +187,19 @@ impl MainView {
         let store = Arc::clone(&self.settings_store);
         self.settings_load_task = Some(cx.spawn_in(window, async move |view, window| {
             let result = store.load().await;
-            _ = view.update_in(window, |main, _, cx| {
+            _ = view.update_in(window, |main, window, cx| {
                 main.settings_load_task = None;
                 match result {
                     Ok(value) => crate::settings::replace(value, cx),
-                    Err(error) => tracing::warn!(
-                        error = %error.source,
-                        operation = "settings.load",
-                        "could not load settings; using defaults"
-                    ),
+                    Err(error) => {
+                        tracing::warn!(
+                            error = %error.source,
+                            operation = "settings.load",
+                            "could not load settings; using defaults"
+                        );
+                    }
                 }
+                main.apply_generation_defaults(window, cx);
                 cx.notify();
             });
         }));
@@ -217,7 +216,13 @@ impl MainView {
         }
 
         let account = self.account_settings_state();
-        match SettingsWindow::open(Arc::clone(&self.settings_store), account, cx) {
+        match SettingsWindow::open(
+            Arc::clone(&self.settings_store),
+            account,
+            self.models.clone(),
+            self.model_catalog_loaded,
+            cx,
+        ) {
             Ok((handle, settings_view)) => {
                 let subscription = cx.subscribe_in(
                     &settings_view,
@@ -229,6 +234,9 @@ impl MainView {
                             main.conversation.update(cx, |conversation, cx| {
                                 conversation.refresh_math_typography(cx);
                             });
+                        }
+                        SettingsWindowEvent::GenerationDefaultsChanged => {
+                            main.apply_generation_defaults(window, cx);
                         }
                     },
                 );

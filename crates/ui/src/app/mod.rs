@@ -1,6 +1,7 @@
 mod account;
 mod deletion;
 mod finder;
+mod generation;
 mod history;
 mod projects;
 mod render;
@@ -31,8 +32,8 @@ use magenta_application::{
     ConversationHistory, ProjectCatalog, RegenerateMessage, RunWorkspaceAgent, SendMessage,
 };
 use magenta_core::{
-    ConversationId, ConversationSearchResult, MessageId, ModelCatalog, ProviderAccount,
-    ProviderAuthenticator, RepositoryAccess, SettingsStore,
+    ConversationId, ConversationSearchResult, MessageId, ModelCatalog, ModelDescriptor,
+    ProviderAccount, ProviderAuthenticator, RepositoryAccess, SettingsStore,
 };
 
 use self::settings_window::{AccountSettingsState, SettingsWindow, SettingsWindowEvent};
@@ -89,6 +90,10 @@ pub struct MainView {
     retry_target: Option<MessageId>,
     authenticator: Arc<dyn ProviderAuthenticator>,
     model_catalog: Arc<dyn ModelCatalog>,
+    models: Vec<ModelDescriptor>,
+    model_catalog_loaded: bool,
+    chat_fallback_key: Option<String>,
+    work_fallback_key: Option<String>,
     response_runs: runs::ResponseRunCoordinator,
     history: ConversationHistory,
     projects: Option<ProjectCatalog>,
@@ -285,6 +290,10 @@ impl MainView {
             retry_target: None,
             authenticator: services.authenticator,
             model_catalog: services.model_catalog,
+            models: Vec::new(),
+            model_catalog_loaded: false,
+            chat_fallback_key: None,
+            work_fallback_key: None,
             history,
             response_runs: runs::ResponseRunCoordinator::default(),
             projects: services.projects,

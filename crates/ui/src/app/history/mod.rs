@@ -156,6 +156,7 @@ impl MainView {
             self.active_conversation = None;
             self.conversation.update(cx, super::ConversationView::clear);
             self.composer.update(cx, |composer, cx| {
+                composer.reset_for_new_conversation(cx);
                 composer.set_conversation_context(ConversationMode::Chat, None, cx);
             });
             self.sidebar.update(cx, |sidebar, cx| {
@@ -206,12 +207,12 @@ impl MainView {
                             .as_deref()
                             .and_then(|root| main.sidebar.read(cx).project_for_root(root));
                         main.composer.update(cx, |composer, cx| {
-                            composer.set_configuration(&loaded.conversation.generation, cx);
                             composer.set_conversation_context(
                                 loaded.conversation.mode.clone(),
                                 loaded.conversation.workspace_root.clone(),
                                 cx,
                             );
+                            composer.set_configuration(&loaded.conversation.generation, cx);
                         });
                         main.conversation
                             .update(cx, |view, cx| view.load_page(loaded, cx));
