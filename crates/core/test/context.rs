@@ -1,5 +1,5 @@
 use super::*;
-use crate::{ConversationId, MessageId, MessageStatus};
+use crate::{AssistantTrace, ConversationId, MessageId, MessageStatus};
 
 fn message(id: u64, role: MessageRole, content: &str) -> Message {
     Message {
@@ -11,7 +11,7 @@ fn message(id: u64, role: MessageRole, content: &str) -> Message {
         attachments: Vec::new(),
         generation_outcome: None,
         failure: None,
-        assistant_trace: Default::default(),
+        assistant_trace: AssistantTrace::default(),
     }
 }
 

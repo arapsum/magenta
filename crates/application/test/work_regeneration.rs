@@ -96,21 +96,23 @@ fn work_regeneration_uses_agent_tools_and_can_finalize() {
             .unwrap();
         assert_eq!(replacement.assistant_message.id, first.id);
         while replacement.stream.next().await.is_some() {}
-        let requests = provider.0.lock().unwrap();
-        assert_eq!(requests.len(), 1);
-        assert!(
-            requests[0]
-                .tools
-                .iter()
-                .any(|tool| tool.name == "create_directory")
-        );
-        assert!(
-            !requests[0]
-                .tools
-                .iter()
-                .any(|tool| tool.name == "run_command")
-        );
-        drop(requests);
+        {
+            let requests = provider.0.lock().unwrap();
+            assert_eq!(requests.len(), 1);
+            assert!(
+                requests[0]
+                    .tools
+                    .iter()
+                    .any(|tool| tool.name == "create_directory")
+            );
+            assert!(
+                !requests[0]
+                    .tools
+                    .iter()
+                    .any(|tool| tool.name == "run_command")
+            );
+            drop(requests);
+        }
 
         replacement.assistant_message.status = MessageStatus::Complete;
         replacement.assistant_message.content = "Replacement answer".into();

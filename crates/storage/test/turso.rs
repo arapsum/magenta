@@ -352,6 +352,7 @@ fn local_turso_app_store_persists_ordered_assistant_traces_and_duration() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn local_turso_v1_migration_backfills_one_trace_entry_per_tool_call() {
     smol::block_on(async {
         let directory = tempfile::tempdir().unwrap();

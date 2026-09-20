@@ -1,4 +1,5 @@
 use super::*;
+use crate::AssistantTrace;
 
 #[test]
 fn message_values_preserve_role_status_and_attachments() {
@@ -17,7 +18,7 @@ fn message_values_preserve_role_status_and_attachments() {
         }],
         generation_outcome: None,
         failure: None,
-        assistant_trace: Default::default(),
+        assistant_trace: AssistantTrace::default(),
     };
 
     assert_eq!(message.role, MessageRole::User);
