@@ -16,6 +16,7 @@ fn request(messages: Vec<Message>) -> GenerationRequest {
             EffortLevel::Medium,
         ),
         messages,
+        instructions: None,
     }
 }
 
@@ -24,6 +25,7 @@ fn user_message(content: &str) -> Message {
         id: MessageId::new(1),
         conversation_id: ConversationId::new(1),
         role: MessageRole::User,
+        command_id: None,
         content: content.to_owned(),
         status: MessageStatus::Complete,
         attachments: Vec::new(),

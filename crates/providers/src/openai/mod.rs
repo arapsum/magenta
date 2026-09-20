@@ -1,6 +1,7 @@
 mod agent;
 mod auth;
 mod chat;
+mod commands;
 mod http;
 mod sse;
 mod wire;

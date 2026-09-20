@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AssistantTrace, ConversationId, GenerationOutcome, MessageId, ProviderError,
+    AssistantTrace, CommandId, ConversationId, GenerationOutcome, MessageId, ProviderError,
     ProviderErrorDiagnostic, ProviderErrorKind, ProviderId,
 };
 
@@ -134,6 +134,7 @@ pub struct Message {
     pub id: MessageId,
     pub conversation_id: ConversationId,
     pub role: MessageRole,
+    pub command_id: Option<CommandId>,
     pub content: String,
     pub status: MessageStatus,
     pub attachments: Vec<Attachment>,

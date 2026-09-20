@@ -6,6 +6,7 @@ fn message(id: u64, role: MessageRole, content: &str) -> Message {
         id: MessageId(id),
         conversation_id: ConversationId(1),
         role,
+        command_id: None,
         content: content.to_owned(),
         status: MessageStatus::Complete,
         attachments: Vec::new(),

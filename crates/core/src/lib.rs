@@ -17,6 +17,7 @@ mod identifiers;
 mod message;
 mod models;
 mod project;
+mod provider_commands;
 mod repository;
 mod settings;
 mod storage;
@@ -59,6 +60,10 @@ pub use message::{
 pub use models::{ModelCatalog, ModelCatalogFuture, ModelDescriptor};
 pub use project::{
     Project, ProjectStore, WorkspaceBrowser, WorkspaceDocument, WorkspaceEntry, WorkspaceEntryKind,
+};
+pub use provider_commands::{
+    AgentToolPolicy, CommandCatalog, CommandDescriptor, CommandId, CommandPromptRequirement,
+    StaticCommandCatalog,
 };
 pub use repository::{
     RepositoryAccess, RepositoryChange, RepositoryChangeKind, RepositoryCommit, RepositoryDiff,

@@ -7,6 +7,7 @@ fn message_values_preserve_role_status_and_attachments() {
         id: MessageId::new(1),
         conversation_id: ConversationId::new(2),
         role: MessageRole::User,
+        command_id: None,
         content: "Show me the plan".to_owned(),
         status: MessageStatus::Complete,
         attachments: vec![Attachment {

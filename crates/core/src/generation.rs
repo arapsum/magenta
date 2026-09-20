@@ -139,6 +139,7 @@ impl GenerationConfig {
 pub struct GenerationRequest {
     pub generation: GenerationConfig,
     pub messages: Vec<Message>,
+    pub instructions: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

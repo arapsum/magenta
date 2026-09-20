@@ -11,6 +11,7 @@ fn message(role: MessageRole, content: &str) -> Message {
         id: MessageId::new(1),
         conversation_id: ConversationId::new(1),
         role,
+        command_id: None,
         content: content.to_owned(),
         status: MessageStatus::Complete,
         attachments: Vec::new(),
@@ -29,6 +30,7 @@ fn responses_request_encodes_user_and_assistant_history() {
             message(MessageRole::User, "Hello"),
             message(MessageRole::Assistant, "Hi there"),
         ],
+        None,
     )
     .expect("request should be valid");
     let value = serde_json::to_value(request).expect("request should serialize");
@@ -39,6 +41,23 @@ fn responses_request_encodes_user_and_assistant_history() {
     assert_eq!(value["reasoning"]["effort"], "high");
     assert_eq!(value["input"][0]["content"][0]["type"], "input_text");
     assert_eq!(value["input"][1]["content"][0]["type"], "output_text");
+}
+
+#[test]
+fn responses_request_carries_chat_instructions() {
+    let request = ResponsesRequest::from_request(
+        "gpt-5.4",
+        &EffortLevel::Medium,
+        &[message(MessageRole::User, "Explain this")],
+        Some("Use readable Markdown with an overview."),
+    )
+    .expect("request should be valid");
+    let value = serde_json::to_value(request).expect("request should serialize");
+
+    assert_eq!(
+        value["instructions"],
+        "Use readable Markdown with an overview."
+    );
 }
 
 #[test]
@@ -138,8 +157,9 @@ fn responses_request_encodes_saved_images_as_data_urls() {
         managed: true,
     });
 
-    let request = ResponsesRequest::from_request("gpt-5.6-luna", &EffortLevel::Medium, &[user])
-        .expect("image request should be valid");
+    let request =
+        ResponsesRequest::from_request("gpt-5.6-luna", &EffortLevel::Medium, &[user], None)
+            .expect("image request should be valid");
     let value = serde_json::to_value(request).expect("request should serialize");
 
     assert_eq!(value["input"][0]["content"][0]["type"], "input_text");
@@ -165,8 +185,9 @@ fn responses_request_allows_an_image_without_prompt_text() {
         managed: true,
     });
 
-    let request = ResponsesRequest::from_request("gpt-5.6-luna", &EffortLevel::Medium, &[user])
-        .expect("image-only request should be valid");
+    let request =
+        ResponsesRequest::from_request("gpt-5.6-luna", &EffortLevel::Medium, &[user], None)
+            .expect("image-only request should be valid");
     let value = serde_json::to_value(request).expect("request should serialize");
 
     assert_eq!(
@@ -187,7 +208,7 @@ fn responses_request_rejects_images_over_the_request_limit() {
         managed: true,
     });
 
-    let error = ResponsesRequest::from_request("gpt-5.6-luna", &EffortLevel::Medium, &[user])
+    let error = ResponsesRequest::from_request("gpt-5.6-luna", &EffortLevel::Medium, &[user], None)
         .expect_err("oversized image requests must be rejected before reading files");
 
     assert_eq!(

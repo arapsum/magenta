@@ -3,8 +3,8 @@
 use std::{error::Error, future::Future, ops::Range, pin::Pin};
 
 use crate::{
-    AgentRunId, AssistantTrace, AttachmentDraft, Conversation, ConversationId, ConversationMode,
-    GenerationConfig, Message, MessageId, ProviderId,
+    AgentRunId, AssistantTrace, AttachmentDraft, CommandId, Conversation, ConversationId,
+    ConversationMode, GenerationConfig, Message, MessageId, ProviderId,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -67,6 +67,7 @@ pub struct BeginTurn {
     pub conversation_id: Option<ConversationId>,
     pub title: String,
     pub prompt: String,
+    pub command_id: Option<CommandId>,
     pub attachments: Vec<AttachmentDraft>,
     pub generation: GenerationConfig,
     pub mode: ConversationMode,
@@ -147,6 +148,14 @@ pub trait ConversationStore: Send + Sync {
         generation: GenerationConfig,
         request_overhead_tokens: u64,
     ) -> StorageFuture<PreparedTurn>;
+    fn command_for_response(
+        &self,
+        conversation_id: ConversationId,
+        assistant_message_id: MessageId,
+    ) -> StorageFuture<Option<CommandId>> {
+        let _ = (conversation_id, assistant_message_id);
+        Box::pin(async { Ok(None) })
+    }
     fn finalize(&self, message: Message) -> StorageFuture<()>;
     fn delete(&self, id: ConversationId) -> StorageFuture<()>;
     fn rename(&self, id: ConversationId, title: String) -> StorageFuture<()>;

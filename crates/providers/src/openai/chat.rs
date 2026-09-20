@@ -115,6 +115,7 @@ impl OpenAiProvider {
                 request.generation.model.0.as_str(),
                 &request.generation.effort,
                 &request.messages,
+                request.instructions.as_deref(),
             )
         })
         .await

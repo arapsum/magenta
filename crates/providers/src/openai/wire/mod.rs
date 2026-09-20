@@ -212,6 +212,7 @@ impl ResponsesRequest {
         model: &str,
         effort: &EffortLevel,
         messages: &[magenta_core::Message],
+        instructions: Option<&str>,
     ) -> Result<Self, String> {
         let mut input = Vec::with_capacity(messages.len());
         let mut has_user_message = false;
@@ -267,7 +268,7 @@ impl ResponsesRequest {
                 effort: effort.wire_value().to_owned(),
                 summary: "auto",
             },
-            instructions: None,
+            instructions: instructions.map(ToOwned::to_owned),
             tools: Vec::new(),
             tool_choice: None,
         })
@@ -278,6 +279,7 @@ impl ResponsesRequest {
             &request.generation.model.0,
             &request.generation.effort,
             &request.messages,
+            None,
         )?;
         wire.instructions = Some(request.instructions.clone());
         wire.tools = request
