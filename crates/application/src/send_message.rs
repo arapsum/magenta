@@ -2,13 +2,17 @@ use std::sync::Arc;
 
 use futures_util::StreamExt as _;
 use magenta_core::{
-    AssistantTrace, AttachmentDraft, BeginTurn, ChatProvider, Conversation, ConversationId,
-    ConversationMode, ConversationStore, GenerationConfig, GenerationEvent, GenerationRequest,
-    GenerationStream, Message, MessageId, MessageRole, MessageStatus,
+    AssistantTrace, AttachmentDraft, BeginTurn, ChatProvider, CommandCatalog, CommandId,
+    Conversation, ConversationId, ConversationMode, ConversationStore, GenerationConfig,
+    GenerationEvent, GenerationRequest, GenerationStream, Message, MessageId, MessageRole,
+    MessageStatus,
 };
 
 use crate::trace::traced_generation_stream;
-use crate::{SendMessageError, TitleConversationError};
+use crate::{
+    CommandResolutionError, SendMessageError, TitleConversationError, apply_provider_prompt,
+    resolve_normal, resolve_submission,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SendTarget {
@@ -20,6 +24,7 @@ pub enum SendTarget {
 pub struct SendMessageInput {
     pub target: SendTarget,
     pub prompt: String,
+    pub command_id: Option<CommandId>,
     pub attachments: Vec<AttachmentDraft>,
     pub generation: GenerationConfig,
     pub mode: ConversationMode,
@@ -40,12 +45,23 @@ pub struct PendingGeneration {
 pub struct SendMessage {
     provider: Arc<dyn ChatProvider>,
     store: Arc<dyn ConversationStore>,
+    command_catalog: Option<Arc<dyn CommandCatalog>>,
 }
 
 impl SendMessage {
     #[must_use]
     pub fn new(provider: Arc<dyn ChatProvider>, store: Arc<dyn ConversationStore>) -> Self {
-        Self { provider, store }
+        Self {
+            provider,
+            store,
+            command_catalog: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_command_catalog(mut self, catalog: Arc<dyn CommandCatalog>) -> Self {
+        self.command_catalog = Some(catalog);
+        self
     }
 
     /// Commits the turn before starting the provider.
@@ -56,11 +72,29 @@ impl SendMessage {
         &self,
         input: SendMessageInput,
     ) -> Result<PendingGeneration, SendMessageError> {
-        let prompt = input.prompt.trim().to_owned();
-        if prompt.is_empty() && input.attachments.is_empty() {
+        let stored_prompt = input.prompt.trim().to_owned();
+        let resolution = match input.command_id.as_ref() {
+            Some(command_id) => {
+                let catalog = self.command_catalog.as_deref().ok_or_else(|| {
+                    SendMessageError::Command(CommandResolutionError::Unavailable {
+                        command_id: command_id.clone(),
+                    })
+                })?;
+                resolve_submission(
+                    catalog,
+                    &input.generation,
+                    &input.mode,
+                    Some(command_id),
+                    &stored_prompt,
+                    !input.attachments.is_empty(),
+                )?
+            }
+            None => resolve_normal(&stored_prompt),
+        };
+        if stored_prompt.is_empty() && input.attachments.is_empty() && input.command_id.is_none() {
             return Err(SendMessageError::EmptyPrompt);
         }
-        let title = title_from_prompt(&prompt, &input.attachments);
+        let title = title_from_prompt(&resolution.title_seed, &input.attachments);
         let prepared = self
             .store
             .begin_turn(BeginTurn {
@@ -69,12 +103,13 @@ impl SendMessage {
                     SendTarget::Existing(id) => Some(id),
                 },
                 title,
-                prompt,
+                prompt: stored_prompt,
+                command_id: resolution.command_id.clone(),
                 attachments: input.attachments,
                 generation: input.generation,
                 mode: input.mode,
                 workspace_root: input.workspace_root,
-                request_overhead_tokens: 0,
+                request_overhead_tokens: resolution.request_overhead_tokens,
             })
             .await?;
         let stream = traced_generation_stream(
@@ -83,7 +118,8 @@ impl SendMessage {
             prepared.assistant_message.assistant_trace.clone(),
             self.provider.stream(GenerationRequest {
                 generation: prepared.conversation.generation.clone(),
-                messages: prepared.context,
+                messages: apply_provider_prompt(prepared.context, Some(&resolution)),
+                instructions: resolution.instructions,
             }),
         );
         Ok(PendingGeneration {
@@ -118,6 +154,7 @@ impl SendMessage {
             id: MessageId(0),
             conversation_id,
             role: MessageRole::User,
+            command_id: None,
             content: request,
             status: MessageStatus::Complete,
             attachments: Vec::new(),
@@ -128,6 +165,7 @@ impl SendMessage {
         let mut stream = self.provider.stream(GenerationRequest {
             generation,
             messages: vec![message],
+            instructions: None,
         });
         let mut output = String::new();
         let mut completed = false;

@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use magenta_core::{
-    ChatProvider, ConversationId, ConversationMode, ConversationStore, GenerationConfig,
-    GenerationRequest, GenerationStream, Message, MessageId, ProviderId,
+    ChatProvider, CommandCatalog, ConversationId, ConversationMode, ConversationStore,
+    GenerationConfig, GenerationRequest, GenerationStream, Message, MessageId, ProviderId,
 };
 
 use crate::trace::traced_generation_stream;
-use crate::{RegenerateMessageError, RetryMessageError};
+use crate::{RegenerateMessageError, RetryMessageError, apply_provider_prompt, resolve_persisted};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RegenerateMessageInput {
@@ -43,12 +43,23 @@ pub struct PendingRetry {
 pub struct RegenerateMessage {
     provider: Arc<dyn ChatProvider>,
     store: Arc<dyn ConversationStore>,
+    command_catalog: Option<Arc<dyn CommandCatalog>>,
 }
 
 impl RegenerateMessage {
     #[must_use]
     pub fn new(provider: Arc<dyn ChatProvider>, store: Arc<dyn ConversationStore>) -> Self {
-        Self { provider, store }
+        Self {
+            provider,
+            store,
+            command_catalog: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_command_catalog(mut self, catalog: Arc<dyn CommandCatalog>) -> Self {
+        self.command_catalog = Some(catalog);
+        self
     }
 
     /// Commits a replacement and loads context before starting the provider.
@@ -59,9 +70,26 @@ impl RegenerateMessage {
         &self,
         input: RegenerateMessageInput,
     ) -> Result<PendingRegeneration, RegenerateMessageError> {
+        let conversation = self.store.load(input.conversation_id).await?;
+        let command_id = self
+            .store
+            .command_for_response(input.conversation_id, input.target_message_id)
+            .await?;
+        let resolution = self.resolve_persisted(
+            &conversation.conversation.generation,
+            &conversation.conversation.mode,
+            command_id.as_ref(),
+        )?;
+        let request_overhead_tokens = resolution
+            .as_ref()
+            .map_or(0, |resolution| resolution.request_overhead_tokens);
         let prepared = self
             .store
-            .begin_regeneration(input.conversation_id, input.target_message_id, 0)
+            .begin_regeneration(
+                input.conversation_id,
+                input.target_message_id,
+                request_overhead_tokens,
+            )
             .await?;
         let provider_id = prepared.conversation.generation.provider.clone();
         let stream = traced_generation_stream(
@@ -70,7 +98,8 @@ impl RegenerateMessage {
             prepared.assistant_message.assistant_trace.clone(),
             self.provider.stream(GenerationRequest {
                 generation: prepared.conversation.generation,
-                messages: prepared.context,
+                messages: apply_provider_prompt(prepared.context, resolution.as_ref()),
+                instructions: resolution.and_then(|resolution| resolution.instructions),
             }),
         );
         Ok(PendingRegeneration {
@@ -101,13 +130,25 @@ impl RegenerateMessage {
         {
             return Err(RetryMessageError::AgentContinuation);
         }
+        let command_id = self
+            .store
+            .command_for_response(input.conversation_id, input.target_message_id)
+            .await?;
+        let resolution = self.resolve_persisted(
+            &input.generation,
+            &ConversationMode::Chat,
+            command_id.as_ref(),
+        )?;
+        let request_overhead_tokens = resolution
+            .as_ref()
+            .map_or(0, |resolution| resolution.request_overhead_tokens);
         let prepared = self
             .store
             .begin_retry(
                 input.conversation_id,
                 input.target_message_id,
                 input.generation,
-                0,
+                request_overhead_tokens,
             )
             .await?;
         let provider_id = prepared.conversation.generation.provider.clone();
@@ -117,7 +158,8 @@ impl RegenerateMessage {
             prepared.assistant_message.assistant_trace.clone(),
             self.provider.stream(GenerationRequest {
                 generation: prepared.conversation.generation.clone(),
-                messages: prepared.context,
+                messages: apply_provider_prompt(prepared.context, resolution.as_ref()),
+                instructions: resolution.and_then(|resolution| resolution.instructions),
             }),
         );
         Ok(PendingRetry {
@@ -128,5 +170,22 @@ impl RegenerateMessage {
             assistant_sequence: prepared.assistant_sequence,
             context_report: prepared.context_report,
         })
+    }
+
+    fn resolve_persisted(
+        &self,
+        generation: &GenerationConfig,
+        mode: &ConversationMode,
+        command_id: Option<&magenta_core::CommandId>,
+    ) -> Result<Option<crate::CommandResolution>, crate::CommandResolutionError> {
+        let Some(command_id) = command_id else {
+            return Ok(None);
+        };
+        let catalog = self.command_catalog.as_deref().ok_or_else(|| {
+            crate::CommandResolutionError::Unavailable {
+                command_id: command_id.clone(),
+            }
+        })?;
+        resolve_persisted(catalog, generation, mode, Some(command_id))
     }
 }

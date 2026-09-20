@@ -63,6 +63,8 @@ fn agent_context(root: PathBuf) -> super::super::AgentStreamContext {
         provider: Arc::new(NoopAgentProvider),
         workspace: Arc::new(PreviewWorkspace),
         command_runner: None,
+        repository: None,
+        tool_policy: magenta_core::AgentToolPolicy::Standard,
         root: root.clone(),
         conversation: Conversation {
             id: ConversationId(1),

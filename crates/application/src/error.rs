@@ -1,11 +1,15 @@
 use magenta_core::{ProviderError, StorageError, WorkspaceError};
 
+use crate::CommandResolutionError;
+
 #[derive(Debug, thiserror::Error)]
 pub enum SendMessageError {
     #[error("the prompt cannot be empty")]
     EmptyPrompt,
     #[error("could not persist the message turn")]
     Storage(#[from] StorageError),
+    #[error("the selected command could not be prepared")]
+    Command(#[from] CommandResolutionError),
     #[error("the selected workspace is unavailable")]
     WorkspaceUnavailable,
     #[error("the workspace review session is unavailable")]
@@ -16,12 +20,16 @@ pub enum SendMessageError {
 pub enum RegenerateMessageError {
     #[error("could not prepare a persisted response replacement")]
     Storage(#[from] StorageError),
+    #[error("the persisted command could not be resolved")]
+    Command(#[from] CommandResolutionError),
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum RetryMessageError {
     #[error("could not prepare a new response attempt")]
     Storage(#[from] StorageError),
+    #[error("the persisted command could not be resolved")]
+    Command(#[from] CommandResolutionError),
     #[error("failed agent responses require a continuation")]
     AgentContinuation,
     #[error("the agent workspace is unavailable")]

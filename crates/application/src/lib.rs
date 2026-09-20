@@ -7,6 +7,7 @@
 //! Runtime dependencies use core ports rather than concrete adapters or GPUI.
 
 mod agent;
+mod commands;
 mod error;
 mod generation_defaults;
 mod history;
@@ -18,6 +19,10 @@ pub mod trace;
 pub use agent::{
     AgentApprovalController, AgentSendTarget, PendingAgentGeneration, RetryWorkspaceAgentInput,
     RunWorkspaceAgent, RunWorkspaceAgentInput,
+};
+pub use commands::{
+    CommandResolution, CommandResolutionError, apply_provider_prompt, resolve_normal,
+    resolve_persisted, resolve_submission,
 };
 pub use error::{
     RegenerateMessageError, RetryMessageError, SendMessageError, TitleConversationError,

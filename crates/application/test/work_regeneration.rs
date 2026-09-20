@@ -62,6 +62,7 @@ fn work_regeneration_uses_agent_tools_and_can_finalize() {
                 conversation_id: None,
                 title: "Work".into(),
                 prompt: "Create HelloExpress".into(),
+                command_id: None,
                 attachments: Vec::new(),
                 generation: GenerationConfig::new(
                     ProviderId::new("test"),

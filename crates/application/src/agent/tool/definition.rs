@@ -1,20 +1,65 @@
-use magenta_core::AgentToolDefinition;
+use magenta_core::{AgentToolDefinition, AgentToolPolicy};
 
+#[cfg(test)]
 pub(super) fn tool_definitions(commands_available: bool) -> Vec<AgentToolDefinition> {
-    let mut definitions = vec![
-        list_files(),
-        search_text(),
-        search_code(),
-        save_memory_candidate(),
-        read_file(),
-        apply_patch(),
-        create_file(),
-        create_directory(),
-    ];
-    if commands_available {
-        definitions.push(run_command());
+    tool_definitions_with_policy(commands_available, false, AgentToolPolicy::Standard)
+}
+
+pub(super) fn tool_definitions_with_policy(
+    commands_available: bool,
+    repository_available: bool,
+    policy: AgentToolPolicy,
+) -> Vec<AgentToolDefinition> {
+    let mut definitions = vec![list_files(), search_text(), search_code()];
+    if policy == AgentToolPolicy::Standard {
+        definitions.push(save_memory_candidate());
+    }
+    definitions.push(read_file());
+    if policy == AgentToolPolicy::Standard {
+        definitions.push(apply_patch());
+        definitions.push(create_file());
+        definitions.push(create_directory());
+        if commands_available {
+            definitions.push(run_command());
+        }
+    }
+    if repository_available {
+        definitions.push(repository_status());
+        definitions.push(repository_diff());
     }
     definitions
+}
+
+fn repository_status() -> AgentToolDefinition {
+    definition(
+        "repository_status",
+        "Read the current branch and changed paths from the selected repository.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+        false,
+        false,
+    )
+}
+
+fn repository_diff() -> AgentToolDefinition {
+    definition(
+        "repository_diff",
+        "Read a staged or unstaged unified diff for one repository path.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "area": {"type": "string", "enum": ["staged", "unstaged"]}
+            },
+            "required": ["path", "area"],
+            "additionalProperties": false
+        }),
+        false,
+        true,
+    )
 }
 
 fn list_files() -> AgentToolDefinition {

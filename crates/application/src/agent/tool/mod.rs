@@ -6,9 +6,9 @@ use std::{
 use async_channel::Receiver;
 use magenta_core::{
     AgentApprovalDecision, AgentApprovalRequest, AgentApprovalSubject, AgentRunEvent,
-    AgentRunStream, AgentToolCall, AgentToolDefinition, AgentToolOutput, AgentWorkspaceChange,
-    MemoryKind, MemoryState, NewAgentMemory, ProviderId, WorkspaceAccess, WorkspaceChangeKind,
-    WorkspaceChangeState, WorkspaceOperation, WorkspacePreview,
+    AgentRunStream, AgentToolCall, AgentToolDefinition, AgentToolOutput, AgentToolPolicy,
+    AgentWorkspaceChange, MemoryKind, MemoryState, NewAgentMemory, ProviderId, WorkspaceAccess,
+    WorkspaceChangeKind, WorkspaceChangeState, WorkspaceOperation, WorkspacePreview,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -17,6 +17,7 @@ use super::{AgentContextServices, AgentStreamContext, ApprovalResponse, agent_er
 mod commands;
 mod data;
 mod definition;
+mod repository;
 mod workspace;
 
 #[cfg(test)]
@@ -38,6 +39,14 @@ pub fn execute_tools(
 ) -> AgentRunStream {
     Box::pin(async_stream::try_stream! {
         for call in calls {
+            if !is_tool_allowed(&context, &call) {
+                yield AgentRunEvent::ToolResult(rejected_output(
+                    &call.id,
+                    "the provider requested a tool outside the active allowlist",
+                ));
+                continue;
+            }
+
             if matches!(call.name.as_str(), "search_code" | "save_memory_candidate") {
                 let output = data::execute_data_tool(&context, &call).await;
                 yield AgentRunEvent::ToolResult(output);
@@ -54,6 +63,18 @@ pub fn execute_tools(
                     yield event?;
                 }
 
+                continue;
+            }
+
+            if matches!(call.name.as_str(), "repository_status" | "repository_diff") {
+                let mut events = repository::execute_repository_tool(
+                    context.clone(),
+                    call,
+                    approvals.clone(),
+                );
+                while let Some(event) = futures_util::StreamExt::next(&mut events).await {
+                    yield event?;
+                }
                 continue;
             }
 
@@ -158,8 +179,49 @@ fn workspace_error_detail(error: &magenta_core::WorkspaceError) -> String {
     error.source.to_string()
 }
 
+#[cfg(test)]
 pub fn tool_definitions(commands_available: bool) -> Vec<AgentToolDefinition> {
     definition::tool_definitions(commands_available)
+}
+
+pub(super) fn tool_definitions_with_policy(
+    commands_available: bool,
+    repository_available: bool,
+    policy: AgentToolPolicy,
+) -> Vec<AgentToolDefinition> {
+    definition::tool_definitions_with_policy(commands_available, repository_available, policy)
+}
+
+fn is_tool_allowed(context: &AgentStreamContext, call: &AgentToolCall) -> bool {
+    let allowed = match context.tool_policy {
+        AgentToolPolicy::ReadOnly => matches!(
+            call.name.as_str(),
+            "list_files"
+                | "search_text"
+                | "search_code"
+                | "read_file"
+                | "repository_status"
+                | "repository_diff"
+        ),
+        AgentToolPolicy::Standard => matches!(
+            call.name.as_str(),
+            "list_files"
+                | "search_text"
+                | "search_code"
+                | "save_memory_candidate"
+                | "read_file"
+                | "apply_patch"
+                | "create_file"
+                | "create_directory"
+                | "run_command"
+                | "repository_status"
+                | "repository_diff"
+        ),
+    };
+    allowed
+        && (call.name != "run_command" || context.command_runner.is_some())
+        && (!matches!(call.name.as_str(), "repository_status" | "repository_diff")
+            || context.repository.is_some())
 }
 
 pub(super) fn rejected_output(call_id: &str, message: &str) -> AgentToolOutput {

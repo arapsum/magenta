@@ -40,6 +40,7 @@ fn input(target: SendTarget) -> SendMessageInput {
     SendMessageInput {
         target,
         prompt: "  A durable conversation  ".into(),
+        command_id: None,
         attachments: Vec::new(),
         generation: GenerationConfig::new(
             ProviderId::new("test"),

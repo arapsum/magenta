@@ -10,11 +10,12 @@ use std::sync::{
 use async_channel::Sender;
 use magenta_core::{
     AgentApprovalDecision, AgentContentCache, AgentMemoryStore, AgentProvider, AgentRequest,
-    AgentRunStream, AgentSession, AgentSessionState, AgentSessionStore, BeginTurn, CodeIndex,
-    CodeIndexMaintainer, Conversation, ConversationId, ConversationMode, ConversationStore,
-    EmbeddingProvider, GenerationConfig, MemoryKind, MemoryState, Message, NewAgentMemory,
-    PreparedTurn, ProviderId, RetrievedContextBlock, RetrievedContextKind, WorkspaceAccess,
-    WorkspaceCommandRunner, WorkspaceSessionAccess, estimate_agent_overhead,
+    AgentRunStream, AgentSession, AgentSessionState, AgentSessionStore, AgentToolDefinition,
+    AgentToolPolicy, BeginTurn, CodeIndex, CodeIndexMaintainer, CommandCatalog, Conversation,
+    ConversationId, ConversationMode, ConversationStore, EmbeddingProvider, GenerationConfig,
+    MemoryKind, MemoryState, Message, NewAgentMemory, PreparedTurn, ProviderId, RepositoryAccess,
+    RetrievedContextBlock, RetrievedContextKind, WorkspaceAccess, WorkspaceCommandRunner,
+    WorkspaceSessionAccess, estimate_agent_overhead,
 };
 
 use super::trace::AssistantTraceRecorder;
@@ -33,6 +34,7 @@ pub enum AgentSendTarget {
 pub struct RunWorkspaceAgentInput {
     pub target: AgentSendTarget,
     pub prompt: String,
+    pub command_id: Option<magenta_core::CommandId>,
     pub generation: GenerationConfig,
     pub workspace_root: std::path::PathBuf,
 }
@@ -60,6 +62,8 @@ pub struct AgentStreamContext {
     pub provider: Arc<dyn AgentProvider>,
     pub workspace: Arc<dyn WorkspaceAccess>,
     pub command_runner: Option<Arc<dyn WorkspaceCommandRunner>>,
+    pub repository: Option<Arc<dyn RepositoryAccess>>,
+    pub tool_policy: AgentToolPolicy,
     pub root: std::path::PathBuf,
     pub conversation: Conversation,
     pub trace: AssistantTraceRecorder,
@@ -227,6 +231,8 @@ pub struct RunWorkspaceAgent {
     store: Arc<dyn ConversationStore>,
     workspace: Arc<dyn WorkspaceAccess>,
     command_runner: Option<Arc<dyn WorkspaceCommandRunner>>,
+    repository: Option<Arc<dyn RepositoryAccess>>,
+    command_catalog: Option<Arc<dyn CommandCatalog>>,
     context_services: Option<AgentContextServices>,
     code_indexer: Option<Arc<dyn CodeIndexMaintainer>>,
     workspace_sessions: Option<(Arc<dyn WorkspaceSessionAccess>, Arc<dyn AgentSessionStore>)>,

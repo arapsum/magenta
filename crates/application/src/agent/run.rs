@@ -1,15 +1,19 @@
 use super::{
     AgentApprovalController, AgentContentCache, AgentContextServices, AgentMemoryStore,
     AgentProvider, AgentRequest, AgentReviewHandle, AgentSendTarget, AgentSession,
-    AgentSessionState, AgentSessionStore, AgentStreamContext, Arc, AssistantTraceRecorder,
-    BeginTurn, CodeIndex, CodeIndexMaintainer, ConversationMode, ConversationStore,
-    EmbeddingProvider, MemoryKind, MemoryState, NewAgentMemory, PendingAgentGeneration,
-    PreparedTurn, RetrievedContextBlock, RetrievedContextKind, RetryMessageError,
-    RetryWorkspaceAgentInput, RunWorkspaceAgent, RunWorkspaceAgentInput, SendMessageError,
-    WorkspaceAccess, WorkspaceCommandRunner, WorkspaceSessionAccess, agent_instructions,
-    estimate_agent_overhead, instructions_with_context, stream, title_from_prompt, tool,
+    AgentSessionState, AgentSessionStore, AgentStreamContext, AgentToolDefinition, Arc,
+    AssistantTraceRecorder, BeginTurn, CodeIndex, CodeIndexMaintainer, CommandCatalog,
+    ConversationMode, ConversationStore, EmbeddingProvider, MemoryKind, MemoryState,
+    NewAgentMemory, PendingAgentGeneration, PreparedTurn, RepositoryAccess, RetrievedContextBlock,
+    RetrievedContextKind, RetryMessageError, RetryWorkspaceAgentInput, RunWorkspaceAgent,
+    RunWorkspaceAgentInput, SendMessageError, WorkspaceAccess, WorkspaceCommandRunner,
+    WorkspaceSessionAccess, agent_instructions, estimate_agent_overhead, instructions_with_context,
+    stream, title_from_prompt, tool,
 };
-use crate::RegenerateMessageInput;
+use crate::{
+    CommandResolution, CommandResolutionError, RegenerateMessageInput, apply_provider_prompt,
+    resolve_normal, resolve_persisted, resolve_submission,
+};
 
 static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -26,6 +30,8 @@ impl RunWorkspaceAgent {
             store,
             workspace,
             command_runner,
+            repository: None,
+            command_catalog: None,
             context_services: None,
             code_indexer: None,
             workspace_sessions: None,
@@ -35,6 +41,18 @@ impl RunWorkspaceAgent {
     #[must_use]
     pub fn with_code_indexer(mut self, indexer: Arc<dyn CodeIndexMaintainer>) -> Self {
         self.code_indexer = Some(indexer);
+        self
+    }
+
+    #[must_use]
+    pub fn with_repository(mut self, repository: Arc<dyn RepositoryAccess>) -> Self {
+        self.repository = Some(repository);
+        self
+    }
+
+    #[must_use]
+    pub fn with_command_catalog(mut self, catalog: Arc<dyn CommandCatalog>) -> Self {
+        self.command_catalog = Some(catalog);
         self
     }
 
@@ -79,8 +97,10 @@ impl RunWorkspaceAgent {
         &self,
         input: RunWorkspaceAgentInput,
     ) -> Result<PendingAgentGeneration, SendMessageError> {
-        let prompt = input.prompt.trim().to_owned();
-        if prompt.is_empty() {
+        let stored_prompt = input.prompt.trim().to_owned();
+        let command = self.resolve_submission_command(&input, &stored_prompt)?;
+        let provider_prompt = command.prompt.clone();
+        if stored_prompt.is_empty() && command.command_id.is_none() {
             return Err(SendMessageError::EmptyPrompt);
         }
         if !input.workspace_root.is_dir() {
@@ -93,21 +113,12 @@ impl RunWorkspaceAgent {
                 .map_err(SendMessageError::WorkspaceSession)?;
         }
 
-        self.prepare_agent_context(&input.workspace_root, &prompt)
+        let (instructions, tools, retrieved_context) = self
+            .prepare_initial_request(&input.workspace_root, &provider_prompt, &command)
             .await;
 
-        let retrieved_context = self
-            .retrieve_context(&input.workspace_root, &prompt, None)
-            .await;
-
-        let instructions = instructions_with_context(
-            agent_instructions(&input.workspace_root),
-            &retrieved_context,
-        );
-
-        let tools = tool::tool_definitions(self.command_runner.is_some());
-
-        let request_overhead_tokens = estimate_agent_overhead(&instructions, &tools);
+        let request_overhead_tokens = estimate_agent_overhead(&instructions, &tools)
+            .saturating_add(command_extra_overhead(&command));
 
         let prepared = self
             .store
@@ -116,8 +127,9 @@ impl RunWorkspaceAgent {
                     AgentSendTarget::New => None,
                     AgentSendTarget::Existing(id) => Some(id),
                 },
-                title: title_from_prompt(&prompt),
-                prompt,
+                title: title_from_prompt(&command.title_seed),
+                prompt: stored_prompt,
+                command_id: command.command_id.clone(),
                 attachments: Vec::new(),
                 generation: input.generation,
                 mode: ConversationMode::Agent,
@@ -144,7 +156,7 @@ impl RunWorkspaceAgent {
 
         let request = AgentRequest {
             generation: prepared.conversation.generation.clone(),
-            messages: prepared.context,
+            messages: apply_provider_prompt(prepared.context, Some(&command)),
             instructions,
             tools,
             retrieved_context,
@@ -155,6 +167,8 @@ impl RunWorkspaceAgent {
                 provider: self.provider.clone(),
                 workspace: self.workspace.clone(),
                 command_runner: self.command_runner.clone(),
+                repository: self.repository.clone(),
+                tool_policy: command.tool_policy,
                 root: input.workspace_root,
                 conversation: prepared.conversation.clone(),
                 trace: AssistantTraceRecorder::new(
@@ -179,6 +193,73 @@ impl RunWorkspaceAgent {
             assistant_sequence: prepared.assistant_sequence,
             context_report: prepared.context_report,
         })
+    }
+
+    fn resolve_submission_command(
+        &self,
+        input: &RunWorkspaceAgentInput,
+        prompt: &str,
+    ) -> Result<CommandResolution, SendMessageError> {
+        let Some(command_id) = input.command_id.as_ref() else {
+            return Ok(resolve_normal(prompt));
+        };
+        let catalog = self.command_catalog.as_deref().ok_or_else(|| {
+            SendMessageError::Command(CommandResolutionError::Unavailable {
+                command_id: command_id.clone(),
+            })
+        })?;
+        Ok(resolve_submission(
+            catalog,
+            &input.generation,
+            &ConversationMode::Agent,
+            Some(command_id),
+            prompt,
+            false,
+        )?)
+    }
+
+    fn resolve_existing_command(
+        &self,
+        generation: &magenta_core::GenerationConfig,
+        mode: &ConversationMode,
+        command_id: Option<&magenta_core::CommandId>,
+    ) -> Result<Option<CommandResolution>, RetryMessageError> {
+        let Some(command_id) = command_id else {
+            return Ok(None);
+        };
+        let catalog = self.command_catalog.as_deref().ok_or_else(|| {
+            RetryMessageError::Command(CommandResolutionError::Unavailable {
+                command_id: command_id.clone(),
+            })
+        })?;
+        Ok(resolve_persisted(
+            catalog,
+            generation,
+            mode,
+            Some(command_id),
+        )?)
+    }
+
+    async fn prepare_initial_request(
+        &self,
+        root: &std::path::Path,
+        prompt: &str,
+        command: &CommandResolution,
+    ) -> (String, Vec<AgentToolDefinition>, Vec<RetrievedContextBlock>) {
+        self.prepare_agent_context(root, prompt).await;
+
+        let retrieved_context = self.retrieve_context(root, prompt, None).await;
+        let instructions = instructions_with_context(
+            append_command_instructions(agent_instructions(root), command),
+            &retrieved_context,
+        );
+        let tools = tool::tool_definitions_with_policy(
+            self.command_runner.is_some(),
+            self.repository.is_some(),
+            command.tool_policy,
+        );
+
+        (instructions, tools, retrieved_context)
     }
 
     async fn prepare_agent_context(&self, root: &std::path::Path, prompt: &str) {
@@ -247,11 +328,27 @@ impl RunWorkspaceAgent {
             let _ = indexer.refresh(workspace_root.clone()).await;
         }
 
-        let instructions = agent_instructions(&workspace_root);
+        let command_id = self
+            .store
+            .command_for_response(input.conversation_id, input.target_message_id)
+            .await?;
+        let command = self.resolve_existing_command(
+            &input.generation,
+            &loaded.conversation.mode,
+            command_id.as_ref(),
+        )?;
+        let command = command.unwrap_or_else(|| resolve_normal(""));
+        let instructions =
+            append_command_instructions(agent_instructions(&workspace_root), &command);
 
-        let tools = tool::tool_definitions(self.command_runner.is_some());
+        let tools = tool::tool_definitions_with_policy(
+            self.command_runner.is_some(),
+            self.repository.is_some(),
+            command.tool_policy,
+        );
 
-        let request_overhead_tokens = estimate_agent_overhead(&instructions, &tools);
+        let request_overhead_tokens = estimate_agent_overhead(&instructions, &tools)
+            .saturating_add(command_extra_overhead(&command));
 
         let prepared = self
             .store
@@ -263,7 +360,7 @@ impl RunWorkspaceAgent {
             )
             .await?;
 
-        self.start_existing_run(prepared, workspace_root, instructions)
+        self.start_existing_run(prepared, workspace_root, command)
             .await
     }
 
@@ -297,18 +394,34 @@ impl RunWorkspaceAgent {
         if let Some(indexer) = &self.code_indexer {
             let _ = indexer.refresh(workspace_root.clone()).await;
         }
-        let instructions = agent_instructions(&workspace_root);
-        let tools = tool::tool_definitions(self.command_runner.is_some());
+        let command_id = self
+            .store
+            .command_for_response(input.conversation_id, input.target_message_id)
+            .await?;
+        let command = self.resolve_existing_command(
+            &loaded.conversation.generation,
+            &loaded.conversation.mode,
+            command_id.as_ref(),
+        )?;
+        let command = command.unwrap_or_else(|| resolve_normal(""));
+        let instructions =
+            append_command_instructions(agent_instructions(&workspace_root), &command);
+        let tools = tool::tool_definitions_with_policy(
+            self.command_runner.is_some(),
+            self.repository.is_some(),
+            command.tool_policy,
+        );
         let prepared = self
             .store
             .begin_regeneration(
                 input.conversation_id,
                 input.target_message_id,
-                estimate_agent_overhead(&instructions, &tools),
+                estimate_agent_overhead(&instructions, &tools)
+                    .saturating_add(command_extra_overhead(&command)),
             )
             .await?;
 
-        self.start_existing_run(prepared, workspace_root, instructions)
+        self.start_existing_run(prepared, workspace_root, command)
             .await
     }
 
@@ -316,14 +429,28 @@ impl RunWorkspaceAgent {
         &self,
         prepared: PreparedTurn,
         workspace_root: std::path::PathBuf,
-        instructions: String,
+        command: CommandResolution,
     ) -> Result<PendingAgentGeneration, RetryMessageError> {
+        let instructions =
+            append_command_instructions(agent_instructions(&workspace_root), &command);
         let retrieved_context = self
-            .retrieve_context(&workspace_root, &prepared.user_message.content, None)
+            .retrieve_context(
+                &workspace_root,
+                if command.prompt.is_empty() {
+                    &prepared.user_message.content
+                } else {
+                    &command.prompt
+                },
+                None,
+            )
             .await;
 
         let instructions = instructions_with_context(instructions, &retrieved_context);
-        let tools = tool::tool_definitions(self.command_runner.is_some());
+        let tools = tool::tool_definitions_with_policy(
+            self.command_runner.is_some(),
+            self.repository.is_some(),
+            command.tool_policy,
+        );
 
         let review = match self.start_review(&workspace_root, &prepared).await {
             Ok(review) => review,
@@ -343,7 +470,7 @@ impl RunWorkspaceAgent {
 
         let request = AgentRequest {
             generation: prepared.conversation.generation.clone(),
-            messages: prepared.context,
+            messages: apply_provider_prompt(prepared.context, Some(&command)),
             instructions,
             tools,
             retrieved_context,
@@ -354,6 +481,8 @@ impl RunWorkspaceAgent {
                 provider: self.provider.clone(),
                 workspace: self.workspace.clone(),
                 command_runner: self.command_runner.clone(),
+                repository: self.repository.clone(),
+                tool_policy: command.tool_policy,
                 root: workspace_root,
                 conversation: prepared.conversation.clone(),
                 trace: AssistantTraceRecorder::new(
@@ -513,4 +642,23 @@ impl RunWorkspaceAgent {
             pending: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         }))
     }
+}
+
+fn append_command_instructions(mut instructions: String, command: &CommandResolution) -> String {
+    if let Some(command_instructions) = &command.instructions {
+        instructions.push_str("\n\nCommand response instructions:\n");
+        instructions.push_str(command_instructions);
+    }
+    instructions
+}
+
+fn command_extra_overhead(command: &CommandResolution) -> u64 {
+    let instruction_tokens = command
+        .instructions
+        .as_deref()
+        .map(magenta_core::estimate_text_tokens)
+        .unwrap_or_default();
+    command
+        .request_overhead_tokens
+        .saturating_sub(instruction_tokens)
 }
