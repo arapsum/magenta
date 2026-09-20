@@ -58,6 +58,9 @@ successful isolation probe; file tools remain available without it.
   and otherwise collapse automatically unless manually overridden.
 - Persistent, categorized response failures with relevant recovery actions,
   preserved partial output, and copyable, allowlisted diagnostic details.
+- Provider-advertised `/plan`, `/review`, and `/explain` commands with a
+  searchable, keyboard-accessible palette, one-turn command persistence, and
+  read-only Work tools for planning and review.
 - Warm light/dark themes, a layered dark surface system, a subtle animated fluid
   field, and separate UI, code, and math typography preferences in a TOML-backed
   settings window.
@@ -203,6 +206,25 @@ successfully parsed file. **Restore defaults** backs up an existing file to a
 `settings.toml.bak-*` sibling before attempting to save defaults. A malformed
 TOML file must be repaired before that save can succeed. Credentials are never
 stored in this file.
+
+### Typed commands
+
+Type `/` at the start of the composer to search the provider's command catalog.
+`/plan` and `/review` are Work-only; `/explain` works in Chat and Work. Select a
+command with Enter, Tab, or the mouse, then type its subject. `/review` may be
+submitted without a subject and uses the provider's “review the current
+workspace changes” fallback. `/plan` and `/explain` require a subject; in Chat,
+an attached image counts as `/explain`'s subject. Unknown slash-prefixed text,
+including `/remember …`, remains a normal prompt.
+
+Commands apply to one submission. The selected command is saved on the user
+message, while assistant messages remain unchanged; retries and regenerations
+reuse that saved command and fail visibly if the provider no longer advertises
+it. Command-only turns display their command badge even when the user message
+has no body. The command palette and chip expose visible focus states and
+accessible labels, and Work command runs use only the advertised read-only tool
+allowlist (`list_files`, `search_text`, `search_code`, `read_file`,
+`repository_status`, and `repository_diff`).
 
 ## Agent behavior and limits
 
