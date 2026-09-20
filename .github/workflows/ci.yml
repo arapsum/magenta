@@ -34,6 +34,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Check Rust module size and layout
+        run: bash scripts/check-rust-module-lines.sh
+
   lint:
     name: Lint
     runs-on: ubuntu-24.04
