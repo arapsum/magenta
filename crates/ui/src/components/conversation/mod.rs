@@ -16,7 +16,7 @@ use std::{
 use futures_util::StreamExt as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, FocusTrapElement as _, Icon, IconName, Sizable as _,
-    StyledExt as _, box_shadow,
+    StyledExt as _,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     h_flex,
@@ -28,15 +28,15 @@ use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, FollowMode,
     InteractiveElement as _, IntoElement, ListAlignment, ListSizingBehavior, ListState,
     MouseButton, ObjectFit, ParentElement as _, Render, Role, StatefulInteractiveElement as _,
-    Styled as _, StyledImage as _, Task, Window, div, img, linear_color_stop, linear_gradient,
-    list, prelude::FluentBuilder as _, px, rems,
+    Styled as _, StyledImage as _, Task, Window, div, img, list, prelude::FluentBuilder as _, px,
+    rems,
 };
 use magenta_application::AgentApprovalController;
 use magenta_core::{
     AgentApprovalRequest, AgentApprovalSubject, AgentWorkspaceChange, AssistantTextPhase,
-    AssistantTraceEntry, AssistantTraceKind, AssistantTraceStatus, Conversation, GenerationConfig,
-    GenerationEvent, GenerationOutcome, GenerationStream, Message, MessageId, MessageRole,
-    MessageStatus, ProviderError, ProviderId, Timestamp, WorkspaceCommandResult,
+    AssistantTraceEntry, AssistantTraceKind, AssistantTraceStatus, Conversation, ConversationMode,
+    GenerationConfig, GenerationEvent, GenerationOutcome, GenerationStream, Message, MessageId,
+    MessageRole, MessageStatus, ProviderError, ProviderId, Timestamp, WorkspaceCommandResult,
     WorkspaceCommandStatus,
 };
 
@@ -302,6 +302,71 @@ fn trace_generation_terminal(progress: &GenerationProgress, status: &'static str
 }
 
 impl ConversationView {
+    fn render_thread_header(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let Some(conversation) = self.conversation.as_ref() else {
+            return div().into_any_element();
+        };
+
+        let subtitle = match conversation.mode {
+            ConversationMode::Chat => "Conversation",
+            ConversationMode::Agent => "Workspace session",
+        };
+
+        h_flex()
+            .flex_none()
+            .w_full()
+            .h(px(60.))
+            .items_center()
+            .border_b_1()
+            .border_color(cx.theme().border.opacity(0.62))
+            .bg(cx.theme().tokens.background.background.opacity(0.96))
+            .px(px(28.))
+            .child(
+                h_flex()
+                    .w_full()
+                    .max_w(px(900.))
+                    .mx_auto()
+                    .items_center()
+                    .gap(px(11.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .size(px(32.))
+                            .rounded(px(9.))
+                            .border_1()
+                            .border_color(cx.theme().primary.opacity(0.2))
+                            .bg(cx.theme().accent.opacity(0.7))
+                            .text_color(cx.theme().primary)
+                            .child(Icon::new(IconName::Bot).xsmall()),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(px(1.))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .text_size(px(14.))
+                                    .font_semibold()
+                                    .child(conversation.title.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(subtitle),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn render_thread_footer(&self, cx: &Context<'_, Self>) -> AnyElement {
         if self.has_newer {
             h_flex()
@@ -346,9 +411,12 @@ impl ConversationView {
             div()
                 .flex_none()
                 .w_full()
-                .px(px(24.))
-                .pt(px(12.))
-                .pb(px(22.))
+                .border_t_1()
+                .border_color(cx.theme().border.opacity(0.5))
+                .bg(cx.theme().tokens.background.background.opacity(0.98))
+                .px(px(28.))
+                .pt(px(14.))
+                .pb(px(18.))
                 .child(
                     div()
                         .w_full()
@@ -371,7 +439,7 @@ impl Render for ConversationView {
             .min_w_0()
             .bg(cx.theme().tokens.background.background)
             .text_color(cx.theme().foreground)
-            .child(super::visual::ambient_field(cx))
+            .child(self.render_thread_header(cx))
             .when(self.has_older, |this| {
                 this.child(
                     Button::new("load-earlier-messages")

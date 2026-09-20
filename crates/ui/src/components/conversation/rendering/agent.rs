@@ -134,22 +134,28 @@ impl ConversationView {
             })
     }
 
-    pub(super) fn render_assistant_trace(
+    fn render_trace_rows(
         &self,
+        message_id: MessageId,
         message: &Message,
         cx: &App,
         view: &Entity<Self>,
     ) -> AnyElement {
-        let message_id = message.id;
-        let mut rows = v_flex().w_full().gap_1().flex_col_reverse().py_1().pr_1();
+        let mut rows = v_flex().w_full().gap_1().flex_col_reverse().py_2().pr_1();
 
         for entry in trace_entries_for_timeline(message) {
-            let default_open = entry.kind == AssistantTraceKind::ReasoningSummary;
+            if entry.kind == AssistantTraceKind::ReasoningSummary {
+                rows = rows.child(Self::render_reasoning_timeline_entry(
+                    message_id, &entry, cx,
+                ));
+                continue;
+            }
+
             let open = self
                 .trace_entry_overrides
                 .get(&(message_id, entry.key.clone()))
                 .copied()
-                .unwrap_or(default_open);
+                .unwrap_or(false);
             let entry_title = trace_entry_title(&entry);
             let title = Self::render_trace_entry_title(&entry, cx);
             let detail = Self::render_trace_entry_detail(message_id, &entry, cx);
@@ -206,6 +212,18 @@ impl ConversationView {
             rows = rows.child(row);
         }
 
+        rows.into_any_element()
+    }
+
+    pub(super) fn render_assistant_trace(
+        &self,
+        message: &Message,
+        cx: &App,
+        view: &Entity<Self>,
+    ) -> AnyElement {
+        let message_id = message.id;
+        let rows = self.render_trace_rows(message_id, message, cx, view);
+
         let trace_viewport = div()
             .id(("assistant-trace-viewport", message_id.0))
             .debug_selector(|| "assistant-trace-viewport".to_owned())
@@ -217,8 +235,13 @@ impl ConversationView {
         let trace_open = self.trace_is_open(message);
         let mut accordion = Accordion::new(("assistant-trace", message_id.0))
             .multiple(false)
-            .bordered(false)
+            .bordered(true)
             .small()
+            .border_color(cx.theme().border.opacity(0.72))
+            .bg(crate::components::visual::surface(
+                crate::components::visual::SurfaceLevel::Raised,
+                cx,
+            ))
             .on_toggle_click(move |open_indices, _, cx| {
                 trace_view.update(cx, |view, cx| {
                     view.set_trace_disclosure_override(message_id, open_indices.contains(&0), cx);
@@ -227,8 +250,14 @@ impl ConversationView {
         accordion = accordion.item(|item| {
             item.open(trace_open)
                 .title(self.render_trace_header(message, cx, view))
-                .hover(|this| this.bg(cx.theme().accent.opacity(0.24)))
-                .child(v_flex().w_full().gap_1().child(trace_viewport))
+                .hover(|this| this.bg(cx.theme().accent.opacity(0.32)))
+                .child(
+                    div()
+                        .w_full()
+                        .border_t_1()
+                        .border_color(cx.theme().border.opacity(0.56))
+                        .child(trace_viewport),
+                )
         });
 
         accordion.into_any_element()
@@ -238,39 +267,81 @@ impl ConversationView {
         let active = Self::trace_is_active(message);
         let final_answer_started = self.trace_is_final_answer_started(message.id);
         let message_id = message.id;
-        let label = if active && !final_answer_started {
-            ShimmerText::new("Thinking")
+        let reasoning_active = active && !final_answer_started;
+        let label = if reasoning_active {
+            ShimmerText::new("Reasoning")
                 .id(("assistant-trace-thinking", message.id.0))
                 .duration(Duration::from_millis(2200))
                 .spread(0.38)
                 .font_medium()
                 .into_any_element()
         } else {
-            let text = match message.status {
-                MessageStatus::Stopped => "Thinking stopped",
-                MessageStatus::Failed => "Thinking failed",
-                _ => "Thought",
-            };
-            div().font_medium().child(text).into_any_element()
+            div().font_medium().child("Reasoning").into_any_element()
         };
         let elapsed = self.trace_elapsed(message);
         let stop_view = view.clone();
+        let status = match message.status {
+            MessageStatus::Stopped => "Stopped".to_owned(),
+            MessageStatus::Failed => "Failed".to_owned(),
+            _ if reasoning_active => elapsed.map_or_else(
+                || "In progress".to_owned(),
+                |elapsed| format!("{} elapsed", format_elapsed(elapsed)),
+            ),
+            _ => elapsed.map_or_else(
+                || "Completed".to_owned(),
+                |elapsed| format!("Completed in {}", format_elapsed(elapsed)),
+            ),
+        };
+
+        let status_icon = if reasoning_active {
+            Spinner::new()
+                .xsmall()
+                .color(cx.theme().primary)
+                .into_any_element()
+        } else {
+            Icon::new(
+                if matches!(
+                    message.status,
+                    MessageStatus::Failed | MessageStatus::Stopped
+                ) {
+                    IconName::CircleX
+                } else {
+                    IconName::CircleCheck
+                },
+            )
+            .xsmall()
+            .text_color(if message.status == MessageStatus::Failed {
+                cx.theme().danger
+            } else if message.status == MessageStatus::Stopped {
+                cx.theme().muted_foreground
+            } else {
+                cx.theme().success
+            })
+            .into_any_element()
+        };
 
         let leading = h_flex()
             .items_center()
             .gap_2()
-            .when(active && !final_answer_started, |this| {
-                this.child(Spinner::new().xsmall().color(cx.theme().primary))
-            })
-            .child(label)
-            .when_some(elapsed, |this, elapsed| {
-                this.child(
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .size_7()
+                    .rounded(cx.theme().radius)
+                    .bg(cx.theme().accent.opacity(0.64))
+                    .child(status_icon),
+            )
+            .child(
+                v_flex().min_w_0().gap(px(1.)).child(label).child(
                     div()
                         .text_size(rems(0.6875))
+                        .font_normal()
                         .text_color(cx.theme().muted_foreground)
-                        .child(format_elapsed(elapsed)),
-                )
-            })
+                        .child(status),
+                ),
+            )
             .into_any_element();
 
         let mut header = h_flex()
@@ -278,7 +349,7 @@ impl ConversationView {
             .items_center()
             .justify_between()
             .child(leading);
-        if active {
+        if reasoning_active {
             header = header.child(
                 Button::new(("stop-assistant-trace", message.id.0))
                     .ghost()
@@ -291,6 +362,29 @@ impl ConversationView {
             );
         }
         header.into_any_element()
+    }
+
+    fn render_reasoning_timeline_entry(
+        message_id: MessageId,
+        entry: &AssistantTraceEntry,
+        cx: &App,
+    ) -> AnyElement {
+        h_flex()
+            .w_full()
+            .items_start()
+            .gap_2()
+            .pl_3()
+            .py_1p5()
+            .border_l_1()
+            .border_color(trace_status_color(entry.status, cx).opacity(0.34))
+            .child(render_trace_entry_indicator(entry, cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(render_reasoning_summary(message_id, entry, cx)),
+            )
+            .into_any_element()
     }
 
     fn render_trace_entry_title(entry: &AssistantTraceEntry, cx: &App) -> AnyElement {

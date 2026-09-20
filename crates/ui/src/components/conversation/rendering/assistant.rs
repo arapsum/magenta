@@ -29,7 +29,7 @@ impl ConversationView {
         let timestamp = relative_message_timestamp(rendered.created_at);
 
         h_flex()
-            .h(px(28.))
+            .h(px(30.))
             .items_center()
             .gap(px(9.))
             .child(
@@ -37,9 +37,11 @@ impl ConversationView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .size(px(26.))
-                    .rounded_full()
-                    .bg(cx.theme().primary.opacity(0.16))
+                    .size(px(28.))
+                    .rounded(px(9.))
+                    .border_1()
+                    .border_color(cx.theme().primary.opacity(0.18))
+                    .bg(cx.theme().accent.opacity(0.68))
                     .text_color(cx.theme().primary)
                     .child(
                         provider_icon(generation.map(|generation| &generation.provider)).xsmall(),
