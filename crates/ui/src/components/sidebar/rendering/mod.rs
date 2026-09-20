@@ -12,7 +12,7 @@ impl SidebarView {
         );
 
         h_flex()
-            .h(px(46.))
+            .h(px(48.))
             .items_center()
             .gap(px(10.))
             .px(px(7.))
@@ -22,19 +22,12 @@ impl SidebarView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .size(px(31.))
-                    .rounded(px(10.))
+                    .size(px(32.))
+                    .rounded(px(9.))
                     .bg(mark)
                     .border_1()
                     .border_color(cx.theme().primary.opacity(0.42))
                     .text_color(cx.theme().primary_foreground)
-                    .shadow(vec![box_shadow(
-                        0.,
-                        7.,
-                        18.,
-                        -8.,
-                        cx.theme().primary.opacity(0.48),
-                    )])
                     .child(
                         div()
                             .absolute()
@@ -48,7 +41,7 @@ impl SidebarView {
             )
             .child(
                 div()
-                    .text_size(px(15.))
+                    .text_size(px(16.))
                     .font_semibold()
                     .text_color(cx.theme().foreground)
                     .child("Magenta"),
@@ -63,26 +56,16 @@ impl SidebarView {
     }
 
     fn new_chat_button(view: Entity<Self>, cx: &App) -> AnyElement {
-        let surface = linear_gradient(
-            145.,
-            linear_color_stop(cx.theme().primary.opacity(0.56), 0.),
-            linear_color_stop(cx.theme().accent.opacity(0.96), 1.),
-        );
-
         Button::new("sidebar-new-chat")
             .ghost()
             .accessibility_id("new-chat")
             .w_full()
-            .h(px(40.))
-            .rounded(px(11.))
+            .h(px(42.))
+            .rounded(px(10.))
             .border_1()
-            .border_color(cx.theme().primary.opacity(0.42))
-            .bg(surface)
-            .text_color(cx.theme().foreground)
-            .shadow(vec![
-                box_shadow(0., 12., 28., -16., cx.theme().primary.opacity(0.7)),
-                box_shadow(0., 5., 14., -9., cx.theme().background.opacity(0.95)),
-            ])
+            .border_color(cx.theme().primary.opacity(0.5))
+            .bg(cx.theme().sidebar_primary)
+            .text_color(cx.theme().sidebar_primary_foreground)
             .icon(IconName::Plus)
             .label("New chat")
             .on_click(move |_, _window, cx| {
@@ -516,11 +499,11 @@ impl SidebarView {
     pub(super) fn render_content(&self, view: Entity<Self>, cx: &App) -> AnyElement {
         let controls = v_flex()
             .w_full()
-            .gap(px(8.))
+            .gap(px(10.))
             .child(Self::brand_header(cx))
             .child(Self::new_chat_button(view.clone(), cx))
             .child(self.search_button(cx));
-        let mut content = v_flex().w_full().gap(px(6.)).child(controls).child(
+        let mut content = v_flex().w_full().gap(px(7.)).child(controls).child(
             div()
                 .mx(px(4.))
                 .my(px(3.))

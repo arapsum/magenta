@@ -42,7 +42,7 @@ pub(super) use profile::{ProfileDetails, profile_details};
 
 use self::model::title_matches;
 
-const EXPANDED_WIDTH: gpui_kit::Pixels = px(272.);
+const EXPANDED_WIDTH: gpui_kit::Pixels = px(280.);
 const ROW_HEIGHT: gpui_kit::Pixels = px(34.);
 const ROW_RADIUS: gpui_kit::Pixels = px(7.);
 const SECTION_LABEL_HEIGHT: gpui_kit::Pixels = px(28.);
@@ -528,11 +528,7 @@ impl Render for SidebarView {
         Sidebar::new("magenta-sidebar")
             .w(EXPANDED_WIDTH)
             .border_r_1()
-            .border_color(cx.theme().foreground.opacity(0.055))
-            .shadow(vec![
-                box_shadow(16., 0., 44., -20., cx.theme().background.opacity(0.98)),
-                box_shadow(9., 0., 30., -18., cx.theme().primary.opacity(0.18)),
-            ])
+            .border_color(cx.theme().sidebar_border.opacity(0.72))
             .collapsible(SidebarCollapsible::None)
             .child(SidebarContent {
                 view: view.clone(),

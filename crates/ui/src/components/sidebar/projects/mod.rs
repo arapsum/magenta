@@ -105,11 +105,12 @@ impl SidebarView {
         let expanded = self.expanded_projects.contains(&project.root);
 
         let active = self.active_project.as_ref() == Some(&project.root);
+        let emphasized = active && self.active_conversation.is_none();
         let group_name: SharedString = format!("project-row-{}", project.root.display()).into();
 
         let active_background = cx.theme().sidebar_accent;
 
-        let hover_background = if active {
+        let hover_background = if emphasized {
             cx.theme().sidebar_accent
         } else {
             cx.theme().sidebar_accent.opacity(0.72)
@@ -129,14 +130,14 @@ impl SidebarView {
             .items_center()
             .rounded(ROW_RADIUS)
             .border_1()
-            .border_color(if active {
+            .border_color(if emphasized {
                 cx.theme().primary.opacity(0.3)
             } else {
                 cx.theme().transparent
             })
-            .when(active, |this| this.bg(active_background))
+            .when(emphasized, |this| this.bg(active_background))
             .hover(move |this| this.bg(hover_background))
-            .when(active, |this| {
+            .when(emphasized, |this| {
                 this.child(
                     div()
                         .absolute()
