@@ -37,6 +37,9 @@ impl ConversationStore for TursoAppStore {
             if version == 1 {
                 migration::migrate_v1_to_v2(&mut connection).await?;
             }
+            if (1..=2).contains(&version) {
+                migration::migrate_v2_to_v3(&connection).await?;
+            }
 
             connection
                 .execute(
@@ -277,6 +280,40 @@ impl ConversationStore for TursoAppStore {
                 request_overhead_tokens,
             )
             .await
+        })
+    }
+
+    fn command_for_response(
+        &self,
+        conversation_id: ConversationId,
+        assistant_message_id: MessageId,
+    ) -> StorageFuture<Option<magenta_core::CommandId>> {
+        self.run(async move |connection| {
+            let mut statement = connection
+                .prepare(
+                    "SELECT m.command_id FROM messages m JOIN messages a \
+                     ON a.conversation_id=m.conversation_id \
+                     AND a.role='assistant' AND a.id=?2 \
+                     WHERE m.conversation_id=?1 AND m.role='user' AND m.sequence<a.sequence \
+                     ORDER BY m.sequence DESC LIMIT 1",
+                )
+                .await
+                .map_err(db)?;
+            let mut rows = statement
+                .query(params![
+                    as_i64(conversation_id.0)?,
+                    as_i64(assistant_message_id.0)?
+                ])
+                .await
+                .map_err(db)?;
+            let value = rows
+                .next()
+                .await
+                .map_err(db)?
+                .map(|row| row.get::<Option<String>>(0))
+                .transpose()
+                .map_err(db)?;
+            Ok(value.flatten().map(magenta_core::CommandId::new))
         })
     }
 

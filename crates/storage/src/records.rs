@@ -1,7 +1,7 @@
 use magenta_core::{
     AssistantTrace, AssistantTraceEntry, AssistantTraceKind, AssistantTraceStatus, Attachment,
-    Conversation, ConversationId, ConversationMode, Message, MessageId, MessagePage, MessageRole,
-    MessageSequence, MessageStatus, StoredMessage, Timestamp,
+    CommandId, Conversation, ConversationId, ConversationMode, Message, MessageId, MessagePage,
+    MessageRole, MessageSequence, MessageStatus, StoredMessage, Timestamp,
 };
 use rusqlite::{Connection, params};
 
@@ -44,7 +44,7 @@ pub fn page(
         .prepare(
             r"
                 SELECT id, sequence, role, content, status, generation, outcome, failure,
-                       thinking_duration_ms, created_at, omitted_context_messages
+                       thinking_duration_ms, created_at, omitted_context_messages, command_id
                 FROM messages
                 WHERE conversation_id = ?1
                   AND (?2 IS NULL OR sequence < ?2)
@@ -88,7 +88,7 @@ pub fn page_after(
         .prepare(
             r"
                 SELECT id, sequence, role, content, status, generation, outcome, failure,
-                       thinking_duration_ms, created_at, omitted_context_messages
+                       thinking_duration_ms, created_at, omitted_context_messages, command_id
                 FROM messages
                 WHERE conversation_id = ?1 AND sequence > ?2
                 ORDER BY sequence
@@ -128,7 +128,7 @@ pub fn page_around(
         .prepare(
             r"
                 SELECT id, sequence, role, content, status, generation, outcome, failure,
-                       thinking_duration_ms, created_at, omitted_context_messages
+                       thinking_duration_ms, created_at, omitted_context_messages, command_id
                 FROM messages
                 WHERE conversation_id = ?1
                   AND sequence BETWEEN ?2 AND ?3
@@ -175,7 +175,7 @@ pub fn context(connection: &Connection, id: ConversationId, before: i64) -> Resu
         .prepare(
             r"
                 SELECT id, sequence, role, content, status, generation, outcome, failure,
-                       thinking_duration_ms, created_at, omitted_context_messages
+                       thinking_duration_ms, created_at, omitted_context_messages, command_id
                 FROM messages
                 WHERE conversation_id = ?1
                   AND sequence < ?2
@@ -205,6 +205,7 @@ fn read_message(
     let generation: String = row.get(5).map_err(database_error)?;
     let outcome: Option<String> = row.get(6).map_err(database_error)?;
     let failure_json: Option<String> = row.get(7).map_err(database_error)?;
+    let command_id: Option<String> = row.get(11).map_err(database_error)?;
 
     let role = match role.as_str() {
         "user" => MessageRole::User,
@@ -253,6 +254,7 @@ fn read_message(
             id: message_id,
             conversation_id: id,
             role,
+            command_id: command_id.map(CommandId::new),
             content,
             status,
             attachments,

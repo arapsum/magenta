@@ -52,6 +52,45 @@ fn reopen_preserves_messages_configuration_metadata_and_pins() {
 }
 
 #[test]
+fn command_ids_round_trip_and_resolve_for_their_assistant_response() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite3");
+        let store = SqliteConversationStore::new(path.clone());
+        store.initialize().await.unwrap();
+
+        let mut turn = input(None);
+        turn.prompt.clear();
+        turn.command_id = Some(CommandId::new("review"));
+        let pending = store.begin_turn(turn).await.unwrap();
+        let conversation_id = pending.conversation.id;
+        let assistant_id = pending.assistant_message.id;
+        let mut assistant = pending.assistant_message;
+        assistant.content = "No findings.".into();
+        assistant.status = MessageStatus::Complete;
+        store.finalize(assistant).await.unwrap();
+
+        assert_eq!(
+            store
+                .command_for_response(conversation_id, assistant_id)
+                .await
+                .unwrap(),
+            Some(CommandId::new("review"))
+        );
+
+        drop(store);
+        let reopened = SqliteConversationStore::new(path);
+        reopened.initialize().await.unwrap();
+        let loaded = reopened.load(conversation_id).await.unwrap();
+        assert_eq!(
+            loaded.page.messages[0].message.command_id,
+            Some(CommandId::new("review"))
+        );
+        assert_eq!(loaded.page.messages[1].message.command_id, None);
+    });
+}
+
+#[test]
 fn agent_finalization_marks_the_run_completed() {
     smol::block_on(async {
         let directory = tempfile::tempdir().unwrap();

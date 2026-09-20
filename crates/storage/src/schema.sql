@@ -19,6 +19,7 @@ CREATE TABLE messages (
     generation TEXT NOT NULL,
     outcome TEXT,
     failure TEXT,
+    command_id TEXT,
     omitted_context_messages INTEGER NOT NULL DEFAULT 0 CHECK (omitted_context_messages >= 0),
     thinking_duration_ms INTEGER CHECK (thinking_duration_ms IS NULL OR thinking_duration_ms >= 0),
     created_at INTEGER NOT NULL,
@@ -125,4 +126,4 @@ CREATE TRIGGER message_fts_update AFTER UPDATE OF content ON messages BEGIN
     INSERT INTO message_fts(rowid, content) VALUES (new.id, new.content);
 END;
 
-PRAGMA user_version = 8;
+PRAGMA user_version = 9;

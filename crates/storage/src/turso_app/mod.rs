@@ -12,11 +12,11 @@ use std::{
 use crate::{attachments, failure, invalid, now, records, unavailable};
 use magenta_core::{
     AgentRunId, AssistantTrace, AssistantTraceEntry, AssistantTraceKind, AssistantTraceStatus,
-    Attachment, BeginTurn, ContextBudgetReport, Conversation, ConversationId, ConversationMode,
-    ConversationPage, ConversationSearchResult, ConversationStore, ConversationSummary,
-    GenerationConfig, Message, MessageId, MessagePage, MessageRole, MessageSequence, MessageStatus,
-    PreparedTurn, Project, ProjectStore, StorageError, StorageErrorKind, StorageFuture,
-    StoredMessage, Timestamp, select_context,
+    Attachment, BeginTurn, CommandId, ContextBudgetReport, Conversation, ConversationId,
+    ConversationMode, ConversationPage, ConversationSearchResult, ConversationStore,
+    ConversationSummary, GenerationConfig, Message, MessageId, MessagePage, MessageRole,
+    MessageSequence, MessageStatus, PreparedTurn, Project, ProjectStore, StorageError,
+    StorageErrorKind, StorageFuture, StoredMessage, Timestamp, select_context,
 };
 use rusqlite::OptionalExtension;
 use turso::{
@@ -32,7 +32,7 @@ mod trace;
 mod turns;
 
 type Result<T> = std::result::Result<T, StorageError>;
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const PAGE_SIZE: usize = 50;
 const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -50,7 +50,7 @@ DROP INDEX IF EXISTS conversation_recency;
 CREATE TABLE IF NOT EXISTS messages (
  id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
  sequence INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL,
- generation TEXT NOT NULL, outcome TEXT, failure TEXT, omitted_context_messages INTEGER NOT NULL DEFAULT 0,
+ generation TEXT NOT NULL, outcome TEXT, failure TEXT, command_id TEXT, omitted_context_messages INTEGER NOT NULL DEFAULT 0,
  thinking_duration_ms INTEGER,
  created_at INTEGER NOT NULL, UNIQUE(conversation_id, sequence)
 );

@@ -23,6 +23,7 @@ fn begin_turn(attachments: Vec<AttachmentDraft>) -> BeginTurn {
         conversation_id: None,
         title: "Image attachment".into(),
         prompt: "What is in this image?".into(),
+        command_id: None,
         attachments,
         generation: GenerationConfig::new(
             ProviderId::new("openai"),
@@ -238,7 +239,7 @@ fn version_one_attachments_remain_unmanaged_and_their_sources_are_not_deleted() 
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
     });
 }
 

@@ -41,6 +41,7 @@ fn version_four_migration_backfills_full_text_indexes() {
                     ALTER TABLE messages DROP COLUMN omitted_context_messages;
                     ALTER TABLE messages DROP COLUMN failure;
                     ALTER TABLE messages DROP COLUMN thinking_duration_ms;
+                    ALTER TABLE messages DROP COLUMN command_id;
                     PRAGMA user_version = 4;
                 ",
             )
@@ -52,5 +53,42 @@ fn version_four_migration_backfills_full_text_indexes() {
         let matches = migrated.search("main".into(), 10).await.unwrap();
         assert_eq!(matches[0].conversation_id, pending.conversation.id);
         assert_eq!(matches[0].message_id, Some(pending.user_message.id));
+    });
+}
+
+#[test]
+fn version_eight_migration_adds_nullable_command_ids() {
+    smol::block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite3");
+        let store = SqliteConversationStore::new(path.clone());
+        store.initialize().await.unwrap();
+        let pending = store.begin_turn(input(None)).await.unwrap();
+        drop(store);
+
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch("ALTER TABLE messages DROP COLUMN command_id; PRAGMA user_version = 8;")
+            .unwrap();
+        drop(connection);
+
+        let migrated = SqliteConversationStore::new(path.clone());
+        migrated.initialize().await.unwrap();
+        assert_eq!(
+            migrated
+                .load(pending.conversation.id)
+                .await
+                .unwrap()
+                .page
+                .messages[0]
+                .message
+                .command_id,
+            None
+        );
+        let connection = rusqlite::Connection::open(path).unwrap();
+        let version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 9);
     });
 }

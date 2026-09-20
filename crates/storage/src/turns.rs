@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
 use magenta_core::{
-    AgentRunId, AssistantTrace, Attachment, BeginTurn, Conversation, ConversationId,
+    AgentRunId, AssistantTrace, Attachment, BeginTurn, CommandId, Conversation, ConversationId,
     ConversationMode, GenerationConfig, Message, MessageId, MessageRole, MessageSequence,
     MessageStatus, PreparedTurn, StorageErrorKind, select_context,
 };
-use rusqlite::{Connection, Transaction, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
 use crate::{Result, database_error, failure, invalid, now, records};
 
@@ -18,6 +18,7 @@ pub fn begin(
         conversation_id,
         title,
         prompt,
+        command_id,
         attachments: _,
         generation: generation_config,
         mode,
@@ -25,7 +26,7 @@ pub fn begin(
         request_overhead_tokens,
     } = input;
 
-    if prompt.trim().is_empty() && attachments.is_empty() {
+    if prompt.trim().is_empty() && attachments.is_empty() && command_id.is_none() {
         return Err(failure(StorageErrorKind::InvalidData, "empty prompt"));
     }
 
@@ -58,12 +59,15 @@ pub fn begin(
 
     let user_message = insert_user_message(
         &transaction,
-        conversation.id,
-        sequence,
-        prompt,
-        attachments,
-        &generation,
-        timestamp,
+        UserMessageInput {
+            conversation_id: conversation.id,
+            sequence,
+            prompt,
+            attachments,
+            command_id,
+            generation: &generation,
+            timestamp,
+        },
     )?;
 
     context.push(user_message.clone());
@@ -204,29 +208,41 @@ fn insert_agent_run(
     )))
 }
 
-fn insert_user_message(
-    transaction: &Transaction<'_>,
+struct UserMessageInput<'a> {
     conversation_id: ConversationId,
     sequence: i64,
     prompt: String,
     attachments: Vec<Attachment>,
-    generation: &str,
+    command_id: Option<CommandId>,
+    generation: &'a str,
     timestamp: i64,
+}
+
+fn insert_user_message(
+    transaction: &Transaction<'_>,
+    input: UserMessageInput<'_>,
 ) -> Result<Message> {
     transaction
         .execute(
             r"
                 INSERT INTO messages(
-                    conversation_id, sequence, role, content, status, generation, created_at
+                    conversation_id, sequence, role, content, status, generation, command_id, created_at
                 )
-                VALUES (?1, ?2, 'user', ?3, 'complete', ?4, ?5)
+                VALUES (?1, ?2, 'user', ?3, 'complete', ?4, ?5, ?6)
             ",
-            params![conversation_id.0, sequence, &prompt, generation, timestamp],
+            params![
+                input.conversation_id.0,
+                input.sequence,
+                &input.prompt,
+                input.generation,
+                input.command_id.as_ref().map(CommandId::as_str),
+                input.timestamp
+            ],
         )
         .map_err(database_error)?;
     let user_id = MessageId(u64::try_from(transaction.last_insert_rowid()).map_err(invalid)?);
 
-    for (index, attachment) in attachments.iter().enumerate() {
+    for (index, attachment) in input.attachments.iter().enumerate() {
         let position = i64::try_from(index).map_err(invalid)?;
         let source_path = records::encode_path(&attachment.path);
         transaction
@@ -252,11 +268,12 @@ fn insert_user_message(
 
     Ok(Message {
         id: user_id,
-        conversation_id,
+        conversation_id: input.conversation_id,
         role: MessageRole::User,
-        content: prompt,
+        command_id: input.command_id,
+        content: input.prompt,
         status: MessageStatus::Complete,
-        attachments,
+        attachments: input.attachments,
         generation_outcome: None,
         failure: None,
         assistant_trace: AssistantTrace::default(),
@@ -297,6 +314,7 @@ fn insert_assistant_message(
         id: MessageId(u64::try_from(transaction.last_insert_rowid()).map_err(invalid)?),
         conversation_id,
         role: MessageRole::Assistant,
+        command_id: None,
         content: String::new(),
         status: MessageStatus::Streaming,
         attachments: Vec::new(),
@@ -397,6 +415,7 @@ pub fn regenerate(
         id: target,
         conversation_id: id,
         role: MessageRole::Assistant,
+        command_id: None,
         content: String::new(),
         status: MessageStatus::Streaming,
         attachments: Vec::new(),
@@ -510,6 +529,29 @@ pub fn retry(
     })
 }
 
+pub fn command_for_response(
+    connection: &Connection,
+    conversation_id: ConversationId,
+    assistant_message_id: MessageId,
+) -> Result<Option<CommandId>> {
+    let assistant_sequence: i64 = connection
+        .query_row(
+            "SELECT sequence FROM messages WHERE conversation_id = ?1 AND id = ?2 AND role = 'assistant'",
+            params![conversation_id.0, assistant_message_id.0],
+            |row| row.get(0),
+        )
+        .map_err(database_error)?;
+    let command_id: Option<Option<String>> = connection
+        .query_row(
+            "SELECT command_id FROM messages WHERE conversation_id = ?1 AND role = 'user' AND sequence < ?2 ORDER BY sequence DESC LIMIT 1",
+            params![conversation_id.0, assistant_sequence],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(database_error)?;
+    Ok(command_id.flatten().map(CommandId::new))
+}
+
 fn insert_retry_assistant_message(
     transaction: &Transaction<'_>,
     conversation_id: ConversationId,
@@ -540,6 +582,7 @@ fn insert_retry_assistant_message(
         id: MessageId(u64::try_from(transaction.last_insert_rowid()).map_err(invalid)?),
         conversation_id,
         role: MessageRole::Assistant,
+        command_id: None,
         content: String::new(),
         status: MessageStatus::Streaming,
         attachments: Vec::new(),

@@ -35,9 +35,10 @@ use std::{
 };
 
 use magenta_core::{
-    AssistantTrace, BeginTurn, ConversationId, ConversationPage, ConversationSearchResult,
-    ConversationStore, ConversationSummary, Message, MessageId, MessagePage, MessageSequence,
-    PreparedTurn, Project, ProjectStore, StorageError, StorageErrorKind, StorageFuture, Timestamp,
+    AssistantTrace, BeginTurn, CommandId, ConversationId, ConversationPage,
+    ConversationSearchResult, ConversationStore, ConversationSummary, Message, MessageId,
+    MessagePage, MessageSequence, PreparedTurn, Project, ProjectStore, StorageError,
+    StorageErrorKind, StorageFuture, Timestamp,
 };
 use rusqlite::{Connection, TransactionBehavior, params};
 
@@ -267,6 +268,16 @@ impl ConversationStore for SqliteConversationStore {
     ) -> StorageFuture<PreparedTurn> {
         self.run(move |connection| {
             turns::retry(connection, id, target, generation, request_overhead_tokens)
+        })
+    }
+
+    fn command_for_response(
+        &self,
+        conversation_id: ConversationId,
+        assistant_message_id: MessageId,
+    ) -> StorageFuture<Option<CommandId>> {
+        self.run(move |connection| {
+            turns::command_for_response(connection, conversation_id, assistant_message_id)
         })
     }
 

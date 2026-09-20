@@ -9,6 +9,7 @@ fn input(id: Option<ConversationId>) -> BeginTurn {
         conversation_id: id,
         title: "Context and paging".into(),
         prompt: "latest message".into(),
+        command_id: None,
         attachments: Vec::new(),
         generation: GenerationConfig::new(
             ProviderId::new("openai"),

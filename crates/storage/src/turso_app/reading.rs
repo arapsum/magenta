@@ -1,8 +1,9 @@
 use super::trace::read_trace;
 use super::{
-    Attachment, Connection, Conversation, ConversationId, Message, MessageId, MessagePage,
-    MessageSequence, PAGE_SIZE, Result, Row, StorageErrorKind, StoredMessage, Timestamp, as_i64,
-    as_u64, db, decode_optional_path, params, parse_mode, parse_role, parse_status, scalar_i64,
+    Attachment, CommandId, Connection, Conversation, ConversationId, Message, MessageId,
+    MessagePage, MessageSequence, PAGE_SIZE, Result, Row, StorageErrorKind, StoredMessage,
+    Timestamp, as_i64, as_u64, db, decode_optional_path, params, parse_mode, parse_role,
+    parse_status, scalar_i64,
 };
 
 pub(super) async fn ensure_idle(connection: &Connection, id: ConversationId) -> Result<()> {
@@ -60,6 +61,7 @@ struct RawMessage {
     generation: String,
     outcome: Option<String>,
     failure: Option<String>,
+    command_id: Option<String>,
     thinking_duration_ms: Option<i64>,
     created_at: i64,
     omitted: i64,
@@ -75,6 +77,7 @@ fn raw_message(row: &Row) -> Result<RawMessage> {
         generation: row.get(5).map_err(db)?,
         outcome: row.get(6).map_err(db)?,
         failure: row.get(7).map_err(db)?,
+        command_id: row.get(11).map_err(db)?,
         thinking_duration_ms: row.get(8).map_err(db)?,
         created_at: row.get(9).map_err(db)?,
         omitted: row.get(10).map_err(db)?,
@@ -93,7 +96,7 @@ pub(super) async fn read_page(
         let mut statement = connection
             .prepare(
                 "SELECT id,sequence,role,content,status,generation,outcome,failure, \
-                 thinking_duration_ms,created_at,omitted_context_messages \
+                 thinking_duration_ms,created_at,omitted_context_messages,command_id \
                  FROM messages \
                  WHERE conversation_id=?1 AND sequence>?2 \
                  ORDER BY sequence LIMIT 51",
@@ -115,7 +118,7 @@ pub(super) async fn read_page(
         let mut statement = connection
             .prepare(
                 "SELECT id,sequence,role,content,status,generation,outcome,failure, \
-                 thinking_duration_ms,created_at,omitted_context_messages \
+                 thinking_duration_ms,created_at,omitted_context_messages,command_id \
                  FROM messages \
                  WHERE conversation_id=?1 AND sequence<?2 \
                  ORDER BY sequence DESC LIMIT 51",
@@ -169,7 +172,7 @@ pub(super) async fn read_range(
     let mut statement = connection
         .prepare(
             "SELECT id,sequence,role,content,status,generation,outcome,failure, \
-             thinking_duration_ms,created_at,omitted_context_messages \
+             thinking_duration_ms,created_at,omitted_context_messages,command_id \
              FROM messages \
              WHERE conversation_id=?1 AND sequence BETWEEN ?2 AND ?3 \
              ORDER BY sequence",
@@ -255,7 +258,7 @@ pub(super) async fn read_context(
     let mut statement = connection
         .prepare(
             "SELECT id,sequence,role,content,status,generation,outcome,failure, \
-             thinking_duration_ms,created_at,omitted_context_messages \
+             thinking_duration_ms,created_at,omitted_context_messages,command_id \
              FROM messages \
              WHERE conversation_id=?1 AND sequence<?2 AND status='complete' \
              ORDER BY sequence",
@@ -315,6 +318,7 @@ async fn hydrate_message(
         id,
         conversation_id,
         role: parse_role(&raw.role)?,
+        command_id: raw.command_id.map(CommandId::new),
         content: raw.content,
         status: parse_status(&raw.status)?,
         attachments,

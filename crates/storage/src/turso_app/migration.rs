@@ -26,6 +26,14 @@ pub(super) async fn migrate_v1_to_v2(connection: &mut Connection) -> Result<()> 
     Ok(())
 }
 
+pub(super) async fn migrate_v2_to_v3(connection: &Connection) -> Result<()> {
+    connection
+        .execute("ALTER TABLE messages ADD COLUMN command_id TEXT", ())
+        .await
+        .map_err(db)?;
+    Ok(())
+}
+
 async fn load_legacy_traces(
     connection: &Connection,
 ) -> Result<std::collections::BTreeMap<i64, Vec<LegacyTrace>>> {

@@ -1,9 +1,9 @@
 use magenta_core::{
     AgentMemoryStore, AgentSession, AgentSessionState, AgentSessionStore, AssistantTrace,
     AssistantTraceEntry, AssistantTraceKind, AssistantTraceStatus, BeginTurn, CodeChunk, CodeIndex,
-    ConversationId, ConversationMode, ConversationStore, EffortLevel, GenerationConfig, MemoryKind,
-    MemoryState, MessageStatus, ModelId, NewAgentMemory, Project, ProjectStore, ProviderId,
-    Timestamp,
+    CommandId, ConversationId, ConversationMode, ConversationStore, EffortLevel, GenerationConfig,
+    MemoryKind, MemoryState, MessageStatus, ModelId, NewAgentMemory, Project, ProjectStore,
+    ProviderId, Timestamp,
 };
 use magenta_storage::{TursoAgentDatabase, TursoAppStore};
 use turso::{Builder, params};
@@ -30,6 +30,7 @@ fn local_turso_app_store_persists_conversations_and_projects() {
                 conversation_id: None,
                 title: "Turso conversation".into(),
                 prompt: "remember the architecture".into(),
+                command_id: Some(CommandId::new("explain")),
                 attachments: Vec::new(),
                 generation: generation(),
                 mode: ConversationMode::Chat,
@@ -63,6 +64,12 @@ fn local_turso_app_store_persists_conversations_and_projects() {
 
         assert_eq!(reopened.load(id).await.unwrap().page.messages.len(), 2);
         assert_eq!(
+            reopened.load(id).await.unwrap().page.messages[0]
+                .message
+                .command_id,
+            Some(CommandId::new("explain"))
+        );
+        assert_eq!(
             reopened
                 .search("architecture".into(), 10)
                 .await
@@ -87,6 +94,7 @@ fn local_turso_agent_regeneration_can_finalize_a_replaced_answer() {
                 conversation_id: None,
                 title: "Work".into(),
                 prompt: "Create a folder".into(),
+                command_id: None,
                 attachments: Vec::new(),
                 generation: generation(),
                 mode: ConversationMode::Agent,
@@ -123,6 +131,7 @@ fn local_turso_finalize_waits_for_a_concurrent_trace_writer() {
                 conversation_id: None,
                 title: "Concurrent writes".into(),
                 prompt: "Work".into(),
+                command_id: None,
                 attachments: Vec::new(),
                 generation: generation(),
                 mode: ConversationMode::Agent,
@@ -280,6 +289,7 @@ fn local_turso_app_store_persists_ordered_assistant_traces_and_duration() {
                 conversation_id: None,
                 title: "Trace conversation".into(),
                 prompt: "show the work".into(),
+                command_id: None,
                 attachments: Vec::new(),
                 generation: generation(),
                 mode: ConversationMode::Chat,

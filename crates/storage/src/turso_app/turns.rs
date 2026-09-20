@@ -1,6 +1,6 @@
 use super::reading::{ensure_idle, read_context, read_conversation};
 use super::{
-    AgentRunId, AssistantTrace, Attachment, BeginTurn, Connection, ContextBudgetReport,
+    AgentRunId, AssistantTrace, Attachment, BeginTurn, CommandId, Connection, ContextBudgetReport,
     Conversation, ConversationId, ConversationMode, GenerationConfig, Message, MessageId,
     MessageRole, MessageSequence, MessageStatus, PathBuf, PreparedTurn, Result, StorageError,
     StorageErrorKind, Transaction, TransactionBehavior, as_i64, as_u64, db, mode_name, params,
@@ -16,6 +16,7 @@ pub(super) async fn begin_turn(
         conversation_id,
         title,
         prompt,
+        command_id,
         attachments: _,
         generation,
         mode,
@@ -23,7 +24,7 @@ pub(super) async fn begin_turn(
         request_overhead_tokens,
     } = input;
 
-    if prompt.trim().is_empty() && attachments.is_empty() {
+    if prompt.trim().is_empty() && attachments.is_empty() && command_id.is_none() {
         return Err(super::failure(
             StorageErrorKind::InvalidData,
             "empty prompt",
@@ -60,12 +61,15 @@ pub(super) async fn begin_turn(
 
     let user_message = insert_user(
         &transaction,
-        conversation.id,
-        sequence,
-        prompt,
-        attachments,
-        &generation_json,
-        timestamp,
+        UserMessageInput {
+            conversation_id: conversation.id,
+            sequence,
+            content: prompt,
+            attachments,
+            command_id,
+            generation: &generation_json,
+            timestamp,
+        },
     )
     .await?;
 
@@ -316,6 +320,7 @@ pub(super) async fn regenerate(
         id: target,
         conversation_id: id,
         role: MessageRole::Assistant,
+        command_id: None,
         content: String::new(),
         status: MessageStatus::Streaming,
         attachments: Vec::new(),
@@ -449,26 +454,29 @@ pub(super) async fn retry(
     })
 }
 
-async fn insert_user(
-    connection: &Connection,
+struct UserMessageInput<'a> {
     conversation_id: ConversationId,
     sequence: i64,
     content: String,
     attachments: Vec<Attachment>,
-    generation: &str,
+    command_id: Option<CommandId>,
+    generation: &'a str,
     timestamp: i64,
-) -> Result<Message> {
+}
+
+async fn insert_user(connection: &Connection, input: UserMessageInput<'_>) -> Result<Message> {
     connection
         .execute(
             "INSERT INTO messages( \
-             conversation_id,sequence,role,content,status,generation,created_at \
-             ) VALUES (?1,?2,'user',?3,'complete',?4,?5)",
+             conversation_id,sequence,role,content,status,generation,command_id,created_at \
+             ) VALUES (?1,?2,'user',?3,'complete',?4,?5,?6)",
             params![
-                as_i64(conversation_id.0)?,
-                sequence,
-                content.as_str(),
-                generation,
-                timestamp,
+                as_i64(input.conversation_id.0)?,
+                input.sequence,
+                input.content.as_str(),
+                input.generation,
+                input.command_id.as_ref().map(CommandId::as_str),
+                input.timestamp,
             ],
         )
         .await
@@ -476,7 +484,7 @@ async fn insert_user(
 
     let id = MessageId(as_u64(connection.last_insert_rowid())?);
 
-    for (position, attachment) in attachments.iter().enumerate() {
+    for (position, attachment) in input.attachments.iter().enumerate() {
         connection
             .execute(
                 "INSERT INTO attachments( \
@@ -498,11 +506,12 @@ async fn insert_user(
 
     Ok(Message {
         id,
-        conversation_id,
+        conversation_id: input.conversation_id,
         role: MessageRole::User,
-        content,
+        command_id: input.command_id,
+        content: input.content,
         status: MessageStatus::Complete,
-        attachments,
+        attachments: input.attachments,
         generation_outcome: None,
         failure: None,
         assistant_trace: AssistantTrace::default(),
@@ -538,6 +547,7 @@ async fn insert_assistant(
         id: MessageId(as_u64(connection.last_insert_rowid())?),
         conversation_id,
         role: MessageRole::Assistant,
+        command_id: None,
         content: String::new(),
         status: MessageStatus::Streaming,
         attachments: Vec::new(),

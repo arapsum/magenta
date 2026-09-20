@@ -1,8 +1,8 @@
 use magenta_core::{
-    AttachmentDraft, BeginTurn, ConversationId, ConversationMode, ConversationStore, EffortLevel,
-    FinishReason, GenerationConfig, GenerationOutcome, MessageFailure, MessageFailureCategory,
-    MessageFailureDetail, MessageSequence, MessageStatus, ModelId, Project, ProjectStore,
-    ProviderId, StorageErrorKind, Timestamp, TokenUsage,
+    AttachmentDraft, BeginTurn, CommandId, ConversationId, ConversationMode, ConversationStore,
+    EffortLevel, FinishReason, GenerationConfig, GenerationOutcome, MessageFailure,
+    MessageFailureCategory, MessageFailureDetail, MessageSequence, MessageStatus, ModelId, Project,
+    ProjectStore, ProviderId, StorageErrorKind, Timestamp, TokenUsage,
 };
 use magenta_storage::SqliteConversationStore;
 use std::{
@@ -30,6 +30,7 @@ fn input(id: Option<ConversationId>) -> BeginTurn {
         conversation_id: id,
         title: "Unicode λ and Markdown".into(),
         prompt: "Explain `λ`\n```rust\nfn main() {}\n```".into(),
+        command_id: None,
         attachments: Vec::new(),
         generation: GenerationConfig::new(
             ProviderId::new("openai"),
