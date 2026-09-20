@@ -2,8 +2,10 @@ use std::{future::Future, path::PathBuf, pin::Pin};
 
 use serde::{Deserialize, Serialize};
 
+use crate::{ConversationMode, EffortLevel, ModelId, ProviderId};
+
 /// The persisted settings format supported by this version of Magenta.
-pub const SETTINGS_VERSION: u32 = 1;
+pub const SETTINGS_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -120,10 +122,46 @@ impl Default for TypographySettings {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GenerationPreference {
+    pub provider: ProviderId,
+    pub model: ModelId,
+    pub effort: EffortLevel,
+}
+
+impl GenerationPreference {
+    #[must_use]
+    pub const fn new(provider: ProviderId, model: ModelId, effort: EffortLevel) -> Self {
+        Self {
+            provider,
+            model,
+            effort,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GenerationSettings {
+    pub chat: Option<GenerationPreference>,
+    pub work: Option<GenerationPreference>,
+}
+
+impl GenerationSettings {
+    #[must_use]
+    #[allow(clippy::needless_pass_by_value)]
+    pub const fn for_mode(&self, mode: ConversationMode) -> Option<&GenerationPreference> {
+        match mode {
+            ConversationMode::Chat => self.chat.as_ref(),
+            ConversationMode::Agent => self.work.as_ref(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppSettings {
     pub version: u32,
     pub appearance: AppearanceMode,
     pub typography: TypographySettings,
+    pub generation: GenerationSettings,
 }
 
 impl Default for AppSettings {
@@ -132,6 +170,7 @@ impl Default for AppSettings {
             version: SETTINGS_VERSION,
             appearance: AppearanceMode::default(),
             typography: TypographySettings::default(),
+            generation: GenerationSettings::default(),
         }
     }
 }

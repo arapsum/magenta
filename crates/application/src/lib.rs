@@ -8,6 +8,7 @@
 
 mod agent;
 mod error;
+mod generation_defaults;
 mod history;
 mod projects;
 mod regenerate_message;
@@ -20,6 +21,9 @@ pub use agent::{
 };
 pub use error::{
     RegenerateMessageError, RetryMessageError, SendMessageError, TitleConversationError,
+};
+pub use generation_defaults::{
+    GenerationFallbackReason, GenerationResolution, resolve_generation_defaults,
 };
 pub use history::ConversationHistory;
 pub use projects::{ProjectCatalog, ProjectCatalogError};

@@ -65,8 +65,9 @@ pub use repository::{
     RepositoryDiffArea, RepositoryError, RepositoryErrorKind, RepositoryFuture, RepositoryStatus,
 };
 pub use settings::{
-    AppSettings, AppearanceMode, FontChoice, MathFontStyle, SETTINGS_VERSION, SettingsError,
-    SettingsFuture, SettingsStore, TypographySettings,
+    AppSettings, AppearanceMode, FontChoice, GenerationPreference, GenerationSettings,
+    MathFontStyle, SETTINGS_VERSION, SettingsError, SettingsFuture, SettingsStore,
+    TypographySettings,
 };
 pub use storage::{
     BeginTurn, ConversationPage, ConversationSearchResult, ConversationStore, ConversationSummary,
