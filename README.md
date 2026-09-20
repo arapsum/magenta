@@ -143,11 +143,11 @@ Deleting a conversation removes its database records and Magenta-managed image
 copies, not the original attachments or workspace files. Forgetting a project
 removes its registration, not its directory or conversations.
 
-Settings apply across Magenta windows and persist without blocking the UI. The
-default configuration is:
+Settings apply across Magenta windows and persist without blocking the UI. A
+complete schema example is:
 
 ```toml
-version = 1
+version = 2
 
 [appearance]
 theme = "dark"
@@ -160,7 +160,32 @@ monospace_size = 13
 math_font = "default"
 inline_math_size = 13
 display_math_size = 16
+
+[generation.chat]
+provider = "openai"
+model = "gpt-5.4"
+effort = "medium"
+
+[generation.work]
+provider = "openai"
+model = "gpt-5.6-codex"
+effort = "high"
 ```
+
+The `generation.chat` and `generation.work` tables are optional. Omitting either
+table selects **Automatic**, which uses the highest-priority live model and that
+model's provider-defined default effort. These defaults seed new conversations;
+existing conversations, retries, and regenerations keep their persisted
+provider, model, effort, and limits. Supported effort strings are `none`,
+`minimal`, `low`, `medium`, `high`, `xhigh`, and `max`; non-empty provider-specific
+strings are also retained as custom effort values.
+
+If a configured model, provider, or effort is unavailable, Magenta keeps the TOML
+value unchanged, uses the best live fallback, and shows one deduplicated warning
+notice until the requested or effective value changes. An incomplete generation
+table is treated as Automatic, retained in the source file, and reported to
+diagnostics. Version-1 settings load with both generation preferences unset and
+are upgraded to version 2 only when a subsequent explicit save occurs.
 
 Appearance accepts `system`, `light`, or `dark`; math styles accept `default`,
 `roman`, `sans-serif`, or `typewriter`. The UI labels those math choices as KaTeX
