@@ -1,98 +1,6 @@
 use super::*;
 
 impl PromptComposer {
-    pub(super) fn render_chat_content(
-        &self,
-        submit_view: Entity<Self>,
-        generating: bool,
-        ready: bool,
-        can_add_attachment: bool,
-        cx: &Context<'_, Self>,
-    ) -> AnyElement {
-        let submit = submit_view.clone();
-
-        v_flex()
-            .w_full()
-            .gap(px(8.))
-            .when_some(self.inline_error(), |this, error| {
-                this.child(
-                    div()
-                        .text_size(px(12.))
-                        .text_color(cx.theme().danger)
-                        .child(format!("{} {}", error.title, error.message)),
-                )
-            })
-            .when_some(self.blocking_error(), |this, error| {
-                this.child(
-                    div()
-                        .text_size(px(12.))
-                        .text_color(cx.theme().warning)
-                        .child(format!("{} {}", error.title, error.message)),
-                )
-            })
-            .when(!self.attachments.is_empty(), |this| {
-                this.child(self.attachment_strip(cx))
-            })
-            .child(
-                h_flex()
-                    .w_full()
-                    .items_center()
-                    .gap(px(8.))
-                    .when(can_add_attachment, |this| {
-                        this.child(Self::attachment_button(cx))
-                    })
-                    .child(
-                        Textarea::new(&self.input)
-                            .appearance(false)
-                            .bordered(false)
-                            .aria_label("Chat message composer")
-                            .flex_1()
-                            .min_w_0()
-                            .min_h(px(32.))
-                            .p_0()
-                            .text_size(px(15.))
-                            .line_height(px(22.)),
-                    )
-                    .child(self.model_selector(submit_view, cx))
-                    .child(
-                        Button::new("prompt-submit")
-                            .when(generating, ButtonVariants::secondary)
-                            .when(!generating, ButtonVariants::primary)
-                            .disabled(!ready && !generating)
-                            .accessibility_id(if generating {
-                                "prompt-stop-response"
-                            } else {
-                                "prompt-submit"
-                            })
-                            .tooltip(if generating {
-                                "Stop response"
-                            } else if ready {
-                                "Send message"
-                            } else {
-                                "Add a message before sending"
-                            })
-                            .size(px(36.))
-                            .p_0()
-                            .rounded_full()
-                            .icon(if generating {
-                                Icon::empty().path("icons/generation-stop.svg")
-                            } else {
-                                Icon::new(IconName::ChevronUp)
-                            })
-                            .on_click(move |_, _, cx| {
-                                submit.update(cx, |composer, cx| {
-                                    if generating {
-                                        composer.cancel(cx);
-                                    } else {
-                                        composer.submit(cx);
-                                    }
-                                });
-                            }),
-                    ),
-            )
-            .into_any_element()
-    }
-
     pub(super) fn render_input_content(&self, cx: &Context<'_, Self>) -> AnyElement {
         v_flex()
             .flex_1()
@@ -161,13 +69,13 @@ impl PromptComposer {
             .into_any_element()
     }
 
-    pub(super) fn mode_selector(&self, view: Entity<Self>, cx: &Context<'_, Self>) -> AnyElement {
+    pub(crate) fn mode_selector(&self, view: Entity<Self>, cx: &App) -> AnyElement {
         let mode = self.mode.clone();
         let agent_available = self.agent_capability.available();
 
         div()
             .debug_selector(|| "prompt-mode-selector".into())
-            .rounded_full()
+            .rounded(px(9.))
             .border_1()
             .border_color(cx.theme().foreground.opacity(0.07))
             .bg(super::super::super::visual::surface(
@@ -175,13 +83,6 @@ impl PromptComposer {
                 cx,
             ))
             .p(px(2.))
-            .shadow(vec![box_shadow(
-                0.,
-                5.,
-                14.,
-                -10.,
-                cx.theme().background.opacity(0.9),
-            )])
             .child(
                 ToggleGroup::new("prompt-mode-selector")
                     .segmented()
@@ -189,15 +90,15 @@ impl PromptComposer {
                     .child(
                         Toggle::new("prompt-mode-chat")
                             .label("Chat")
-                            .w(px(76.))
-                            .h(px(28.))
+                            .w(px(58.))
+                            .h(px(26.))
                             .checked(mode == ConversationMode::Chat),
                     )
                     .child(
                         Toggle::new("prompt-mode-work")
                             .label("Work")
-                            .w(px(76.))
-                            .h(px(28.))
+                            .w(px(58.))
+                            .h(px(26.))
                             .checked(mode == ConversationMode::Agent)
                             .disabled(!agent_available),
                     )

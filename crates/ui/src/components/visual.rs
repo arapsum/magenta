@@ -28,17 +28,10 @@ pub fn surface(level: SurfaceLevel, cx: &App) -> Hsla {
     }
 }
 
-pub fn raised_shadow(cx: &App) -> Vec<gpui_kit::BoxShadow> {
-    vec![
-        box_shadow(0., 18., 48., -24., cx.theme().primary.opacity(0.22)),
-        box_shadow(0., 8., 24., -12., cx.theme().background.opacity(0.96)),
-    ]
-}
-
 pub fn floating_shadow(cx: &App) -> Vec<gpui_kit::BoxShadow> {
     vec![
-        box_shadow(0., 28., 72., -30., cx.theme().primary.opacity(0.32)),
-        box_shadow(0., 12., 32., -14., cx.theme().background.opacity(0.98)),
+        box_shadow(0., 22., 56., -28., cx.theme().background.opacity(0.98)),
+        box_shadow(0., 4., 14., -8., cx.theme().border.opacity(0.42)),
     ]
 }
 
@@ -63,7 +56,7 @@ pub fn ambient_field(cx: &App) -> AnyElement {
                         .repeat_synced()
                         .with_max_fps(20.),
                     |field, delta| {
-                        let breath = (delta * TAU).sin().mul_add(0.055, 0.74);
+                        let breath = (delta * TAU).sin().mul_add(0.035, 0.54);
                         field.opacity(breath)
                     },
                 ),

@@ -41,6 +41,7 @@ impl PromptComposer {
 
         self.mode = mode;
         self.synchronize_input_mode(window, cx);
+        cx.emit(PromptComposerEvent::ModeChanged);
     }
 
     pub(crate) fn synchronize_input_mode(

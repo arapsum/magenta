@@ -112,6 +112,22 @@ impl PromptComposer {
         can_add_attachment: bool,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
+        let generation_controls =
+            self.generation_controls(submit_view.clone(), generating, ready, cx);
+
+        if self.mode == ConversationMode::Agent {
+            return h_flex()
+                .w_full()
+                .min_h(px(36.))
+                .min_w_0()
+                .items_center()
+                .justify_between()
+                .gap(px(12.))
+                .child(self.workspace_controls(submit_view, cx))
+                .child(generation_controls)
+                .into_any_element();
+        }
+
         h_flex()
             .w_full()
             .min_h(px(30.))
@@ -125,52 +141,58 @@ impl PromptComposer {
                     .gap(px(6.))
                     .when(can_add_attachment, |this| {
                         this.child(Self::attachment_button(cx))
-                    })
-                    .when(self.mode == ConversationMode::Agent, |this| {
-                        this.child(self.workspace_controls(submit_view.clone(), cx))
                     }),
             )
+            .child(generation_controls)
+            .into_any_element()
+    }
+
+    fn generation_controls(
+        &self,
+        submit_view: Entity<Self>,
+        generating: bool,
+        ready: bool,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        h_flex()
+            .min_w_0()
+            .items_center()
+            .gap(px(6.))
+            .child(self.model_selector(submit_view.clone(), cx))
             .child(
-                h_flex()
-                    .min_w_0()
-                    .items_center()
-                    .gap(px(6.))
-                    .child(self.model_selector(submit_view.clone(), cx))
-                    .child(
-                        Button::new("prompt-submit")
-                            .when(generating, ButtonVariants::secondary)
-                            .when(!generating, ButtonVariants::primary)
-                            .disabled(!ready && !generating)
-                            .accessibility_id(if generating {
-                                "prompt-stop-response"
+                Button::new("prompt-submit")
+                    .when(generating, ButtonVariants::secondary)
+                    .when(!generating, ButtonVariants::primary)
+                    .disabled(!ready && !generating)
+                    .accessibility_id(if generating {
+                        "prompt-stop-response"
+                    } else {
+                        "prompt-submit"
+                    })
+                    .tooltip(if generating {
+                        "Stop response"
+                    } else if ready {
+                        "Send message"
+                    } else {
+                        "Add a message before sending"
+                    })
+                    .size(px(36.))
+                    .p_0()
+                    .rounded_full()
+                    .icon(if generating {
+                        Icon::empty().path("icons/generation-stop.svg")
+                    } else {
+                        Icon::new(IconName::ChevronUp)
+                    })
+                    .on_click(move |_, _window, cx| {
+                        submit_view.update(cx, |composer, cx| {
+                            if generating {
+                                composer.cancel(cx);
                             } else {
-                                "prompt-submit"
-                            })
-                            .tooltip(if generating {
-                                "Stop response"
-                            } else if ready {
-                                "Send message"
-                            } else {
-                                "Add a message before sending"
-                            })
-                            .size(px(36.))
-                            .p_0()
-                            .rounded_full()
-                            .icon(if generating {
-                                Icon::empty().path("icons/generation-stop.svg")
-                            } else {
-                                Icon::new(IconName::ChevronUp)
-                            })
-                            .on_click(move |_, _window, cx| {
-                                submit_view.update(cx, |composer, cx| {
-                                    if generating {
-                                        composer.cancel(cx);
-                                    } else {
-                                        composer.submit(cx);
-                                    }
-                                });
-                            }),
-                    ),
+                                composer.submit(cx);
+                            }
+                        });
+                    }),
             )
             .into_any_element()
     }

@@ -1,12 +1,34 @@
 use std::{cell::RefCell, rc::Rc};
 
-use gpui_kit::{TestAppContext, size};
+use gpui_kit::{
+    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
+    TestAppContext, Window, div, size,
+};
 use magenta_core::{
     ConversationMode, EffortLevel, GenerationConfig, GenerationLimits, GenerationPreference,
     GenerationSettings, ModelDescriptor,
 };
 
 use super::{AgentCapability, PromptComposer, PromptComposerEvent, is_supported_image};
+
+struct ModeSelectorHarness {
+    composer: Entity<PromptComposer>,
+}
+
+impl Render for ModeSelectorHarness {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                self.composer
+                    .read(cx)
+                    .mode_selector(self.composer.clone(), cx),
+            )
+    }
+}
 
 fn model(id: &str, default_effort: EffortLevel) -> ModelDescriptor {
     ModelDescriptor {
@@ -268,11 +290,17 @@ fn chat_and_work_segments_switch_in_both_directions(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let window = cx.open_window(
         size(gpui_kit::px(720.), gpui_kit::px(420.)),
-        PromptComposer::new,
+        |window, cx| {
+            let composer = cx.new(|cx| PromptComposer::new(window, cx));
+
+            ModeSelectorHarness { composer }
+        },
     );
     window
-        .update(cx, |composer, _, cx| {
-            composer.set_agent_capability(AgentCapability::Commands, cx);
+        .update(cx, |harness, _, cx| {
+            harness.composer.update(cx, |composer, cx| {
+                composer.set_agent_capability(AgentCapability::Commands, cx);
+            });
         })
         .unwrap();
 
@@ -289,8 +317,8 @@ fn chat_and_work_segments_switch_in_both_directions(cx: &mut TestAppContext) {
         gpui_kit::Modifiers::default(),
     );
     window
-        .update(cx, |composer, _, _| {
-            assert_eq!(composer.mode, ConversationMode::Agent);
+        .update(cx, |harness, _, cx| {
+            assert_eq!(harness.composer.read(cx).mode, ConversationMode::Agent);
         })
         .unwrap();
 
@@ -300,8 +328,8 @@ fn chat_and_work_segments_switch_in_both_directions(cx: &mut TestAppContext) {
         gpui_kit::Modifiers::default(),
     );
     window
-        .update(cx, |composer, _, _| {
-            assert_eq!(composer.mode, ConversationMode::Chat);
+        .update(cx, |harness, _, cx| {
+            assert_eq!(harness.composer.read(cx).mode, ConversationMode::Chat);
         })
         .unwrap();
 }

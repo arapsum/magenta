@@ -29,21 +29,30 @@ fn render_recent_row(
     Button::new(("workspace-recent", id.0))
         .ghost()
         .w_full()
-        .h(px(56.))
-        .px(px(13.))
-        .rounded(px(11.))
+        .h(px(68.))
+        .px(px(14.))
+        .rounded(px(12.))
         .border_1()
-        .border_color(cx.theme().border.opacity(0.56))
-        .bg(cx.theme().popover.opacity(0.52))
+        .border_color(cx.theme().border.opacity(0.72))
+        .bg(cx.theme().popover.opacity(0.68))
         .child(
             h_flex()
                 .w_full()
-                .items_start()
-                .gap(px(10.))
+                .items_center()
+                .gap(px(12.))
                 .child(
-                    provider_icon(Some(&conversation.provider))
-                        .xsmall()
-                        .text_color(cx.theme().muted_foreground),
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(36.))
+                        .flex_none()
+                        .rounded(px(10.))
+                        .border_1()
+                        .border_color(cx.theme().primary.opacity(0.18))
+                        .bg(cx.theme().accent.opacity(0.72))
+                        .text_color(cx.theme().primary)
+                        .child(provider_icon(Some(&conversation.provider)).xsmall()),
                 )
                 .child(
                     v_flex()
@@ -57,8 +66,8 @@ fn render_recent_row(
                                 .overflow_hidden()
                                 .whitespace_nowrap()
                                 .text_ellipsis()
-                                .text_size(px(13.))
-                                .font_medium()
+                                .text_size(px(14.))
+                                .font_semibold()
                                 .text_color(cx.theme().foreground)
                                 .child(conversation.title),
                         )
@@ -68,19 +77,24 @@ fn render_recent_row(
                                 .overflow_hidden()
                                 .whitespace_nowrap()
                                 .text_ellipsis()
-                                .text_size(px(12.))
+                                .text_size(px(12.5))
                                 .line_height(px(16.))
                                 .text_color(cx.theme().muted_foreground)
                                 .child(conversation.preview),
                         ),
                 )
                 .child(
-                    div()
+                    h_flex()
                         .flex_none()
-                        .font_family(cx.theme().mono_font_family.clone())
-                        .text_size(px(11.))
+                        .gap(px(8.))
                         .text_color(cx.theme().muted_foreground.opacity(0.84))
-                        .child(conversation.updated),
+                        .child(
+                            div()
+                                .font_family(cx.theme().mono_font_family.clone())
+                                .text_size(px(11.))
+                                .child(conversation.updated),
+                        )
+                        .child(Icon::new(IconName::ChevronRight).xsmall()),
                 ),
         )
         .on_click(move |_, _, cx| {
@@ -94,7 +108,7 @@ fn render_recent_rows(
     sidebar: &Entity<SidebarView>,
     cx: &Context<'_, MainView>,
 ) -> AnyElement {
-    let mut rows = v_flex().w_full().gap(px(3.));
+    let mut rows = v_flex().w_full().gap(px(8.));
     for conversation in conversations {
         rows = rows.child(render_recent_row(conversation, sidebar, cx));
     }
@@ -107,13 +121,14 @@ fn landing_copy(project: Option<&Project>, has_recent: bool) -> (String, String,
             if has_recent {
                 (
                     "What would you like to work on?".to_owned(),
-                    "Start something new, or pick up a recent conversation.".to_owned(),
+                    "Start a conversation, explore an idea, or continue where you left off."
+                        .to_owned(),
                     "Continue",
                 )
             } else {
                 (
                     "What can I help with?".to_owned(),
-                    "Ask a question, explore an idea, or work through a problem.".to_owned(),
+                    "Think through a question, shape an idea, or build something new.".to_owned(),
                     "Continue",
                 )
             }
@@ -121,7 +136,7 @@ fn landing_copy(project: Option<&Project>, has_recent: bool) -> (String, String,
         |project| {
             (
                 format!("Ready to work in {}", project.name),
-                "Ask the agent to inspect, create, or edit files in this workspace.".to_owned(),
+                "Ask Magenta to inspect, create, or edit files in this workspace.".to_owned(),
                 "Project threads",
             )
         },
@@ -143,7 +158,7 @@ fn render_landing_content(
     let eyebrow = if project.is_some() {
         "Active workspace"
     } else {
-        "A quieter place to think"
+        "Your AI workspace"
     };
     let icon_background = linear_gradient(
         135.,
@@ -155,33 +170,32 @@ fn render_landing_content(
         .id("new-chat-start-content")
         .debug_selector(|| "new-chat-start-content".into())
         .w_full()
-        .max_w(px(800.))
+        .max_w(px(880.))
         .items_start()
-        .gap(px(10.))
+        .gap(px(12.))
         .child(
             h_flex()
                 .items_center()
-                .gap(px(7.))
-                .text_size(px(12.))
+                .gap(px(8.))
+                .text_size(px(11.))
                 .font_medium()
                 .text_color(cx.theme().primary)
-                .child(div().size(px(6.)).rounded_full().bg(cx.theme().primary))
+                .child(Icon::new(IconName::Bot).xsmall())
                 .child(eyebrow),
         )
         .child(
             h_flex()
                 .items_center()
-                .gap(px(12.))
+                .gap(px(14.))
                 .child(
                     div()
                         .flex()
                         .items_center()
                         .justify_center()
-                        .size(px(42.))
-                        .rounded(px(13.))
+                        .size(px(46.))
+                        .rounded(px(14.))
                         .bg(icon_background)
                         .text_color(cx.theme().primary_foreground)
-                        .shadow_sm()
                         .child(
                             Icon::new(if project.is_some() {
                                 IconName::FolderOpen
@@ -193,16 +207,16 @@ fn render_landing_content(
                 )
                 .child(
                     div()
-                        .text_size(px(34.))
-                        .line_height(px(40.))
+                        .text_size(px(38.))
+                        .line_height(px(44.))
                         .font_semibold()
                         .child(heading),
                 ),
         )
         .child(
             div()
-                .text_size(px(15.))
-                .line_height(px(22.))
+                .text_size(px(16.))
+                .line_height(px(24.))
                 .text_color(cx.theme().muted_foreground)
                 .child(description),
         );
@@ -218,14 +232,14 @@ fn render_landing_content(
                 .child(project.root.display().to_string()),
         );
     }
-    content = content.child(div().w_full().mt(px(24.)).child(composer));
+    content = content.child(div().w_full().mt(px(26.)).child(composer));
     if (project.is_some() && has_recent) || (project.is_none() && show_recent) {
         content = content
             .child(
                 div()
-                    .mt(px(24.))
-                    .text_size(px(11.))
-                    .font_medium()
+                    .mt(px(28.))
+                    .text_size(px(12.))
+                    .font_semibold()
                     .text_color(cx.theme().muted_foreground)
                     .child(section_label),
             )
@@ -234,7 +248,11 @@ fn render_landing_content(
     content.into_any_element()
 }
 
-fn render_landing_shell(content: AnyElement, cx: &Context<'_, MainView>) -> AnyElement {
+fn render_landing_shell(
+    mode_selector: AnyElement,
+    content: AnyElement,
+    cx: &Context<'_, MainView>,
+) -> AnyElement {
     div()
         .relative()
         .flex()
@@ -247,16 +265,28 @@ fn render_landing_shell(content: AnyElement, cx: &Context<'_, MainView>) -> AnyE
         .text_color(cx.theme().foreground)
         .child(super::visual::ambient_field(cx))
         .child(
+            h_flex()
+                .relative()
+                .flex_none()
+                .w_full()
+                .h(px(54.))
+                .items_center()
+                .justify_center()
+                .border_b_1()
+                .border_color(cx.theme().border.opacity(0.52))
+                .bg(cx.theme().tokens.background.background.opacity(0.9))
+                .child(mode_selector),
+        )
+        .child(
             div()
                 .relative()
                 .flex()
                 .flex_1()
                 .min_h_0()
-                .items_center()
                 .justify_center()
-                .px(px(32.))
-                .pt(px(56.))
-                .pb(px(72.))
+                .px(px(48.))
+                .pt(px(48.))
+                .pb(px(64.))
                 .child(content),
         )
         .into_any_element()
@@ -264,7 +294,7 @@ fn render_landing_shell(content: AnyElement, cx: &Context<'_, MainView>) -> AnyE
 
 #[must_use]
 pub fn render(
-    composer: Entity<PromptComposer>,
+    composer: &Entity<PromptComposer>,
     sidebar: &Entity<SidebarView>,
     cx: &Context<'_, MainView>,
 ) -> AnyElement {
@@ -281,7 +311,15 @@ pub fn render(
         },
         |project| sidebar_state.project_conversations_for(&project.root),
     );
-    let content =
-        render_landing_content(project.as_ref(), recent, show_recent, composer, sidebar, cx);
-    render_landing_shell(content, cx)
+    let content = render_landing_content(
+        project.as_ref(),
+        recent,
+        show_recent,
+        composer.clone(),
+        sidebar,
+        cx,
+    );
+    let mode_selector = composer.read(cx).mode_selector(composer.clone(), cx);
+
+    render_landing_shell(mode_selector, content, cx)
 }

@@ -20,7 +20,6 @@ impl MainView {
             .id("titlebar-controls")
             .h_full()
             .items_center()
-            .gap(px(4.))
             .px(px(4.))
             .child(
                 Button::new("titlebar-sidebar-toggle")
@@ -33,34 +32,6 @@ impl MainView {
                         sidebar_view.update(cx, SidebarView::toggle_collapsed);
                     }),
             )
-            .when(
-                self.workbench.is_some() && self.sidebar.read(cx).active_project().is_some(),
-                |this| {
-                    let open = self.workbench_open;
-                    this.child(
-                        Button::new("toggle-code-workbench")
-                            .ghost()
-                            .small()
-                            .child(Icon::empty().path("icons/code.svg").xsmall())
-                            .label(if open { "Conversation" } else { "Code" })
-                            .tooltip(if open {
-                                "Show conversation"
-                            } else {
-                                "Show code"
-                            })
-                            .on_click(cx.listener(|main, _, window, cx| {
-                                let opening = !main.workbench_open;
-                                main.workbench_open = opening;
-                                if opening && let Some(workbench) = &main.workbench {
-                                    workbench.update(cx, |workbench, cx| {
-                                        workbench.prepare_to_show(window, cx);
-                                    });
-                                }
-                                cx.notify();
-                            })),
-                    )
-                },
-            )
             .into_any_element()
     }
 
@@ -68,7 +39,7 @@ impl MainView {
         let conversation = if self.active_conversation.is_some() {
             self.conversation.clone().into_any_element()
         } else {
-            workspace::render(self.composer.clone(), &self.sidebar, cx)
+            workspace::render(&self.composer, &self.sidebar, cx)
         };
         let Some(workbench) = self.workbench.as_ref() else {
             return conversation;
@@ -82,20 +53,20 @@ impl MainView {
         h_resizable("conversation-workbench")
             .child(
                 resizable_panel()
-                    .size(px(620.))
-                    .size_range(px(360.)..gpui_kit::Pixels::MAX)
+                    .size(px(680.))
+                    .size_range(px(600.)..gpui_kit::Pixels::MAX)
                     .child(conversation),
             )
             .child(
                 resizable_panel()
-                    .size(px(760.))
-                    .size_range(px(280.)..gpui_kit::Pixels::MAX)
+                    .size(px(840.))
+                    .size_range(px(480.)..gpui_kit::Pixels::MAX)
                     .child(workbench.clone()),
             )
             .into_any_element()
     }
 
-    fn main_panel(&self, content: AnyElement, narrow: bool, cx: &Context<'_, Self>) -> AnyElement {
+    fn main_panel(&self, content: AnyElement, _narrow: bool, cx: &Context<'_, Self>) -> AnyElement {
         let view = cx.entity();
         div()
             .flex()
@@ -105,90 +76,67 @@ impl MainView {
             .min_w_0()
             .child(titlebar::render(self.titlebar_controls(cx)))
             .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .min_w_0()
-                    .when(narrow, gpui_kit::Styled::p_0)
-                    .when(!narrow, |this| this.px(px(12.)).pb(px(12.)).pt(px(10.)))
-                    .child(
-                        div()
-                            .flex()
-                            .size_full()
-                            .min_h_0()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .rounded(px(18.))
-                            .border_1()
-                            .border_color(cx.theme().primary.opacity(0.18))
-                            .bg(cx.theme().tokens.background.background)
-                            .shadow(vec![
-                                box_shadow(0., 18., 48., -24., cx.theme().primary.opacity(0.3)),
-                                box_shadow(0., 7., 22., -12., cx.theme().background.opacity(0.92)),
-                            ])
-                            .when(narrow, |this| {
-                                this.rounded(px(0.))
-                                    .border_0()
-                                    .border_color(cx.theme().transparent)
-                            })
-                            .child(
-                                v_flex()
-                                    .size_full()
-                                    .min_h_0()
-                                    .when_some(self.history_error, |this, error| {
-                                        let retry_view = view.clone();
-                                        this.child(
-                                            h_flex()
-                                                .id("history-error-banner")
-                                                .role(Role::Alert)
-                                                .aria_label(format!(
-                                                    "{}: {}",
-                                                    error.title, error.message
-                                                ))
-                                                .items_center()
-                                                .justify_between()
-                                                .gap(px(10.))
-                                                .px(px(12.))
-                                                .py(px(8.))
-                                                .border_b_1()
-                                                .border_color(cx.theme().danger.opacity(0.45))
-                                                .bg(cx.theme().danger.opacity(0.08))
-                                                .child(Icon::new(IconName::CircleX).xsmall())
-                                                .child(
-                                                    v_flex()
-                                                        .gap(px(2.))
-                                                        .child(
-                                                            div().font_medium().child(error.title),
-                                                        )
-                                                        .child(
-                                                            div()
-                                                                .text_size(px(12.))
-                                                                .text_color(
-                                                                    cx.theme().muted_foreground,
-                                                                )
-                                                                .child(format!(
-                                                                    "{} Reference: {}",
-                                                                    error.message, error.code
-                                                                )),
-                                                        ),
-                                                )
-                                                .child(
-                                                    Button::new("retry-history-inline")
-                                                        .outline()
-                                                        .small()
-                                                        .label("Retry")
-                                                        .on_click(move |_, window, cx| {
-                                                            retry_view.update(cx, |main, cx| {
-                                                                main.load_history(window, cx);
-                                                            });
-                                                        }),
-                                                ),
-                                        )
-                                    })
-                                    .child(content),
-                            ),
-                    ),
+                div().flex().flex_1().min_h_0().min_w_0().child(
+                    div()
+                        .flex()
+                        .size_full()
+                        .min_h_0()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .bg(cx.theme().tokens.background.background)
+                        .child(
+                            v_flex()
+                                .size_full()
+                                .min_h_0()
+                                .when_some(self.history_error, |this, error| {
+                                    let retry_view = view.clone();
+                                    this.child(
+                                        h_flex()
+                                            .id("history-error-banner")
+                                            .role(Role::Alert)
+                                            .aria_label(format!(
+                                                "{}: {}",
+                                                error.title, error.message
+                                            ))
+                                            .items_center()
+                                            .justify_between()
+                                            .gap(px(10.))
+                                            .px(px(12.))
+                                            .py(px(8.))
+                                            .border_b_1()
+                                            .border_color(cx.theme().danger.opacity(0.45))
+                                            .bg(cx.theme().danger.opacity(0.08))
+                                            .child(Icon::new(IconName::CircleX).xsmall())
+                                            .child(
+                                                v_flex()
+                                                    .gap(px(2.))
+                                                    .child(div().font_medium().child(error.title))
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(12.))
+                                                            .text_color(cx.theme().muted_foreground)
+                                                            .child(format!(
+                                                                "{} Reference: {}",
+                                                                error.message, error.code
+                                                            )),
+                                                    ),
+                                            )
+                                            .child(
+                                                Button::new("retry-history-inline")
+                                                    .outline()
+                                                    .small()
+                                                    .label("Retry")
+                                                    .on_click(move |_, window, cx| {
+                                                        retry_view.update(cx, |main, cx| {
+                                                            main.load_history(window, cx);
+                                                        });
+                                                    }),
+                                            ),
+                                    )
+                                })
+                                .child(content),
+                        ),
+                ),
             )
             .into_any_element()
     }
@@ -304,7 +252,8 @@ impl Render for MainView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let _ = &self.subscriptions;
         let narrow = window.viewport_size().width < px(696.);
-        let content = self.conversation_content(narrow, cx);
+        let compact_workbench = window.viewport_size().width < px(1400.);
+        let content = self.conversation_content(compact_workbench, cx);
         let sidebar_collapsed = self.sidebar.read(cx).is_collapsed();
         let show_sidebar = !narrow && !sidebar_collapsed;
         self.render_frame(content, narrow, show_sidebar, cx)

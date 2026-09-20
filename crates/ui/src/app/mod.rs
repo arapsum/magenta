@@ -15,7 +15,7 @@ use std::{sync::Arc, time::Duration};
 
 use gpui_kit::component::{
     ActiveTheme as _, FocusTrapElement as _, Icon, IconName, Selectable as _, Sizable as _,
-    StyledExt as _, box_shadow,
+    StyledExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -372,6 +372,7 @@ impl MainView {
                         }
                     }
                     PromptComposerEvent::Cancel => main.stop_active_run(window, cx),
+                    PromptComposerEvent::ModeChanged => cx.notify(),
                     PromptComposerEvent::WorkspaceSelected(root) => {
                         main.register_project(root.clone(), window, cx);
                     }

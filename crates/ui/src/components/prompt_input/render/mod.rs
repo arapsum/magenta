@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _, box_shadow,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants, Toggle, ToggleGroup},
     clipboard::Clipboard,
     h_flex,
@@ -11,7 +11,7 @@ use gpui_kit::component::{
 use gpui_kit::{
     Anchor, AnyElement, App, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
     ObjectFit, ParentElement as _, Render, SharedString, Styled as _, StyledImage as _, Window,
-    div, img, linear_color_stop, linear_gradient, prelude::FluentBuilder as _, px, rems,
+    div, img, prelude::FluentBuilder as _, px, rems,
 };
 use magenta_core::{ConversationMode, EffortLevel, ModelDescriptor, ProviderId};
 
@@ -34,37 +34,24 @@ impl Render for PromptComposer {
         let generating = self.generating;
         let is_work = self.mode == ConversationMode::Agent;
         let can_add_attachment = !is_work && self.attachments.len() < MAX_ATTACHMENTS;
-        let highlight = linear_gradient(
-            90.,
-            linear_color_stop(cx.theme().primary.opacity(0.), 0.),
-            linear_color_stop(
-                cx.theme()
-                    .primary
-                    .opacity(if focused { 0.92 } else { 0.48 }),
-                1.,
-            ),
-        );
-
         v_flex()
             .w_full()
-            .max_w(px(800.))
+            .max_w(px(880.))
             .mx_auto()
             .items_center()
-            .gap(px(14.))
-            .child(self.mode_selector(cx.entity(), cx))
             .child(
                 v_flex()
                     .id("prompt-composer-surface")
                     .debug_selector(|| "prompt-composer-surface".into())
                     .relative()
                     .w_full()
-                    .p(px(2.))
-                    .rounded(if is_work { px(22.) } else { px(19.) })
+                    .p(px(14.))
+                    .rounded(px(16.))
                     .border_1()
                     .border_color(if focused {
-                        cx.theme().ring.opacity(0.78)
+                        cx.theme().ring.opacity(0.72)
                     } else {
-                        cx.theme().foreground.opacity(0.08)
+                        cx.theme().border.opacity(0.82)
                     })
                     .bg(super::super::visual::surface(
                         super::super::visual::SurfaceLevel::Floating,
@@ -72,47 +59,19 @@ impl Render for PromptComposer {
                     ))
                     .shadow(super::super::visual::floating_shadow(cx))
                     .child(
-                        div()
-                            .absolute()
-                            .top(px(0.))
-                            .left(px(24.))
-                            .right(px(24.))
-                            .h(px(1.))
-                            .bg(highlight),
-                    )
-                    .child(
                         v_flex()
                             .w_full()
-                            .min_h(if is_work { px(124.) } else { px(56.) })
-                            .p(if is_work { px(16.) } else { px(8.) })
-                            .gap(if is_work { px(12.) } else { px(0.) })
+                            .min_h(px(88.))
+                            .gap(px(12.))
                             .justify_between()
-                            .rounded(if is_work { px(19.) } else { px(16.) })
-                            .border_1()
-                            .border_color(cx.theme().foreground.opacity(0.045))
-                            .bg(super::super::visual::surface(
-                                super::super::visual::SurfaceLevel::Raised,
+                            .child(self.render_input_content(cx))
+                            .child(self.footer(
+                                submit_view,
+                                generating,
+                                ready,
+                                can_add_attachment,
                                 cx,
-                            ))
-                            .shadow(super::super::visual::raised_shadow(cx))
-                            .when(is_work, |this| {
-                                this.child(self.render_input_content(cx)).child(self.footer(
-                                    submit_view.clone(),
-                                    generating,
-                                    ready,
-                                    false,
-                                    cx,
-                                ))
-                            })
-                            .when(!is_work, |this| {
-                                this.child(self.render_chat_content(
-                                    submit_view,
-                                    generating,
-                                    ready,
-                                    can_add_attachment,
-                                    cx,
-                                ))
-                            }),
+                            )),
                     ),
             )
     }

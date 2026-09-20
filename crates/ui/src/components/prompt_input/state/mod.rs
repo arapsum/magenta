@@ -59,6 +59,7 @@ pub struct PromptRequest {
 pub enum PromptComposerEvent {
     Submit(PromptRequest),
     Cancel,
+    ModeChanged,
     WorkspaceSelected(PathBuf),
     OpenWorkspacePanel(PromptWorkspacePanel),
 }
