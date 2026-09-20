@@ -13,10 +13,13 @@ use gpui_kit::{
     App, AppContext as _, Context, Entity, EventEmitter, Focusable as _, PathPromptOptions,
     SharedString, Subscription, Task, Window,
 };
-use magenta_core::{ConversationMode, EffortLevel, GenerationConfig, MessageId, ModelDescriptor};
+use magenta_core::{
+    ConversationMode, EffortLevel, GenerationConfig, GenerationSettings, MessageId, ModelDescriptor,
+};
 
 use crate::{ErrorPresentation, MagentaError, components::code_fence};
 
+mod generation;
 mod lifecycle;
 mod modes;
 
@@ -80,6 +83,49 @@ pub enum AgentCapability {
     Commands,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum GenerationSelectionOrigin {
+    Automatic,
+    ConfiguredDefault,
+    Manual,
+    PersistedConversation,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ModelCatalogState {
+    NotLoaded,
+    Loaded,
+}
+
+impl ModelCatalogState {
+    pub(super) const fn is_loaded(self) -> bool {
+        matches!(self, Self::Loaded)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct ModeGenerationState {
+    pub(super) model: Option<ModelDescriptor>,
+    pub(super) effort: Option<EffortLevel>,
+    pub(super) origin: GenerationSelectionOrigin,
+    pub(super) model_available: bool,
+    pub(super) effort_available: bool,
+    pub(super) persisted: Option<GenerationConfig>,
+}
+
+impl Default for ModeGenerationState {
+    fn default() -> Self {
+        Self {
+            model: None,
+            effort: None,
+            origin: GenerationSelectionOrigin::Automatic,
+            model_available: false,
+            effort_available: false,
+            persisted: None,
+        }
+    }
+}
+
 impl AgentCapability {
     pub(super) const fn available(self) -> bool {
         !matches!(self, Self::Unavailable)
@@ -96,8 +142,12 @@ pub struct PromptComposer {
     pub(super) preview_source: String,
     pub(super) preview_line_count: usize,
     pub(super) models: Vec<ModelDescriptor>,
+    pub(super) model_catalog_state: ModelCatalogState,
     pub(super) model: Option<ModelDescriptor>,
     pub(super) effort: Option<EffortLevel>,
+    pub(super) chat_generation: ModeGenerationState,
+    pub(super) work_generation: ModeGenerationState,
+    pub(super) generation_settings: GenerationSettings,
     pub(super) mode: ConversationMode,
     input_mode: ConversationMode,
     pub(super) workspace_root: Option<PathBuf>,

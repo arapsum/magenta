@@ -32,8 +32,12 @@ impl PromptComposer {
             preview_source: String::new(),
             preview_line_count: 0,
             models: Vec::new(),
+            model_catalog_state: ModelCatalogState::NotLoaded,
             model: None,
             effort: None,
+            chat_generation: ModeGenerationState::default(),
+            work_generation: ModeGenerationState::default(),
+            generation_settings: GenerationSettings::default(),
             mode: ConversationMode::Chat,
             input_mode: ConversationMode::Chat,
             workspace_root: None,
@@ -64,52 +68,7 @@ impl PromptComposer {
         configuration: &GenerationConfig,
         cx: &mut Context<'_, Self>,
     ) {
-        let model = self
-            .models
-            .iter()
-            .find(|model| {
-                model.provider.eq(&configuration.provider) && model.id.eq(&configuration.model)
-            })
-            .cloned()
-            .or_else(|| self.models.first().cloned())
-            .unwrap_or_else(|| ModelDescriptor {
-                provider: configuration.provider.clone(),
-                id: configuration.model.clone(),
-                display_name: configuration.model.0.clone(),
-                description: None,
-                priority: 0,
-                default_effort: configuration.effort.clone(),
-                supported_efforts: EffortLevel::ALL.to_vec(),
-                limits: configuration.limits,
-            });
-        let uses_requested_model =
-            model.provider.eq(&configuration.provider) && model.id.eq(&configuration.model);
-        self.effort = model
-            .supported_efforts
-            .contains(&configuration.effort)
-            .then_some(configuration.effort.clone())
-            .filter(|_| uses_requested_model)
-            .or_else(|| Some(model.default_effort.clone()));
-        self.model = Some(model);
-        cx.notify();
-    }
-
-    pub(crate) fn set_models(&mut self, models: Vec<ModelDescriptor>, cx: &mut Context<'_, Self>) {
-        let selected = self.model.as_ref().and_then(|selected| {
-            models
-                .iter()
-                .find(|model| model.provider == selected.provider && model.id == selected.id)
-                .cloned()
-        });
-        self.models = models;
-        self.model = selected.or_else(|| self.models.first().cloned());
-        let current_effort = self.effort.clone();
-        self.effort = self.model.as_ref().map(|model| {
-            current_effort
-                .filter(|effort| model.supported_efforts.contains(effort))
-                .unwrap_or_else(|| model.default_effort.clone())
-        });
-        cx.notify();
+        self.set_persisted_generation(configuration, cx);
     }
 
     pub fn set_generating(&mut self, generating: bool, cx: &mut Context<'_, Self>) {

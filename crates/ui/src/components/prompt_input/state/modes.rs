@@ -20,6 +20,8 @@ impl PromptComposer {
             && content_ready
             && self.model.is_some()
             && self.effort.is_some()
+            && self.active_model_available()
+            && self.active_effort_available()
             && workspace_ready
     }
 
@@ -49,6 +51,8 @@ impl PromptComposer {
         if self.input_mode == self.mode {
             return;
         }
+
+        self.save_active_generation();
 
         let current = ModeDraft {
             prompt: self.input.read(cx).value().to_string(),
@@ -81,6 +85,7 @@ impl PromptComposer {
 
         self.attachments = std::mem::take(&mut next.attachments);
         self.input_mode = mode;
+        self.restore_generation_for_input_mode();
         self.schedule_code_preview(window, cx);
         cx.notify();
     }
@@ -133,23 +138,11 @@ impl PromptComposer {
     }
 
     pub(crate) fn select_model(&mut self, model: ModelDescriptor, cx: &mut Context<'_, Self>) {
-        if self.model.as_ref() != Some(&model) {
-            self.effort = Some(model.default_effort.clone());
-            self.model = Some(model);
-            cx.notify();
-        }
+        self.select_manual_model(model, cx);
     }
 
     pub(crate) fn select_effort(&mut self, effort: EffortLevel, cx: &mut Context<'_, Self>) {
-        if self
-            .model
-            .as_ref()
-            .is_some_and(|model| model.supported_efforts.contains(&effort))
-            && self.effort.as_ref() != Some(&effort)
-        {
-            self.effort = Some(effort);
-            cx.notify();
-        }
+        self.select_manual_effort(effort, cx);
     }
 
     pub(crate) fn request(&self, cx: &App) -> Option<PromptRequest> {
@@ -158,10 +151,13 @@ impl PromptComposer {
         }
         let model = self.model.as_ref()?;
         let effort = self.effort.clone()?;
+        let generation = self.active_persisted_generation().unwrap_or_else(|| {
+            GenerationConfig::new(model.provider.clone(), model.id.clone(), effort)
+                .with_limits(model.limits)
+        });
         Some(PromptRequest {
             prompt: self.input.read(cx).value().trim().to_owned().into(),
-            generation: GenerationConfig::new(model.provider.clone(), model.id.clone(), effort)
-                .with_limits(model.limits),
+            generation,
             attachments: if self.mode == ConversationMode::Chat {
                 self.attachments
                     .iter()

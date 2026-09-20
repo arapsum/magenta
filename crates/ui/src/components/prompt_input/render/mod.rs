@@ -13,7 +13,7 @@ use gpui_kit::{
     ObjectFit, ParentElement as _, Render, SharedString, Styled as _, StyledImage as _, Window,
     div, img, linear_color_stop, linear_gradient, prelude::FluentBuilder as _, px, rems,
 };
-use magenta_core::{ConversationMode, EffortLevel, ModelDescriptor, ModelId, ProviderId};
+use magenta_core::{ConversationMode, EffortLevel, ModelDescriptor, ProviderId};
 
 use crate::components::provider_icon;
 

@@ -2,7 +2,8 @@ use std::{cell::RefCell, rc::Rc};
 
 use gpui_kit::{TestAppContext, size};
 use magenta_core::{
-    ConversationMode, EffortLevel, GenerationConfig, GenerationLimits, ModelDescriptor,
+    ConversationMode, EffortLevel, GenerationConfig, GenerationLimits, GenerationPreference,
+    GenerationSettings, ModelDescriptor,
 };
 
 use super::{AgentCapability, PromptComposer, PromptComposerEvent, is_supported_image};
@@ -18,6 +19,14 @@ fn model(id: &str, default_effort: EffortLevel) -> ModelDescriptor {
         supported_efforts: EffortLevel::ALL.to_vec(),
         limits: GenerationLimits::default(),
     }
+}
+
+fn preference(provider: &str, model: &str, effort: EffortLevel) -> GenerationPreference {
+    GenerationPreference::new(
+        magenta_core::ProviderId::new(provider),
+        magenta_core::ModelId::new(model),
+        effort,
+    )
 }
 
 #[gpui_kit::test]
@@ -85,6 +94,143 @@ fn supported_image_extensions_are_case_insensitive() {
     assert!(is_supported_image(std::path::Path::new("reference.WebP")));
     assert!(!is_supported_image(std::path::Path::new("reference.gif")));
     assert!(!is_supported_image(std::path::Path::new("reference")));
+}
+
+#[gpui_kit::test]
+fn generation_defaults_arrive_in_either_order_and_stay_independent(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
+    let chat = model("chat-model", EffortLevel::Medium);
+    let work = model("work-model", EffortLevel::High);
+    let settings = GenerationSettings {
+        chat: Some(preference("openai", "chat-model", EffortLevel::Low)),
+        work: Some(preference("openai", "work-model", EffortLevel::High)),
+    };
+
+    window
+        .update(cx, |composer, window, cx| {
+            composer.set_models(vec![chat.clone(), work.clone()], cx);
+            composer.set_generation_settings(settings.clone(), cx);
+            assert_eq!(
+                composer.model.as_ref().map(|model| model.id.0.as_str()),
+                Some("chat-model")
+            );
+
+            composer.set_agent_capability(AgentCapability::Commands, cx);
+            composer.select_mode(ConversationMode::Agent, window, cx);
+            assert_eq!(
+                composer.model.as_ref().map(|model| model.id.0.as_str()),
+                Some("work-model")
+            );
+            assert_eq!(composer.effort, Some(EffortLevel::High));
+
+            composer.select_mode(ConversationMode::Chat, window, cx);
+            assert_eq!(
+                composer.model.as_ref().map(|model| model.id.0.as_str()),
+                Some("chat-model")
+            );
+            assert_eq!(composer.effort, Some(EffortLevel::Low));
+        })
+        .expect("the composer test window should remain open");
+}
+
+#[gpui_kit::test]
+fn manual_mode_selections_survive_mode_switches_and_new_chat_resets(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
+    let chat = model("chat-model", EffortLevel::Medium);
+    let work = model("work-model", EffortLevel::High);
+    let settings = GenerationSettings {
+        chat: Some(preference("openai", "chat-model", EffortLevel::Medium)),
+        work: Some(preference("openai", "work-model", EffortLevel::High)),
+    };
+
+    window
+        .update(cx, |composer, window, cx| {
+            composer.set_models(vec![chat.clone(), work.clone()], cx);
+            composer.set_generation_settings(settings, cx);
+            composer.set_agent_capability(AgentCapability::Commands, cx);
+            composer.select_model(chat.clone(), cx);
+            composer.select_effort(EffortLevel::Low, cx);
+            composer.select_mode(ConversationMode::Agent, window, cx);
+            composer.select_model(work.clone(), cx);
+            composer.select_mode(ConversationMode::Chat, window, cx);
+
+            assert_eq!(
+                composer.model.as_ref().map(|model| model.id.0.as_str()),
+                Some("chat-model")
+            );
+            assert_eq!(composer.effort, Some(EffortLevel::Low));
+
+            composer.reset_for_new_conversation(cx);
+            assert_eq!(composer.effort, Some(EffortLevel::Medium));
+        })
+        .expect("the composer test window should remain open");
+}
+
+#[gpui_kit::test]
+fn persisted_configuration_keeps_limits_and_shows_missing_models(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
+    let live = model("live-model", EffortLevel::Medium);
+    let limits = GenerationLimits {
+        context_window_tokens: 42_000,
+        max_output_tokens: 2_000,
+    };
+
+    window
+        .update(cx, |composer, window, cx| {
+            composer.set_models(vec![live.clone()], cx);
+            composer
+                .input
+                .update(cx, |input, cx| input.set_value("Stored", window, cx));
+            composer.set_configuration(
+                &GenerationConfig::new(live.provider.clone(), live.id.clone(), EffortLevel::High)
+                    .with_limits(limits),
+                cx,
+            );
+            let request = composer
+                .request(cx)
+                .expect("stored configuration should submit");
+            assert_eq!(request.generation.limits, limits);
+
+            composer.set_configuration(
+                &GenerationConfig::new(
+                    magenta_core::ProviderId::new("openai"),
+                    magenta_core::ModelId::new("missing-model"),
+                    EffortLevel::High,
+                ),
+                cx,
+            );
+            assert_eq!(
+                composer.model.as_ref().map(|model| model.id.0.as_str()),
+                Some("missing-model")
+            );
+            assert!(!composer.active_model_available());
+            assert!(composer.request(cx).is_none());
+
+            composer.set_models(Vec::new(), cx);
+            assert_eq!(
+                composer.model.as_ref().map(|model| model.id.0.as_str()),
+                Some("missing-model")
+            );
+
+            composer.clear_models(cx);
+            assert_eq!(
+                composer.model.as_ref().map(|model| model.id.0.as_str()),
+                Some("missing-model")
+            );
+        })
+        .expect("the composer test window should remain open");
 }
 
 #[gpui_kit::test]

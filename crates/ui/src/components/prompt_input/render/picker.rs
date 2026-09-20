@@ -5,7 +5,11 @@ impl PromptComposer {
         let selected_model = self.model.clone();
         let selected_effort = self.effort.clone();
         let models = self.models.clone();
-        let selected_model_id = selected_model.as_ref().map(|model| model.id.clone());
+        let automatic_selected = self.active_generation_is_automatic();
+        let model_unavailable =
+            self.model_catalog_state.is_loaded() && !self.active_model_available();
+        let effort_unavailable =
+            self.model_catalog_state.is_loaded() && !self.active_effort_available();
         let efforts = selected_model
             .as_ref()
             .map_or_else(Vec::new, |model| model.supported_efforts.clone());
@@ -67,9 +71,12 @@ impl PromptComposer {
             .content(move |_, window, popover_cx| {
                 Self::model_picker_surface(
                     &models,
-                    selected_model_id.as_ref(),
+                    selected_model.as_ref(),
+                    automatic_selected,
+                    model_unavailable,
                     &efforts,
                     selected_effort.as_ref(),
+                    effort_unavailable,
                     &view,
                     window,
                     popover_cx,
@@ -78,21 +85,47 @@ impl PromptComposer {
             .into_any_element()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn model_picker_surface(
         models: &[ModelDescriptor],
-        selected_model_id: Option<&ModelId>,
+        selected_model: Option<&ModelDescriptor>,
+        automatic_selected: bool,
+        model_unavailable: bool,
         efforts: &[EffortLevel],
         selected_effort: Option<&EffortLevel>,
+        effort_unavailable: bool,
         view: &Entity<Self>,
         window: &Window,
         cx: &Context<'_, PopoverState>,
     ) -> AnyElement {
         let popover = cx.entity();
-        let model_rows = models
-            .iter()
-            .map(|model| Self::model_picker_model_row(model, selected_model_id, view, window, cx));
+        let unavailable_model = selected_model
+            .filter(|selected| {
+                model_unavailable
+                    && !models
+                        .iter()
+                        .any(|model| model.provider == selected.provider && model.id == selected.id)
+            })
+            .cloned();
+        let model_rows = models.iter().map(|model| {
+            Self::model_picker_model_row(
+                model,
+                selected_model.filter(|_| !automatic_selected),
+                true,
+                view,
+                window,
+                cx,
+            )
+        });
         let effort_rows = efforts.iter().map(|effort| {
-            Self::model_picker_effort_row(effort, selected_effort, view, &popover, cx)
+            Self::model_picker_effort_row(
+                effort,
+                selected_effort,
+                effort_unavailable,
+                view,
+                &popover,
+                cx,
+            )
         });
 
         h_flex()
@@ -116,6 +149,17 @@ impl PromptComposer {
                     .p(px(8.))
                     .gap(px(3.))
                     .child(picker_heading("Models", cx))
+                    .child(Self::automatic_model_row(automatic_selected, view, cx))
+                    .when_some(unavailable_model.as_ref(), |this, model| {
+                        this.child(Self::model_picker_model_row(
+                            model,
+                            selected_model,
+                            false,
+                            view,
+                            window,
+                            cx,
+                        ))
+                    })
                     .children(model_rows),
             )
             .child(
@@ -134,15 +178,78 @@ impl PromptComposer {
 
     fn model_picker_model_row(
         model: &ModelDescriptor,
-        selected_model_id: Option<&ModelId>,
+        selected_model: Option<&ModelDescriptor>,
+        selectable: bool,
         view: &Entity<Self>,
         window: &Window,
         cx: &App,
     ) -> Button {
-        let selected = selected_model_id == Some(&model.id);
+        let selected = selected_model
+            .is_some_and(|selected| selected.provider == model.provider && selected.id == model.id);
         let model_for_click = model.clone();
 
-        Button::new(SharedString::from(format!("model-{}", model.id.0)))
+        Button::new(SharedString::from(format!(
+            "model-{}-{}",
+            model.provider.0, model.id.0
+        )))
+        .ghost()
+        .w_full()
+        .h(px(44.))
+        .px(px(9.))
+        .rounded(px(9.))
+        .border_1()
+        .border_color(if selected {
+            cx.theme().primary.opacity(0.28)
+        } else {
+            cx.theme().foreground.opacity(0.)
+        })
+        .bg(if selected {
+            cx.theme().accent.opacity(0.72)
+        } else {
+            cx.theme().accent.opacity(0.)
+        })
+        .child(
+            h_flex()
+                .w_full()
+                .items_center()
+                .gap(px(9.))
+                .child(provider_icon(Some(&model.provider)))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap(px(2.))
+                        .child(
+                            div()
+                                .w_full()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_size(px(12.))
+                                .font_medium()
+                                .child(model.display_name.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(10.))
+                                .text_color(cx.theme().muted_foreground)
+                                .child(provider_menu_label(&model.provider)),
+                        ),
+                )
+                .when(selected, |this| {
+                    this.child(div().size(px(5.)).rounded_full().bg(cx.theme().primary))
+                }),
+        )
+        .when(selectable, |this| {
+            this.on_click(window.listener_for(view, move |composer, _, _, cx| {
+                composer.select_model(model_for_click.clone(), cx);
+            }))
+        })
+    }
+
+    fn automatic_model_row(selected: bool, view: &Entity<Self>, cx: &App) -> Button {
+        let automatic_view = view.clone();
+        Button::new("model-automatic")
             .ghost()
             .w_full()
             .h(px(44.))
@@ -164,41 +271,33 @@ impl PromptComposer {
                     .w_full()
                     .items_center()
                     .gap(px(9.))
-                    .child(provider_icon(Some(&model.provider)))
+                    .child(provider_icon(None))
                     .child(
                         v_flex()
                             .flex_1()
                             .min_w_0()
                             .gap(px(2.))
-                            .child(
-                                div()
-                                    .w_full()
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .text_size(px(12.))
-                                    .font_medium()
-                                    .child(model.display_name.clone()),
-                            )
+                            .child(div().text_size(px(12.)).font_medium().child("Automatic"))
                             .child(
                                 div()
                                     .text_size(px(10.))
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(provider_menu_label(&model.provider)),
+                                    .child("Use the current default"),
                             ),
                     )
                     .when(selected, |this| {
                         this.child(div().size(px(5.)).rounded_full().bg(cx.theme().primary))
                     }),
             )
-            .on_click(window.listener_for(view, move |composer, _, _, cx| {
-                composer.select_model(model_for_click.clone(), cx);
-            }))
+            .on_click(move |_, _, cx| {
+                automatic_view.update(cx, Self::select_automatic);
+            })
     }
 
     fn model_picker_effort_row(
         effort: &EffortLevel,
         selected_effort: Option<&EffortLevel>,
+        effort_unavailable: bool,
         view: &Entity<Self>,
         popover: &Entity<PopoverState>,
         cx: &App,
@@ -237,12 +336,13 @@ impl PromptComposer {
                     v_flex()
                         .items_start()
                         .gap(px(2.))
-                        .child(
-                            div()
-                                .text_size(px(12.))
-                                .font_medium()
-                                .child(effort.label().to_owned()),
-                        )
+                        .child(div().text_size(px(12.)).font_medium().child(
+                            if effort_unavailable {
+                                format!("{} (unavailable)", effort.label())
+                            } else {
+                                effort.label().to_owned()
+                            },
+                        ))
                         .child(
                             div()
                                 .text_size(px(10.))
