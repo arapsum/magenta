@@ -429,6 +429,7 @@ pub(super) fn conversation_text_style(cx: &App) -> TextViewStyle {
             .border_1()
             .border_color(cx.theme().border.opacity(0.95))
             .bg(cx.theme().popover.opacity(0.88)),
+        table: adaptive_table_style(),
         inline_code: gpui_kit::HighlightStyle {
             background_color: Some(cx.theme().accent.opacity(0.9)),
             ..Default::default()
@@ -436,6 +437,12 @@ pub(super) fn conversation_text_style(cx: &App) -> TextViewStyle {
         is_dark: cx.theme().is_dark(),
         ..Default::default()
     }
+}
+
+fn adaptive_table_style() -> gpui_kit::StyleRefinement {
+    let mut style = gpui_kit::StyleRefinement::default();
+    style.overflow.x = Some(gpui_kit::Overflow::Scroll);
+    style
 }
 
 fn display_language(language: &str) -> String {

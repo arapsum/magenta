@@ -88,17 +88,15 @@ impl ConversationView {
         let command_badge = message.message.command_id.as_ref().map(|command| {
             h_flex()
                 .items_center()
-                .px(px(7.))
-                .py(px(3.))
-                .rounded(px(6.))
-                .border_1()
-                .border_color(cx.theme().primary.opacity(0.28))
-                .bg(cx.theme().accent.opacity(0.3))
+                .gap(px(5.))
                 .text_size(px(11.))
-                .text_color(cx.theme().muted_foreground)
+                .font_semibold()
+                .text_color(cx.theme().primary)
                 .child(format!("/{}", command.as_str()))
                 .into_any_element()
         });
+        let has_message_bubble =
+            command_badge.is_some() || !message.message.content.trim().is_empty();
 
         div()
             .w_full()
@@ -106,9 +104,8 @@ impl ConversationView {
             .flex_col()
             .items_end()
             .gap(px(5.))
-            .when_some(command_badge, gpui_kit::ParentElement::child)
             .when_some(attachments, gpui_kit::ParentElement::child)
-            .when(!message.message.content.trim().is_empty(), |this| {
+            .when(has_message_bubble, |this| {
                 this.child(
                     div()
                         .max_w(USER_MESSAGE_MAX_WIDTH)
@@ -121,7 +118,15 @@ impl ConversationView {
                         .text_size(px(14.5))
                         .line_height(px(23.))
                         .text_color(cx.theme().foreground)
-                        .child(v_flex().w_full().gap(px(8.)).children(segments)),
+                        .child(
+                            v_flex()
+                                .w_full()
+                                .gap(px(7.))
+                                .when_some(command_badge, gpui_kit::ParentElement::child)
+                                .when(!message.message.content.trim().is_empty(), |this| {
+                                    this.children(segments)
+                                }),
+                        ),
                 )
             })
             .child(h_flex().h(px(24.)).items_center().child(actions))

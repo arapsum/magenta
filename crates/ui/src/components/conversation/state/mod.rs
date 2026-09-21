@@ -61,6 +61,10 @@ impl ConversationView {
             return;
         }
 
+        let old_count = self.messages.len();
+        let was_streaming = self.streaming_message.is_some();
+        let mut changed_indices = Vec::new();
+
         self.conversation = Some(snapshot.conversation);
         for live in snapshot.messages {
             self.origins
@@ -87,6 +91,7 @@ impl ConversationView {
                 rendered.sequence = sequence;
                 rendered.omitted_context_messages = omitted_context_messages;
                 self.messages[index] = rendered;
+                changed_indices.push(index);
             } else {
                 let mut rendered = Self::rendered_message(live.message, cx);
                 rendered.sequence = live.sequence;
@@ -103,15 +108,26 @@ impl ConversationView {
         self.pending_agent_approval = snapshot.pending_agent_approval;
         self.live_commands = snapshot.live_commands;
         self.queue_math_for_messages(0..self.messages.len(), cx);
-        self.list_state
-            .reset_with_uniform_height(self.messages.len(), px(96.));
+
+        if self.messages.len() > old_count {
+            self.list_state
+                .splice(old_count..old_count, self.messages.len() - old_count);
+            self.list_state
+                .remeasure_items(old_count..self.messages.len());
+        }
+        changed_indices.sort_unstable();
+        changed_indices.dedup();
+        for index in changed_indices {
+            self.list_state.remeasure_items(index..index + 1);
+        }
+
         self.list_state
             .set_follow_mode(if self.streaming_message.is_some() {
                 FollowMode::Tail
             } else {
                 FollowMode::Normal
             });
-        if self.streaming_message.is_some() {
+        if self.streaming_message.is_some() && !was_streaming {
             self.list_state.scroll_to_end();
         }
         cx.notify();

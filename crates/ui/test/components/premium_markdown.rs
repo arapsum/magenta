@@ -1,4 +1,6 @@
-use super::{display_language, fenced_markdown, language_icon, parse_step_heading};
+use super::{
+    adaptive_table_style, display_language, fenced_markdown, language_icon, parse_step_heading,
+};
 
 #[test]
 fn display_language_is_human_readable() {
@@ -39,4 +41,12 @@ fn fenced_markdown_uses_a_marker_longer_than_the_code() {
     let markdown = fenced_markdown("rust", "let ticks = ```;");
     assert!(markdown.starts_with("````rust\n"));
     assert!(markdown.ends_with("\n````"));
+}
+
+#[test]
+fn conversation_tables_use_adaptive_horizontal_layout() {
+    assert_eq!(
+        adaptive_table_style().overflow.x,
+        Some(gpui_kit::Overflow::Scroll)
+    );
 }

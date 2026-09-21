@@ -1,4 +1,4 @@
-use gpui_kit::component::{accordion::Accordion, shimmer::ShimmerText, spinner::Spinner};
+use gpui_kit::component::{accordion::Accordion, spinner::Spinner};
 
 use super::super::*;
 
@@ -26,18 +26,34 @@ impl ConversationView {
         Some(
             v_flex()
                 .w_full()
-                .gap(px(8.))
-                .p(px(12.))
+                .gap(px(10.))
+                .p(px(14.))
                 .rounded(cx.theme().radius_lg)
                 .border_1()
-                .border_color(cx.theme().warning.opacity(0.55))
-                .child(div().font_medium().child("Review staged workspace changes"))
+                .border_color(cx.theme().primary.opacity(0.34))
+                .bg(cx.theme().primary.opacity(0.045))
                 .child(
-                    div()
-                        .text_size(px(12.))
-                        .text_color(cx.theme().muted_foreground)
+                    h_flex()
+                        .items_start()
+                        .gap(px(9.))
                         .child(
-                            "Changes are isolated in AgentFS and have not touched the project yet.",
+                            Icon::empty()
+                                .path("icons/agent-shield-check.svg")
+                                .small()
+                                .text_color(cx.theme().primary),
+                        )
+                        .child(
+                            v_flex()
+                                .gap(px(3.))
+                                .child(div().font_medium().child("Workspace changes are ready"))
+                                .child(
+                                    div()
+                                        .text_size(px(12.))
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(
+                                            "Review the isolated AgentFS changes before applying them to the project.",
+                                        ),
+                                ),
                         ),
                 )
                 .child(
@@ -48,7 +64,7 @@ impl ConversationView {
                             Button::new(("discard-agentfs", message_id.0))
                                 .outline()
                                 .small()
-                                .label("Discard")
+                                .label("Discard changes")
                                 .on_click(move |_, window, cx| {
                                     discard_view.update(cx, |view, cx| {
                                         view.discard_workspace_review(window, cx);
@@ -59,7 +75,7 @@ impl ConversationView {
                             Button::new(("apply-agentfs", message_id.0))
                                 .primary()
                                 .small()
-                                .label("Apply changes")
+                                .label("Apply to project")
                                 .on_click(move |_, window, cx| {
                                     apply_view.update(cx, |view, cx| {
                                         view.apply_workspace_review(window, cx);
@@ -268,16 +284,6 @@ impl ConversationView {
         let final_answer_started = self.trace_is_final_answer_started(message.id);
         let message_id = message.id;
         let reasoning_active = active && !final_answer_started;
-        let label = if reasoning_active {
-            ShimmerText::new("Reasoning")
-                .id(("assistant-trace-thinking", message.id.0))
-                .duration(Duration::from_millis(2200))
-                .spread(0.38)
-                .font_medium()
-                .into_any_element()
-        } else {
-            div().font_medium().child("Reasoning").into_any_element()
-        };
         let elapsed = self.trace_elapsed(message);
         let stop_view = view.clone();
         let status = match message.status {
@@ -293,34 +299,11 @@ impl ConversationView {
             ),
         };
 
-        let status_icon = if reasoning_active {
-            Spinner::new()
-                .xsmall()
-                .color(cx.theme().primary)
-                .into_any_element()
-        } else {
-            Icon::new(
-                if matches!(
-                    message.status,
-                    MessageStatus::Failed | MessageStatus::Stopped
-                ) {
-                    IconName::CircleX
-                } else {
-                    IconName::CircleCheck
-                },
-            )
-            .xsmall()
-            .text_color(if message.status == MessageStatus::Failed {
-                cx.theme().danger
-            } else if message.status == MessageStatus::Stopped {
-                cx.theme().muted_foreground
-            } else {
-                cx.theme().success
-            })
-            .into_any_element()
-        };
+        let status_icon = render_trace_status_icon(message, reasoning_active, cx);
 
         let leading = h_flex()
+            .flex_1()
+            .min_w_0()
             .items_center()
             .gap_2()
             .child(
@@ -334,20 +317,34 @@ impl ConversationView {
                     .child(status_icon),
             )
             .child(
-                v_flex().min_w_0().gap(px(1.)).child(label).child(
-                    div()
-                        .text_size(rems(0.6875))
-                        .font_normal()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(status),
-                ),
+                h_flex()
+                    .min_w_0()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(div().whitespace_nowrap().font_medium().child("Reasoning"))
+                    .child(
+                        div()
+                            .size(px(3.))
+                            .rounded_full()
+                            .bg(cx.theme().muted_foreground.opacity(0.5)),
+                    )
+                    .child(
+                        div()
+                            .whitespace_nowrap()
+                            .text_size(rems(0.6875))
+                            .font_normal()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(status),
+                    ),
             )
             .into_any_element();
 
         let mut header = h_flex()
             .w_full()
+            .min_w_0()
             .items_center()
             .justify_between()
+            .gap_2()
             .child(leading);
         if reasoning_active {
             header = header.child(
@@ -388,9 +385,10 @@ impl ConversationView {
     }
 
     fn render_trace_entry_title(entry: &AssistantTraceEntry, cx: &App) -> AnyElement {
-        let status = trace_status_label(entry.status);
         let icon = render_trace_entry_indicator(entry, cx);
         h_flex()
+            .w_full()
+            .min_w_0()
             .items_center()
             .gap_1()
             .child(icon)
@@ -401,13 +399,16 @@ impl ConversationView {
                     .text_size(rems(0.8125))
                     .child(trace_entry_title(entry)),
             )
-            .child(
-                div()
-                    .text_size(rems(0.6875))
-                    .font_medium()
-                    .text_color(trace_status_color(entry.status, cx).opacity(0.9))
-                    .child(status),
-            )
+            .when(entry.status != AssistantTraceStatus::Completed, |this| {
+                this.child(
+                    div()
+                        .whitespace_nowrap()
+                        .text_size(rems(0.6875))
+                        .font_medium()
+                        .text_color(trace_status_color(entry.status, cx).opacity(0.9))
+                        .child(trace_status_label(entry.status)),
+                )
+            })
             .into_any_element()
     }
 
@@ -423,20 +424,24 @@ impl ConversationView {
         v_flex()
             .w_full()
             .gap_2()
-            .when(!entry.input.is_empty(), |this| {
+            .when(trace_detail_is_meaningful(&entry.input), |this| {
                 this.child(trace_detail_block("Input", &entry.input, cx))
             })
-            .when(!entry.output.is_empty(), |this| {
+            .when(trace_detail_is_meaningful(&entry.output), |this| {
                 this.child(trace_detail_block("Output", &entry.output, cx))
             })
-            .when(entry.input.is_empty() && entry.output.is_empty(), |this| {
-                this.child(
-                    div()
-                        .text_size(rems(0.6875))
-                        .text_color(cx.theme().muted_foreground)
-                        .child("No details available yet."),
-                )
-            })
+            .when(
+                !trace_detail_is_meaningful(&entry.input)
+                    && !trace_detail_is_meaningful(&entry.output),
+                |this| {
+                    this.child(
+                        div()
+                            .text_size(rems(0.6875))
+                            .text_color(cx.theme().muted_foreground)
+                            .child("No details available yet."),
+                    )
+                },
+            )
             .into_any_element()
     }
 
@@ -524,6 +529,35 @@ impl ConversationView {
 
 const TRACE_VIEWPORT_MAX_HEIGHT: gpui_kit::Rems = rems(16.25);
 
+fn render_trace_status_icon(message: &Message, reasoning_active: bool, cx: &App) -> AnyElement {
+    if reasoning_active {
+        Spinner::new()
+            .xsmall()
+            .color(cx.theme().primary)
+            .into_any_element()
+    } else {
+        Icon::new(
+            if matches!(
+                message.status,
+                MessageStatus::Failed | MessageStatus::Stopped
+            ) {
+                IconName::CircleX
+            } else {
+                IconName::CircleCheck
+            },
+        )
+        .xsmall()
+        .text_color(if message.status == MessageStatus::Failed {
+            cx.theme().danger
+        } else if message.status == MessageStatus::Stopped {
+            cx.theme().muted_foreground
+        } else {
+            cx.theme().success
+        })
+        .into_any_element()
+    }
+}
+
 fn trace_entries_for_timeline(message: &Message) -> Vec<AssistantTraceEntry> {
     let mut entries = message.assistant_trace.entries.clone();
     entries.sort_by_key(|entry| entry.sequence);
@@ -536,9 +570,32 @@ fn trace_entry_title(entry: &AssistantTraceEntry) -> String {
         && entry.title.eq_ignore_ascii_case("thinking")
     {
         "Reasoning".to_owned()
+    } else if entry.kind == AssistantTraceKind::Tool {
+        humanize_tool_name(entry.tool_name.as_deref().unwrap_or(&entry.title))
     } else {
         entry.title.clone()
     }
+}
+
+fn humanize_tool_name(value: &str) -> String {
+    let mut words = value.split('_').filter(|word| !word.is_empty());
+    let Some(first) = words.next() else {
+        return "Tool".to_owned();
+    };
+
+    let mut label = first.to_owned();
+    if let Some(initial) = label.get_mut(0..1) {
+        initial.make_ascii_uppercase();
+    }
+    for word in words {
+        label.push(' ');
+        label.push_str(word);
+    }
+    label
+}
+
+fn trace_detail_is_meaningful(value: &str) -> bool {
+    !matches!(value.trim(), "" | "{}" | "[]" | "null")
 }
 
 fn render_reasoning_summary(

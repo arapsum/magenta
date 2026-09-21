@@ -85,6 +85,27 @@ fn reasoning_rows_use_a_distinct_summary_label() {
 }
 
 #[test]
+fn tool_names_are_humanized_for_display() {
+    let entry = trace_entry(
+        "tool:status-1",
+        0,
+        AssistantTraceKind::Tool,
+        AssistantTraceStatus::Completed,
+        "repository_status",
+        Some("repository_status"),
+    );
+
+    assert_eq!(trace_entry_title(&entry), "Repository status");
+}
+
+#[test]
+fn empty_structured_trace_details_are_suppressed() {
+    assert!(!trace_detail_is_meaningful("{}"));
+    assert!(!trace_detail_is_meaningful(" [] "));
+    assert!(trace_detail_is_meaningful(r#"{"path":"src"}"#));
+}
+
+#[test]
 fn active_trace_entries_keep_the_timeline_open_by_default() {
     let message = Message {
         status: MessageStatus::Streaming,
