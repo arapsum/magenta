@@ -11,7 +11,7 @@ use magenta_core::{
 use crate::trace::traced_generation_stream;
 use crate::{
     CommandResolutionError, SendMessageError, TitleConversationError, apply_provider_prompt,
-    resolve_normal, resolve_submission,
+    conversation_title, resolve_normal, resolve_submission,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,7 +148,7 @@ impl SendMessage {
     ) -> Result<Option<String>, TitleConversationError> {
         let opening_prompt = opening_prompt.chars().take(4_000).collect::<String>();
         let request = format!(
-            "Name this conversation from the opening message below. Return only a concise, specific title of 3 to 7 words. Do not use quotation marks, markdown, or a trailing period.\n\nOpening message:\n{opening_prompt}"
+            "Name this conversation from the opening message below. Return only a concise, specific noun phrase of 3 to 5 words and no more than 48 characters. Do not use quotation marks, markdown, ellipses, or a trailing period.\n\nOpening message:\n{opening_prompt}"
         );
         let message = Message {
             id: MessageId(0),
@@ -186,7 +186,8 @@ impl SendMessage {
         if !completed {
             return Err(TitleConversationError::Incomplete);
         }
-        let title = normalize_generated_title(&output).ok_or(TitleConversationError::Empty)?;
+        let title = conversation_title::normalize_generated(&output)
+            .ok_or(TitleConversationError::Empty)?;
         let changed = self
             .store
             .rename_if_current(conversation_id, current_title, title.clone())
@@ -195,66 +196,13 @@ impl SendMessage {
     }
 }
 
-fn normalize_generated_title(value: &str) -> Option<String> {
-    let mut title = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if title.len() >= 2 {
-        let quoted = (title.starts_with('"') && title.ends_with('"'))
-            || (title.starts_with('`') && title.ends_with('`'));
-        if quoted {
-            title.remove(0);
-            title.pop();
-            trim_in_place(&mut title);
-        }
-    }
-    if title
-        .get(..10)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("**title:**"))
-    {
-        title.drain(..10);
-        trim_in_place(&mut title);
-    }
-    if title
-        .get(..6)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("title:"))
-    {
-        title.drain(..6);
-        trim_in_place(&mut title);
-    }
-    while title.ends_with('.') {
-        title.pop();
-    }
-    trim_in_place(&mut title);
-    if title.chars().count() > 60 {
-        title = format!("{}…", title.chars().take(59).collect::<String>());
-    }
-    (!title.is_empty()).then_some(title)
-}
-
-fn trim_in_place(value: &mut String) {
-    let leading = value.len().saturating_sub(value.trim_start().len());
-    value.drain(..leading);
-    value.truncate(value.trim_end().len());
-}
-
 fn title_from_prompt(prompt: &str, attachments: &[AttachmentDraft]) -> String {
-    let title = prompt
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    if title.is_empty() {
-        return attachments.first().map_or_else(
-            || "New conversation".to_owned(),
-            |attachment| format!("Image: {}", attachment.name),
-        );
-    }
-    if title.chars().count() > 46 {
-        format!("{}...", title.chars().take(43).collect::<String>())
-    } else {
-        title
-    }
+    let empty_title = attachments.first().map_or_else(
+        || "New conversation".to_owned(),
+        |attachment| format!("Image: {}", attachment.name),
+    );
+
+    conversation_title::fallback_from_prompt(prompt, &empty_title)
 }
 
 #[cfg(test)]

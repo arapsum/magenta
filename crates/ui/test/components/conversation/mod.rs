@@ -62,6 +62,20 @@ fn elapsed_time_uses_compact_stable_units() {
     assert_eq!(format_elapsed(Duration::from_secs(3_725)), "1h 02m");
 }
 
+#[test]
+fn legacy_title_ellipsis_is_presented_consistently() {
+    assert_eq!(
+        polished_conversation_title(
+            "Kotlin Projects: Organization, Dependencies, Builds, and Ru..."
+        ),
+        "Kotlin Projects: Organization, Dependencies, Builds,…"
+    );
+    assert_eq!(
+        polished_conversation_title("Provider-ready stream"),
+        "Provider-ready stream"
+    );
+}
+
 #[gpui_kit::test]
 fn attachment_preview_can_be_opened_and_dismissed(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);

@@ -8,6 +8,7 @@
 
 mod agent;
 mod commands;
+mod conversation_title;
 mod error;
 mod generation_defaults;
 mod history;

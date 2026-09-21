@@ -19,7 +19,7 @@ use magenta_core::{
 };
 
 use super::trace::AssistantTraceRecorder;
-use crate::{RetryMessageError, SendMessageError};
+use crate::{RetryMessageError, SendMessageError, conversation_title};
 
 const MAX_AGENT_ROUNDS: usize = 64;
 const MAX_AGENT_TOOL_CALLS: usize = 256;
@@ -299,19 +299,5 @@ fn agent_instructions(root: &std::path::Path) -> String {
 }
 
 fn title_from_prompt(prompt: &str) -> String {
-    let title = prompt
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    if title.chars().count() > 46 {
-        format!("{}...", title.chars().take(43).collect::<String>())
-    } else if title.is_empty() {
-        "New conversation".to_owned()
-    } else {
-        title
-    }
+    conversation_title::fallback_from_prompt(prompt, "New conversation")
 }

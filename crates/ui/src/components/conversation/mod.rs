@@ -68,6 +68,23 @@ const LIST_OVERDRAW: gpui_kit::Pixels = px(640.);
 const GENERATION_CLOCK_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_RENDERED_MESSAGES: usize = 150;
 
+fn polished_conversation_title(title: &str) -> String {
+    let Some(prefix) = title.strip_suffix("...") else {
+        return title.to_owned();
+    };
+    let complete_prefix = prefix
+        .trim_end()
+        .rsplit_once(char::is_whitespace)
+        .map_or(prefix, |(complete, _)| complete);
+    let concise_prefix = complete_prefix
+        .split_whitespace()
+        .take(5)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    format!("{concise_prefix}…")
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, gpui_kit::Action)]
 #[action(namespace = magenta)]
 struct CloseAttachmentPreview;
@@ -306,6 +323,7 @@ impl ConversationView {
         let Some(conversation) = self.conversation.as_ref() else {
             return div().into_any_element();
         };
+        let display_title = polished_conversation_title(&conversation.title);
 
         let subtitle = match conversation.mode {
             ConversationMode::Chat => "Conversation",
@@ -354,7 +372,7 @@ impl ConversationView {
                                     .text_ellipsis()
                                     .text_size(px(14.))
                                     .font_semibold()
-                                    .child(conversation.title.clone()),
+                                    .child(display_title),
                             )
                             .child(
                                 div()
