@@ -48,7 +48,7 @@ impl Render for PromptComposer {
                     .p(px(14.))
                     .rounded(px(16.))
                     .border_1()
-                    .border_color(if focused {
+                    .border_color(if focused && !generating {
                         cx.theme().ring.opacity(0.72)
                     } else {
                         cx.theme().border.opacity(0.82)

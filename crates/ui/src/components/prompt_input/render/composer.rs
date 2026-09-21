@@ -3,6 +3,7 @@ use super::*;
 impl PromptComposer {
     pub(super) fn render_input_content(&self, cx: &Context<'_, Self>) -> AnyElement {
         let view = cx.entity();
+        let command_palette_open = self.command_palette_state.is_open();
 
         v_flex()
             .flex_1()
@@ -51,29 +52,33 @@ impl PromptComposer {
                 )
             })
             .when(self.selected_command.is_some(), |this| {
-                this.child(self.command_chip(&view, cx))
+                this.child(h_flex().w_full().child(self.command_chip(&view, cx)))
             })
             .when_some(self.command_palette_element(&view, cx), |this, palette| {
                 this.child(palette)
             })
-            .when(!self.attachments.is_empty(), |this| {
-                this.child(self.attachment_strip(cx))
-            })
-            .when(!self.preview_source.is_empty(), |this| {
-                this.child(self.code_preview(cx))
-            })
-            .child(
-                Textarea::new(&self.input)
-                    .appearance(false)
-                    .bordered(false)
-                    .aria_label("Chat message composer")
-                    .w_full()
-                    .flex_1()
-                    .min_h(px(30.))
-                    .p_0()
-                    .text_size(px(15.))
-                    .line_height(px(22.)),
+            .when(
+                !command_palette_open && !self.attachments.is_empty(),
+                |this| this.child(self.attachment_strip(cx)),
             )
+            .when(
+                !command_palette_open && !self.preview_source.is_empty(),
+                |this| this.child(self.code_preview(cx)),
+            )
+            .when(!command_palette_open, |this| {
+                this.child(
+                    Textarea::new(&self.input)
+                        .appearance(false)
+                        .bordered(false)
+                        .aria_label("Chat message composer")
+                        .w_full()
+                        .flex_1()
+                        .min_h(px(30.))
+                        .p_0()
+                        .text_size(px(15.))
+                        .line_height(px(22.)),
+                )
+            })
             .into_any_element()
     }
 

@@ -1,14 +1,14 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, IconName,
+    ActiveTheme as _, Disableable as _, IconName, StyledExt as _,
     button::{Button, ButtonVariants},
     command::{Command, CommandItem},
-    h_flex,
+    h_flex, v_flex,
 };
 use gpui_kit::{
     AnyElement, App, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _, px,
 };
-use magenta_core::{CommandDescriptor, CommandPromptRequirement, ProviderId};
+use magenta_core::{CommandDescriptor, CommandPromptRequirement, ConversationMode, ProviderId};
 
 use super::state::{CommandPaletteState, PromptComposer};
 
@@ -34,6 +34,78 @@ fn matching_command<'a>(
     commands
         .iter()
         .find(|command| command.id.as_str().eq_ignore_ascii_case(token))
+}
+
+fn command_items(commands: &[CommandDescriptor], mode: &ConversationMode) -> Vec<CommandItem> {
+    commands
+        .iter()
+        .map(|command| {
+            let command_token = format!("/{}", command.id.as_str());
+            let command_label = command.label.clone();
+            let command_description = command.description.clone();
+            let is_supported = command.supports_mode(mode);
+
+            CommandItem::new()
+                .label(format!("{command_token} {command_label}"))
+                .keywords([
+                    command.id.as_str().to_owned(),
+                    command.label.clone(),
+                    command.description.clone(),
+                ])
+                .child(move |_, cx| {
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .items_center()
+                        .gap(px(12.))
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(62.))
+                                .font_medium()
+                                .text_size(px(13.))
+                                .text_color(cx.theme().primary)
+                                .child(command_token.clone()),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap(px(2.))
+                                .child(
+                                    div()
+                                        .font_medium()
+                                        .text_size(px(13.))
+                                        .child(command_label.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
+                                        .text_ellipsis()
+                                        .text_size(px(11.))
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(command_description.clone()),
+                                ),
+                        )
+                        .when(!is_supported, |this| {
+                            this.child(
+                                div()
+                                    .flex_none()
+                                    .rounded_full()
+                                    .border_1()
+                                    .border_color(cx.theme().border)
+                                    .px(px(7.))
+                                    .py(px(2.))
+                                    .text_size(px(10.))
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Work only"),
+                            )
+                        })
+                })
+                .disabled(!is_supported)
+        })
+        .collect()
 }
 
 impl PromptComposer {
@@ -163,27 +235,21 @@ impl PromptComposer {
         let Some(command_id) = self.selected_command.as_ref() else {
             return div().into_any_element();
         };
-        let label = self
-            .command_descriptors()
-            .into_iter()
-            .find(|command| command.id == *command_id)
-            .map_or_else(
-                || format!("/{}", command_id.as_str()),
-                |command| format!("/{} · {}", command.id.as_str(), command.label),
-            );
+        let label = format!("/{}", command_id.as_str());
         let remove_view = view.clone();
 
         h_flex()
             .id("prompt-command-chip")
             .items_center()
             .gap(px(4.))
-            .px(px(7.))
-            .py(px(3.))
-            .rounded(px(7.))
+            .px(px(8.))
+            .h(px(26.))
+            .rounded_full()
             .border_1()
             .border_color(cx.theme().primary.opacity(0.3))
-            .bg(cx.theme().accent.opacity(0.32))
+            .bg(cx.theme().primary.opacity(0.08))
             .text_size(px(11.))
+            .font_medium()
             .text_color(cx.theme().foreground)
             .child(label)
             .child(
@@ -222,34 +288,13 @@ impl PromptComposer {
         let tab_commands = commands.clone();
         let tab_state = self.command_palette.clone();
         let tab_view = view.clone();
-        let items = commands
-            .iter()
-            .map(|command| {
-                let mode_label = if command.supports_mode(&mode) {
-                    String::new()
-                } else {
-                    " — Work only".to_owned()
-                };
-                CommandItem::new()
-                    .label(format!(
-                        "/{} · {}{}",
-                        command.id.as_str(),
-                        command.label,
-                        mode_label
-                    ))
-                    .keywords([
-                        command.id.as_str().to_owned(),
-                        command.label.clone(),
-                        command.description.clone(),
-                    ])
-                    .disabled(!command.supports_mode(&mode))
-            })
-            .collect::<Vec<_>>();
+        let items = command_items(&commands, &mode);
 
         let palette = Command::new(&self.command_palette)
             .items(items)
-            .placeholder("Search commands")
-            .max_h(px(220.))
+            .placeholder("Filter commands…")
+            .max_h(px(204.))
+            .bordered(false)
             .on_confirm(move |index, window, cx| {
                 let Some(command) = commands.get(index.row).cloned() else {
                     return;
@@ -278,7 +323,6 @@ impl PromptComposer {
             div()
                 .id("prompt-command-palette")
                 .w_full()
-                .max_w(px(520.))
                 .aria_label("Slash command palette")
                 .on_key_down(move |event, window, cx| {
                     if event.keystroke.key != "tab" || event.keystroke.modifiers.shift {
@@ -300,8 +344,8 @@ impl PromptComposer {
                 })
                 .border_1()
                 .border_color(cx.theme().border)
-                .rounded(px(9.))
-                .bg(cx.theme().background)
+                .rounded(px(10.))
+                .bg(cx.theme().popover)
                 .shadow(super::super::visual::floating_shadow(cx))
                 .child(palette)
                 .into_any_element(),
