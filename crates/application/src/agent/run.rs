@@ -639,7 +639,7 @@ impl RunWorkspaceAgent {
             root: root.to_path_buf(),
             session_id,
             assistant_message_id: prepared.assistant_message.id,
-            pending: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            pending: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }))
     }
 }

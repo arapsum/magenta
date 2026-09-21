@@ -114,13 +114,14 @@ impl ResponseRunCoordinator {
     }
 
     pub(crate) fn mark_saved(&mut self, message_id: MessageId) -> bool {
+        let review_is_resolving = self.control_tasks.contains_key(&message_id);
         let Some(run) = self.runs.get_mut(&message_id) else {
             return false;
         };
-        if run
-            .controller
-            .as_ref()
-            .is_some_and(magenta_application::AgentApprovalController::has_pending_workspace_review)
+        if review_is_resolving
+            || run.controller.as_ref().is_some_and(
+                magenta_application::AgentApprovalController::has_pending_workspace_review,
+            )
         {
             run.save_state = RunSaveState::Saved;
             self.stream_tasks.remove(&message_id);

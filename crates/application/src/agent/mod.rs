@@ -2,6 +2,10 @@ mod run;
 mod stream;
 mod tool;
 
+#[cfg(test)]
+#[path = "../../test/agent/review.rs"]
+mod review_tests;
+
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -216,6 +220,7 @@ impl AgentReviewHandle {
                 AgentSessionState::AwaitingReview,
             )
             .await;
+        self.pending.store(true, Ordering::Release);
         Ok(())
     }
 }

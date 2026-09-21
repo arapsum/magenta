@@ -57,6 +57,7 @@ impl MainView {
         cx: &mut Context<'_, Self>,
     ) {
         if self.response_runs.complete(assistant_id, outcome).is_some() {
+            self.finish_workspace_review(assistant_id, window, cx);
             self.sync_run(assistant_id, cx);
             self.save_run(assistant_id, window, cx);
         }
@@ -78,7 +79,7 @@ impl MainView {
         );
         if self.response_runs.fail(assistant_id, error).is_some() {
             self.sync_run(assistant_id, cx);
-            self.finish_interrupted_workspace_review(assistant_id, window, cx);
+            self.finish_workspace_review(assistant_id, window, cx);
             self.save_run(assistant_id, window, cx);
         }
     }
@@ -91,12 +92,12 @@ impl MainView {
     ) {
         if self.response_runs.stop(assistant_id).is_some() {
             self.sync_run(assistant_id, cx);
-            self.finish_interrupted_workspace_review(assistant_id, window, cx);
+            self.finish_workspace_review(assistant_id, window, cx);
             self.save_run(assistant_id, window, cx);
         }
     }
 
-    fn finish_interrupted_workspace_review(
+    fn finish_workspace_review(
         &mut self,
         message_id: MessageId,
         window: &Window,
