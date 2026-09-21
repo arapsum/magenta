@@ -1,77 +1,12 @@
 use std::fmt::Write as _;
 
+#[cfg(test)]
 use chrono::Datelike as _;
 use gpui_kit::component::accordion::Accordion;
 
 use super::super::*;
 
 impl ConversationView {
-    fn render_assistant_header(&self, rendered: &RenderedMessage, cx: &App) -> AnyElement {
-        let message = &rendered.message;
-        let generation = self.origins.get(&message.id).or_else(|| {
-            self.conversation
-                .as_ref()
-                .map(|conversation| &conversation.generation)
-        });
-        let model_label = generation.map_or_else(
-            || "Model".to_owned(),
-            |generation| display_model_name(&generation.model.0),
-        );
-        let label = match message.status {
-            MessageStatus::Stopped => format!("{model_label} · stopped"),
-            MessageStatus::Failed if self.has_successful_retry(message.id) => {
-                format!("{model_label} · previous attempt")
-            }
-            MessageStatus::Failed => format!("{model_label} · failed"),
-            MessageStatus::Complete | MessageStatus::Streaming => model_label,
-        };
-
-        let timestamp = relative_message_timestamp(rendered.created_at);
-
-        h_flex()
-            .h(px(30.))
-            .items_center()
-            .gap(px(9.))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(px(28.))
-                    .rounded(px(9.))
-                    .border_1()
-                    .border_color(cx.theme().primary.opacity(0.18))
-                    .bg(cx.theme().accent.opacity(0.68))
-                    .text_color(cx.theme().primary)
-                    .child(
-                        provider_icon(generation.map(|generation| &generation.provider)).xsmall(),
-                    ),
-            )
-            .child(
-                div()
-                    .text_size(px(13.))
-                    .font_semibold()
-                    .text_color(cx.theme().foreground.opacity(0.82))
-                    .child(label),
-            )
-            .when(!timestamp.is_empty(), |this| {
-                this.child(
-                    div()
-                        .size(px(3.))
-                        .rounded_full()
-                        .bg(cx.theme().muted_foreground.opacity(0.55)),
-                )
-                .child(
-                    div()
-                        .text_size(px(12.))
-                        .font_medium()
-                        .text_color(cx.theme().muted_foreground.opacity(0.82))
-                        .child(timestamp),
-                )
-            })
-            .into_any_element()
-    }
-
     #[allow(clippy::too_many_lines)]
     pub(super) fn render_assistant_message(
         &self,
@@ -106,8 +41,7 @@ impl ConversationView {
 
         v_flex()
             .w_full()
-            .gap(px(15.))
-            .child(self.render_assistant_header(rendered, cx))
+            .gap(px(13.))
             .when_some(
                 Self::render_context_notice(rendered),
                 gpui_kit::ParentElement::child,
@@ -352,83 +286,128 @@ impl ConversationView {
         let mut details = Accordion::new(("generation-failure-details", message_id.0))
             .multiple(false)
             .bordered(false)
-            .small();
+            .small()
+            .bg(cx.theme().transparent);
         details = details.item(|item| {
-            item.open(false).title("Technical details").child(
-                v_flex()
-                    .gap(px(6.))
-                    .text_size(px(11.))
-                    .text_color(cx.theme().muted_foreground)
-                    .child(technical)
-                    .child(copy),
-            )
+            item.open(false)
+                .bg(cx.theme().transparent)
+                .title(
+                    div()
+                        .debug_selector(|| "generation-failure-details-trigger".into())
+                        .text_size(px(12.))
+                        .font_normal()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Technical details"),
+                )
+                .hover(|this| this.bg(cx.theme().accent.opacity(0.18)))
+                .child(
+                    h_flex()
+                        .w_full()
+                        .items_start()
+                        .justify_between()
+                        .gap(px(8.))
+                        .p(px(8.))
+                        .rounded(px(8.))
+                        .bg(cx.theme().background.opacity(0.42))
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_size(px(11.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child(div().flex_1().min_w_0().child(technical))
+                        .child(copy),
+                )
         });
+        let primary_action = Button::new(("generation-failure-primary", message_id.0))
+            .secondary()
+            .small()
+            .label(primary_label)
+            .accessibility_id(format!("generation-failure-primary-{}", message_id.0))
+            .on_click(move |_, _, cx| {
+                primary_view.update(cx, |_, cx| cx.emit(primary_event.clone()));
+            });
         v_flex()
+            .debug_selector(|| "generation-failure".into())
             .w_full()
-            .gap(px(8.))
+            .gap(px(9.))
             .p(px(12.))
-            .rounded(px(10.))
+            .rounded(px(14.))
             .border_1()
-            .border_color(cx.theme().danger.opacity(0.55))
-            .bg(cx.theme().danger.opacity(0.08))
+            .border_color(cx.theme().border.opacity(0.72))
+            .bg(crate::components::visual::surface(
+                crate::components::visual::SurfaceLevel::Raised,
+                cx,
+            ))
             .child(
                 h_flex()
-                    .items_center()
-                    .gap(px(7.))
-                    .child(Icon::new(IconName::CircleX).small())
+                    .w_full()
+                    .items_start()
+                    .gap(px(10.))
+                    .child(
+                        div()
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .size(px(28.))
+                            .rounded(px(8.))
+                            .bg(cx.theme().danger.opacity(0.1))
+                            .child(
+                                Icon::new(IconName::TriangleAlert)
+                                    .xsmall()
+                                    .text_color(cx.theme().danger),
+                            ),
+                    )
                     .child(
                         v_flex()
-                            .gap(px(2.))
-                            .child(div().font_medium().child(title))
+                            .flex_1()
+                            .min_w_0()
+                            .gap(px(3.))
                             .child(
                                 div()
-                                    .text_size(px(12.))
+                                    .debug_selector(|| "generation-failure-title".into())
+                                    .text_size(px(14.))
+                                    .font_medium()
+                                    .child(title),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(13.))
+                                    .line_height(px(19.))
                                     .text_color(cx.theme().muted_foreground)
                                     .child(explanation),
                             ),
+                    )
+                    .child(
+                        h_flex()
+                            .flex_none()
+                            .items_center()
+                            .gap(px(4.))
+                            .child(primary_action)
+                            .when_some(secondary_label, |this, label| {
+                                let secondary_view = view.clone();
+                                this.child(
+                                    Button::new(("generation-failure-secondary", message_id.0))
+                                        .ghost()
+                                        .small()
+                                        .label(label)
+                                        .on_click(move |_, _, cx| {
+                                            secondary_view.update(cx, |view, cx| {
+                                                view.request_choose_model(message_id, cx);
+                                            });
+                                        }),
+                                )
+                            }),
                     ),
             )
             .when(!message.content.is_empty(), |this| {
                 this.child(
                     div()
+                        .pl(px(38.))
                         .text_size(px(11.))
                         .text_color(cx.theme().muted_foreground)
                         .child("Partial response preserved below"),
                 )
             })
-            .child(
-                h_flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .child(
-                        Button::new(("generation-failure-primary", message_id.0))
-                            .primary()
-                            .small()
-                            .label(primary_label)
-                            .accessibility_id(format!(
-                                "generation-failure-primary-{}",
-                                message_id.0
-                            ))
-                            .on_click(move |_, _, cx| {
-                                primary_view.update(cx, |_, cx| cx.emit(primary_event.clone()));
-                            }),
-                    )
-                    .when_some(secondary_label, |this, label| {
-                        let secondary_view = view.clone();
-                        this.child(
-                            Button::new(("generation-failure-secondary", message_id.0))
-                                .ghost()
-                                .small()
-                                .label(label)
-                                .on_click(move |_, _, cx| {
-                                    secondary_view.update(cx, |view, cx| {
-                                        view.request_choose_model(message_id, cx);
-                                    });
-                                }),
-                        )
-                    }),
-            )
-            .child(details)
+            .child(div().w_full().pl(px(36.)).child(details))
             .into_any_element()
     }
 
@@ -449,6 +428,7 @@ impl ConversationView {
     }
 }
 
+#[cfg(test)]
 fn relative_message_timestamp(timestamp: magenta_core::Timestamp) -> String {
     let Some(created_at) = chrono::DateTime::from_timestamp_millis(timestamp.0)
         .map(|time| time.with_timezone(&chrono::Local))
@@ -468,6 +448,7 @@ fn relative_message_timestamp(timestamp: magenta_core::Timestamp) -> String {
     }
 }
 
+#[cfg(test)]
 fn display_model_name(model: &str) -> String {
     model.get(..3).map_or_else(
         || model.to_owned(),

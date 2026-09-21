@@ -15,7 +15,8 @@ use gpui_kit::component::Root;
 use gpui_kit::{TestAppContext, size};
 use magenta_core::{
     AssistantTrace, AssistantTraceEntry, AssistantTraceKind, AssistantTraceStatus, ConversationId,
-    ConversationMode, EffortLevel, FinishReason, GenerationConfig, ModelId, TokenUsage,
+    ConversationMode, EffortLevel, FinishReason, GenerationConfig, MessageFailure,
+    MessageFailureCategory, MessageFailureDetail, ModelId, TokenUsage,
 };
 
 use super::*;
@@ -356,6 +357,54 @@ fn expanded_trace_viewport_keeps_its_content_visible(cx: &mut TestAppContext) {
 
     window
         .update(cx, |view, _, cx| {
+            let mut work_conversation = conversation();
+            work_conversation.mode = ConversationMode::Agent;
+            let mut assistant = message(2, MessageRole::Assistant, MessageStatus::Complete);
+            assistant.content = "The answer".to_owned();
+            assistant.assistant_trace = AssistantTrace {
+                entries: vec![AssistantTraceEntry {
+                    key: "reasoning:item-1:0".to_owned(),
+                    sequence: 0,
+                    kind: AssistantTraceKind::ReasoningSummary,
+                    status: AssistantTraceStatus::Completed,
+                    title: "Thinking".to_owned(),
+                    tool_name: None,
+                    input: String::new(),
+                    output: "A compact reasoning summary.".to_owned(),
+                    started_at: None,
+                    finished_at: None,
+                }],
+                thinking_duration_ms: Some(1_200),
+            };
+            view.load(
+                ConversationThread {
+                    conversation: work_conversation,
+                    messages: vec![assistant],
+                },
+                cx,
+            );
+        })
+        .expect("the conversation test window should remain open");
+    cx.run_until_parked();
+
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    let viewport = visual
+        .debug_bounds("assistant-trace-viewport")
+        .expect("the expanded trace viewport should be rendered");
+    assert!(viewport.size.height > px(0.));
+}
+
+#[gpui_kit::test]
+fn completed_chat_reasoning_keeps_a_stable_collapsed_header(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
+        let composer = cx.new(|cx| PromptComposer::new(window, cx));
+        ConversationView::new(composer, window, cx)
+    });
+
+    window
+        .update(cx, |view, _, cx| {
             let mut assistant = message(2, MessageRole::Assistant, MessageStatus::Complete);
             assistant.content = "The answer".to_owned();
             assistant.assistant_trace = AssistantTrace {
@@ -386,10 +435,160 @@ fn expanded_trace_viewport_keeps_its_content_visible(cx: &mut TestAppContext) {
 
     let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
-    let viewport = visual
-        .debug_bounds("assistant-trace-viewport")
-        .expect("the expanded trace viewport should be rendered");
-    assert!(viewport.size.height > px(0.));
+    assert!(visual.debug_bounds("assistant-trace-header").is_some());
+}
+
+#[gpui_kit::test]
+fn completing_a_live_run_preserves_the_rendered_answer_entity(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
+        let composer = cx.new(|cx| PromptComposer::new(window, cx));
+        ConversationView::new(composer, window, cx)
+    });
+
+    window
+        .update(cx, |view, _, cx| {
+            let conversation = conversation();
+            let generation = conversation.generation.clone();
+            let mut assistant = message(2, MessageRole::Assistant, MessageStatus::Streaming);
+            assistant.content = "The answer remains mounted.".to_owned();
+            assistant.assistant_trace = AssistantTrace {
+                entries: vec![AssistantTraceEntry {
+                    key: "reasoning:item-1:0".to_owned(),
+                    sequence: 0,
+                    kind: AssistantTraceKind::ReasoningSummary,
+                    status: AssistantTraceStatus::Completed,
+                    title: "Thinking".to_owned(),
+                    tool_name: None,
+                    input: String::new(),
+                    output: "A compact reasoning summary.".to_owned(),
+                    started_at: None,
+                    finished_at: None,
+                }],
+                thinking_duration_ms: Some(1_200),
+            };
+            view.apply_live_run(
+                LiveRunSnapshot {
+                    conversation: conversation.clone(),
+                    messages: vec![LiveRunMessage {
+                        message: assistant.clone(),
+                        sequence: Some(magenta_core::MessageSequence(2)),
+                        created_at: magenta_core::Timestamp(2),
+                        generation: generation.clone(),
+                        omitted_context_messages: 0,
+                        replaces: None,
+                    }],
+                    streaming_message: Some(assistant.id),
+                    generation_progress: Some(GenerationProgress::new(
+                        assistant.id,
+                        generation.provider.clone(),
+                        Some(generation.clone()),
+                    )),
+                    agent_controller: None,
+                    pending_agent_approval: None,
+                    live_commands: HashMap::new(),
+                },
+                cx,
+            );
+            let markdown_id = view.messages[0]
+                .markdown
+                .as_ref()
+                .expect("the streaming answer should have retained markdown state")
+                .entity_id();
+
+            assistant.status = MessageStatus::Complete;
+            view.apply_live_run(
+                LiveRunSnapshot {
+                    conversation,
+                    messages: vec![LiveRunMessage {
+                        message: assistant,
+                        sequence: Some(magenta_core::MessageSequence(2)),
+                        created_at: magenta_core::Timestamp(2),
+                        generation,
+                        omitted_context_messages: 0,
+                        replaces: None,
+                    }],
+                    streaming_message: None,
+                    generation_progress: None,
+                    agent_controller: None,
+                    pending_agent_approval: None,
+                    live_commands: HashMap::new(),
+                },
+                cx,
+            );
+
+            assert_eq!(
+                view.messages[0]
+                    .markdown
+                    .as_ref()
+                    .expect("the completed answer should keep its markdown state")
+                    .entity_id(),
+                markdown_id
+            );
+            assert_eq!(
+                view.messages[0].message.content,
+                "The answer remains mounted."
+            );
+        })
+        .expect("the conversation test window should remain open");
+}
+
+#[gpui_kit::test]
+fn generation_failure_is_compact_and_stops_stale_reasoning(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(size(px(900.), px(640.)), |window, cx| {
+        let composer = cx.new(|cx| PromptComposer::new(window, cx));
+        ConversationView::new(composer, window, cx)
+    });
+
+    window
+        .update(cx, |view, _, cx| {
+            let mut assistant = message(2, MessageRole::Assistant, MessageStatus::Failed);
+            assistant.failure = Some(MessageFailure {
+                category: MessageFailureCategory::RateLimit,
+                reference_code: "MAG-GEN-RATE-LIMIT".to_owned(),
+                provider: ProviderId::new("demo"),
+                detail: Some(MessageFailureDetail::HttpStatus { status: 429 }),
+            });
+            assistant.assistant_trace = AssistantTrace {
+                entries: vec![AssistantTraceEntry {
+                    key: "reasoning:item-1:0".to_owned(),
+                    sequence: 0,
+                    kind: AssistantTraceKind::ReasoningSummary,
+                    status: AssistantTraceStatus::Running,
+                    title: "Thinking".to_owned(),
+                    tool_name: None,
+                    input: String::new(),
+                    output: "A stale in-flight summary.".to_owned(),
+                    started_at: None,
+                    finished_at: None,
+                }],
+                thinking_duration_ms: Some(26_000),
+            };
+            view.load(
+                ConversationThread {
+                    conversation: conversation(),
+                    messages: vec![assistant],
+                },
+                cx,
+            );
+        })
+        .expect("the conversation test window should remain open");
+    cx.run_until_parked();
+
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    let failure = visual
+        .debug_bounds("generation-failure")
+        .expect("the failure surface should be visible");
+    assert!(failure.size.height < px(160.));
+    assert!(visual.debug_bounds("generation-failure-title").is_some());
+    assert!(
+        visual
+            .debug_bounds("generation-failure-details-trigger")
+            .is_some()
+    );
+    assert!(visual.debug_bounds("assistant-trace-header").is_some());
 }
 
 #[gpui_kit::test]

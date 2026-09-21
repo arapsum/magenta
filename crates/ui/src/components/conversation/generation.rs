@@ -266,6 +266,7 @@ impl ConversationView {
             message.message.status = MessageStatus::Complete;
             message.message.generation_outcome = Some(outcome);
         }
+        self.remeasure_message(assistant_id);
         self.streaming_message = None;
         if let Some(message) = self
             .messages
@@ -328,6 +329,7 @@ impl ConversationView {
             message.message.status = MessageStatus::Failed;
             message.message.failure = Some(failure);
         }
+        self.remeasure_message(assistant_id);
         self.streaming_message = None;
         if let Some(message) = self
             .messages
@@ -368,6 +370,7 @@ impl ConversationView {
         {
             message.message.status = MessageStatus::Stopped;
         }
+        self.remeasure_message(assistant_id);
         if let Some(message) = self
             .messages
             .iter()
@@ -421,6 +424,16 @@ impl ConversationView {
                 entry.status = status;
                 entry.finished_at = Some(finished_at);
             }
+        }
+    }
+
+    fn remeasure_message(&self, message_id: MessageId) {
+        if let Some(index) = self
+            .messages
+            .iter()
+            .position(|message| message.message.id == message_id)
+        {
+            self.list_state.remeasure_items(index..index + 1);
         }
     }
 

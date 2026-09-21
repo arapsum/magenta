@@ -2,6 +2,8 @@ mod agent;
 mod agent_cards;
 mod assistant;
 
+use chrono::Datelike as _;
+
 use super::*;
 
 impl ConversationView {
@@ -20,19 +22,47 @@ impl ConversationView {
             MessageRole::User => Self::render_user_message(message, view, cx),
             MessageRole::Assistant => self.render_assistant_message(message, cx, view),
         };
+        let day_label = self.message_day_label(index);
 
         div()
             .w_full()
-            .px(px(28.))
-            .py(px(14.))
+            .px(px(24.))
+            .py(px(13.))
             .child(
-                div()
+                v_flex()
                     .w_full()
                     .max_w(MESSAGE_MAX_WIDTH)
                     .mx_auto()
+                    .gap(px(28.))
+                    .when_some(day_label, |this, label| {
+                        this.child(
+                            div()
+                                .w_full()
+                                .text_center()
+                                .text_size(px(12.))
+                                .text_color(cx.theme().muted_foreground.opacity(0.82))
+                                .child(label),
+                        )
+                    })
                     .child(body),
             )
             .into_any_element()
+    }
+
+    fn message_day_label(&self, index: usize) -> Option<String> {
+        let message = self.messages.get(index)?;
+        let current = chrono::DateTime::from_timestamp_millis(message.created_at.0)?
+            .with_timezone(&chrono::Local);
+        let starts_new_day = index == 0
+            || self
+                .messages
+                .get(index.wrapping_sub(1))
+                .is_none_or(|previous| {
+                    chrono::DateTime::from_timestamp_millis(previous.created_at.0)
+                        .map(|time| time.with_timezone(&chrono::Local).date_naive())
+                        != Some(current.date_naive())
+                });
+        starts_new_day.then(|| format_message_day(current))
     }
 
     fn render_user_message(message: &RenderedMessage, view: &Entity<Self>, cx: &App) -> AnyElement {
@@ -111,10 +141,13 @@ impl ConversationView {
                         .max_w(USER_MESSAGE_MAX_WIDTH)
                         .px(px(16.))
                         .py(px(11.))
-                        .rounded(px(13.))
+                        .rounded(px(17.))
                         .border_1()
-                        .border_color(cx.theme().primary.opacity(0.26))
-                        .bg(cx.theme().accent.opacity(0.72))
+                        .border_color(cx.theme().border.opacity(0.38))
+                        .bg(crate::components::visual::surface(
+                            crate::components::visual::SurfaceLevel::Raised,
+                            cx,
+                        ))
                         .text_size(px(14.5))
                         .line_height(px(23.))
                         .text_color(cx.theme().foreground)
@@ -349,5 +382,21 @@ impl ConversationView {
                     ),
             )
             .into_any_element()
+    }
+}
+
+fn format_message_day(created_at: chrono::DateTime<chrono::Local>) -> String {
+    let today = chrono::Local::now().date_naive();
+    let date = created_at.date_naive();
+    if date == today {
+        return created_at.format("Today at %-H:%M").to_string();
+    }
+    if date == today - chrono::Days::new(1) {
+        return created_at.format("Yesterday at %-H:%M").to_string();
+    }
+    if date.year() == today.year() {
+        created_at.format("%a %-d %b at %-H:%M").to_string()
+    } else {
+        created_at.format("%-d %b %Y at %-H:%M").to_string()
     }
 }

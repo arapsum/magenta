@@ -5,7 +5,7 @@ use std::{
 };
 
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, Sizable as _, StyledExt as _, box_shadow,
+    ActiveTheme as _, Icon, Sizable as _, StyledExt as _,
     clipboard::Clipboard,
     h_flex,
     scroll::ScrollableElement as _,
@@ -15,8 +15,8 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, IntoElement, ParentElement as _, Styled as _, Window, div, linear_color_stop,
-    linear_gradient, prelude::FluentBuilder as _, px, rems,
+    AnyElement, App, IntoElement, ParentElement as _, Styled as _, Window, div,
+    prelude::FluentBuilder as _, px, rems,
 };
 
 use super::{
@@ -84,52 +84,15 @@ impl MarkdownPlugin for PremiumStepHeadingPlugin {
         let Some(heading) = node.data::<StepHeadingData>() else {
             return div().child(node.as_text().to_owned()).into_any_element();
         };
-        let marker = linear_gradient(
-            145.,
-            linear_color_stop(cx.theme().primary.opacity(0.84), 0.),
-            linear_color_stop(cx.theme().accent.opacity(0.96), 1.),
-        );
-
-        h_flex()
+        div()
             .w_full()
-            .ml(px(-46.))
-            .mt(px(8.))
-            .mb(px(3.))
-            .items_center()
-            .gap(px(16.))
-            .child(
-                div()
-                    .flex_none()
-                    .size(px(30.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded_full()
-                    .border_1()
-                    .border_color(cx.theme().primary.opacity(0.34))
-                    .bg(marker)
-                    .text_color(cx.theme().primary_foreground)
-                    .font_semibold()
-                    .text_size(px(13.))
-                    .shadow(vec![box_shadow(
-                        0.,
-                        5.,
-                        14.,
-                        -5.,
-                        cx.theme().primary.opacity(0.42),
-                    )])
-                    .child(heading.number.to_string()),
-            )
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .font_semibold()
-                    .text_size(px(18.))
-                    .line_height(px(24.))
-                    .text_color(cx.theme().foreground)
-                    .child(heading.title.clone()),
-            )
+            .mt(px(12.))
+            .mb(px(4.))
+            .font_semibold()
+            .text_size(px(19.))
+            .line_height(px(26.))
+            .text_color(cx.theme().foreground)
+            .child(format!("{}. {}", heading.number, heading.title))
             .into_any_element()
     }
 }
@@ -211,7 +174,7 @@ impl MarkdownPlugin for PremiumOrderedListPlugin {
             return div().child(node.as_text().to_owned()).into_any_element();
         };
 
-        let mut content = v_flex().w_full().gap(px(12.)).pb(rems(0.85));
+        let mut content = v_flex().w_full().gap(px(7.)).pb(rems(0.7));
         for (index, item) in list.items.iter().enumerate() {
             let id = content_id(&list.source, index);
             let text = TextView::markdown(("premium-list-item", id), item.clone())
@@ -227,21 +190,16 @@ impl MarkdownPlugin for PremiumOrderedListPlugin {
                     .w_full()
                     .min_w_0()
                     .items_start()
-                    .gap(px(10.))
+                    .gap(px(8.))
                     .child(
                         div()
                             .flex_none()
-                            .mt(px(1.))
-                            .size(px(26.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded_full()
-                            .bg(cx.theme().primary.opacity(0.2))
-                            .text_color(cx.theme().primary)
-                            .font_medium()
-                            .text_size(px(13.))
-                            .child((index + 1).to_string()),
+                            .w(px(22.))
+                            .text_right()
+                            .text_size(px(15.))
+                            .line_height(px(25.))
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("{}.", index + 1)),
                     )
                     .child(div().min_w_0().flex_1().child(text)),
             );
@@ -299,11 +257,6 @@ impl MarkdownPlugin for PremiumCodeBlockPlugin {
         };
         let id = content_id(&block.source, 0);
         let fenced = fenced_markdown(&block.language, &block.code);
-        let surface = linear_gradient(
-            145.,
-            linear_color_stop(cx.theme().popover.opacity(0.98), 0.),
-            linear_color_stop(cx.theme().accent.opacity(0.34), 1.),
-        );
         let code_style = TextViewStyle {
             paragraph_gap: rems(0.),
             code_block: gpui_kit::StyleRefinement::default()
@@ -314,54 +267,27 @@ impl MarkdownPlugin for PremiumCodeBlockPlugin {
             is_dark: cx.theme().is_dark(),
             ..Default::default()
         };
-        let line_numbers = (1..=block.code.lines().count().max(1))
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-
         v_flex()
             .w_full()
-            .mb(rems(0.8))
+            .mb(rems(0.75))
             .overflow_hidden()
             .rounded(px(14.))
             .border_1()
-            .border_color(cx.theme().primary.opacity(0.2))
-            .bg(surface)
-            .shadow(vec![
-                box_shadow(0., 16., 34., -20., cx.theme().primary.opacity(0.34)),
-                box_shadow(0., 5., 14., -8., cx.theme().background.opacity(0.86)),
-            ])
+            .border_color(cx.theme().border.opacity(0.58))
+            .bg(crate::components::visual::surface(
+                crate::components::visual::SurfaceLevel::Raised,
+                cx,
+            ))
             .child(render_code_header(block, id, cx))
             .child(
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .items_start()
-                    .child(
-                        div()
-                            .w(px(42.))
-                            .flex_none()
-                            .py(px(12.))
-                            .pr(px(10.))
-                            .border_r_1()
-                            .border_color(cx.theme().border.opacity(0.62))
-                            .font_family(cx.theme().mono_font_family.clone())
-                            .text_size(px(11.))
-                            .line_height(px(20.))
-                            .text_right()
-                            .text_color(cx.theme().muted_foreground.opacity(0.62))
-                            .child(line_numbers),
-                    )
-                    .child(
-                        div().min_w_0().flex_1().overflow_x_scrollbar().child(
-                            TextView::markdown(("premium-code-body", id), fenced)
-                                .selectable(true)
-                                .style(code_style)
-                                .w_full()
-                                .text_size(px(13.))
-                                .line_height(px(20.)),
-                        ),
-                    ),
+                div().w_full().min_w_0().overflow_x_scrollbar().child(
+                    TextView::markdown(("premium-code-body", id), fenced)
+                        .selectable(true)
+                        .style(code_style)
+                        .w_full()
+                        .text_size(px(13.))
+                        .line_height(px(20.)),
+                ),
             )
             .into_any_element()
     }
@@ -376,8 +302,7 @@ fn render_code_header(block: &CodeBlockData, id: u64, cx: &App) -> AnyElement {
         .justify_between()
         .px(px(12.))
         .border_b_1()
-        .border_color(cx.theme().primary.opacity(0.16))
-        .bg(cx.theme().accent.opacity(0.42))
+        .border_color(cx.theme().border.opacity(0.42))
         .child(
             h_flex()
                 .items_center()

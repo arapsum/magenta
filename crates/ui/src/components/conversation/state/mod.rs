@@ -15,6 +15,8 @@ impl ConversationView {
         self.trace_disclosure_overrides.clear();
         self.trace_entry_overrides.clear();
         self.conversation = Some(loaded.conversation);
+        self.composer
+            .update(cx, |composer, cx| composer.set_thread_active(true, cx));
         self.origins = loaded
             .page
             .messages
@@ -66,6 +68,8 @@ impl ConversationView {
         let mut changed_indices = Vec::new();
 
         self.conversation = Some(snapshot.conversation);
+        self.composer
+            .update(cx, |composer, cx| composer.set_thread_active(true, cx));
         for live in snapshot.messages {
             self.origins
                 .insert(live.message.id, live.generation.clone());
@@ -86,11 +90,14 @@ impl ConversationView {
                 } else {
                     live.omitted_context_messages
                 };
-                let mut rendered = Self::rendered_message(live.message, cx);
-                rendered.created_at = created_at;
-                rendered.sequence = sequence;
-                rendered.omitted_context_messages = omitted_context_messages;
-                self.messages[index] = rendered;
+                Self::update_rendered_live_message(
+                    &mut self.messages[index],
+                    live.message,
+                    created_at,
+                    sequence,
+                    omitted_context_messages,
+                    cx,
+                );
                 changed_indices.push(index);
             } else {
                 let mut rendered = Self::rendered_message(live.message, cx);
@@ -264,12 +271,21 @@ impl ConversationView {
             CloseAttachmentPreview,
             Some("AttachmentPreview"),
         )]);
+        let list_state =
+            ListState::new(0, ListAlignment::Top, LIST_OVERDRAW).with_uniform_item_height(px(96.));
+        let weak_view = cx.weak_entity();
+        list_state.set_scroll_handler(move |_, _, cx| {
+            let weak_view = weak_view.clone();
+            cx.defer(move |cx| {
+                let _ = weak_view.update(cx, |_, cx| cx.notify());
+            });
+        });
+
         Self {
             composer,
             conversation: None,
             messages: Vec::new(),
-            list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW)
-                .with_uniform_item_height(px(96.)),
+            list_state,
             generation: 0,
             streaming_message: None,
             generation_task: None,
@@ -306,6 +322,8 @@ impl ConversationView {
         self.has_newer = false;
         self.origins.clear();
         self.conversation = Some(thread.conversation);
+        self.composer
+            .update(cx, |composer, cx| composer.set_thread_active(true, cx));
         self.messages = thread
             .messages
             .into_iter()
@@ -335,6 +353,8 @@ impl ConversationView {
         self.attachment_preview = None;
         self.attachment_preview_return_focus = None;
         self.list_state.reset(0);
+        self.composer
+            .update(cx, |composer, cx| composer.set_thread_active(false, cx));
         cx.notify();
     }
 
@@ -492,6 +512,54 @@ impl ConversationView {
             sequence: None,
             omitted_context_messages: 0,
         }
+    }
+
+    fn update_rendered_live_message(
+        rendered: &mut RenderedMessage,
+        message: Message,
+        created_at: Timestamp,
+        sequence: Option<magenta_core::MessageSequence>,
+        omitted_context_messages: usize,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let can_update_in_place = rendered.message.role == message.role
+            && (message.role == MessageRole::Assistant
+                || rendered.message.content == message.content);
+
+        if can_update_in_place {
+            if message.role == MessageRole::Assistant {
+                let normalized = markdown::normalize_for_text_view(&message.content);
+                if rendered.markdown.is_none()
+                    || rendered.markdown_source.as_deref() != Some(normalized.as_str())
+                {
+                    if let Some(markdown) = rendered.markdown.as_ref() {
+                        let previous = rendered.markdown_source.as_deref().unwrap_or_default();
+                        markdown.update(cx, |state, cx| {
+                            if let Some(delta) = normalized.strip_prefix(previous) {
+                                state.push_str(delta, cx);
+                            } else {
+                                state.set_text(&normalized, cx);
+                            }
+                        });
+                    } else {
+                        rendered.markdown =
+                            Some(cx.new(|cx| TextViewState::markdown(&normalized, cx)));
+                    }
+                    rendered.markdown_source = Some(normalized);
+                }
+            }
+            rendered.message = message;
+            rendered.created_at = created_at;
+            rendered.sequence = sequence;
+            rendered.omitted_context_messages = omitted_context_messages;
+            return;
+        }
+
+        let mut replacement = Self::rendered_message(message, cx);
+        replacement.created_at = created_at;
+        replacement.sequence = sequence;
+        replacement.omitted_context_messages = omitted_context_messages;
+        *rendered = replacement;
     }
 
     fn rendered_stored_message(

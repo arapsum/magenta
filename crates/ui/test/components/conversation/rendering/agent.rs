@@ -131,3 +131,118 @@ fn active_trace_entries_keep_the_timeline_open_by_default() {
             .any(|entry| matches!(entry.status, AssistantTraceStatus::Running))
     );
 }
+
+#[test]
+fn completed_trace_headers_use_elapsed_work_language() {
+    let message = message(AssistantTrace {
+        entries: Vec::new(),
+        thinking_duration_ms: Some(123_000),
+    });
+
+    assert_eq!(
+        trace_header_label(
+            &message,
+            false,
+            Some(Duration::from_secs(123)),
+            &ConversationMode::Agent,
+        ),
+        "Worked for 2m 03s"
+    );
+}
+
+#[test]
+fn completed_chat_trace_headers_use_thought_language() {
+    let message = message(AssistantTrace {
+        entries: Vec::new(),
+        thinking_duration_ms: Some(26_000),
+    });
+
+    assert_eq!(
+        trace_header_label(
+            &message,
+            false,
+            Some(Duration::from_secs(26)),
+            &ConversationMode::Chat,
+        ),
+        "Thought for 26s"
+    );
+}
+
+#[test]
+fn active_tool_summaries_group_common_activity() {
+    let message = message(AssistantTrace {
+        entries: vec![
+            trace_entry(
+                "tool:skill",
+                0,
+                AssistantTraceKind::Tool,
+                AssistantTraceStatus::Completed,
+                "read_skill",
+                Some("read_skill"),
+            ),
+            trace_entry(
+                "tool:file",
+                1,
+                AssistantTraceKind::Tool,
+                AssistantTraceStatus::Completed,
+                "read_file",
+                Some("read_file"),
+            ),
+            trace_entry(
+                "tool:command",
+                2,
+                AssistantTraceKind::Tool,
+                AssistantTraceStatus::Running,
+                "run_command",
+                Some("run_command"),
+            ),
+        ],
+        thinking_duration_ms: None,
+    });
+
+    assert_eq!(
+        trace_header_label(&message, true, None, &ConversationMode::Agent),
+        "Loaded tools, read files, ran commands"
+    );
+}
+
+#[test]
+fn tool_rows_use_activity_language() {
+    let entry = trace_entry(
+        "tool:command",
+        0,
+        AssistantTraceKind::Tool,
+        AssistantTraceStatus::Completed,
+        "run_command",
+        Some("run_command"),
+    );
+
+    assert_eq!(trace_entry_activity_label(&entry), "Ran command");
+}
+
+#[test]
+fn failed_messages_do_not_leave_the_trace_running() {
+    let mut message = message(AssistantTrace {
+        entries: vec![trace_entry(
+            "reasoning:item-1:0",
+            0,
+            AssistantTraceKind::ReasoningSummary,
+            AssistantTraceStatus::Running,
+            "Thinking",
+            None,
+        )],
+        thinking_duration_ms: Some(26_000),
+    });
+    message.status = MessageStatus::Failed;
+
+    assert!(!ConversationView::trace_is_active(&message));
+    assert_eq!(
+        trace_header_label(
+            &message,
+            false,
+            Some(Duration::from_secs(26)),
+            &ConversationMode::Agent,
+        ),
+        "Work failed"
+    );
+}

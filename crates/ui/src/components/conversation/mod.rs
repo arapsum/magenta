@@ -50,7 +50,6 @@ use crate::components::{
         conversation_text_style,
     },
     prompt_input::PromptComposer,
-    provider_icon,
 };
 
 #[allow(dead_code)]
@@ -60,8 +59,8 @@ pub struct ConversationThread {
     pub messages: Vec<Message>,
 }
 
-const MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(780.);
-const COMPOSER_MAX_WIDTH: gpui_kit::Pixels = px(800.);
+const MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(736.);
+const COMPOSER_MAX_WIDTH: gpui_kit::Pixels = px(760.);
 const USER_MESSAGE_MAX_WIDTH: gpui_kit::Pixels = px(520.);
 const LIST_OVERDRAW: gpui_kit::Pixels = px(640.);
 #[allow(dead_code)]
@@ -323,66 +322,48 @@ impl ConversationView {
         let Some(conversation) = self.conversation.as_ref() else {
             return div().into_any_element();
         };
+        if conversation.mode == ConversationMode::Chat {
+            return div().into_any_element();
+        }
         let display_title = polished_conversation_title(&conversation.title);
-
-        let subtitle = match conversation.mode {
-            ConversationMode::Chat => "Conversation",
-            ConversationMode::Agent => "Workspace session",
-        };
 
         h_flex()
             .flex_none()
             .w_full()
-            .h(px(60.))
+            .h(px(48.))
             .items_center()
             .border_b_1()
-            .border_color(cx.theme().border.opacity(0.62))
-            .bg(cx.theme().tokens.background.background.opacity(0.96))
-            .px(px(28.))
+            .border_color(cx.theme().border.opacity(0.48))
+            .bg(cx.theme().tokens.background.background)
+            .px(px(20.))
             .child(
                 h_flex()
                     .w_full()
-                    .max_w(px(900.))
-                    .mx_auto()
                     .items_center()
-                    .gap(px(11.))
+                    .gap(px(8.))
                     .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .size(px(32.))
-                            .rounded(px(9.))
-                            .border_1()
-                            .border_color(cx.theme().primary.opacity(0.2))
-                            .bg(cx.theme().accent.opacity(0.7))
-                            .text_color(cx.theme().primary)
-                            .child(Icon::new(IconName::Bot).xsmall()),
+                        Icon::new(IconName::FolderOpen)
+                            .xsmall()
+                            .text_color(cx.theme().muted_foreground),
                     )
                     .child(
-                        v_flex()
+                        div()
                             .flex_1()
                             .min_w_0()
-                            .gap(px(1.))
-                            .child(
-                                div()
-                                    .w_full()
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .text_size(px(14.))
-                                    .font_semibold()
-                                    .child(display_title),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(11.))
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(subtitle),
-                            ),
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_size(px(14.))
+                            .font_medium()
+                            .child(display_title),
                     ),
             )
             .into_any_element()
+    }
+
+    fn is_scrolled_up(&self) -> bool {
+        self.list_state.max_offset_for_scrollbar().y > px(0.)
+            && !self.list_state.is_scrolled_to_end().unwrap_or(false)
     }
 
     fn render_thread_footer(&self, cx: &Context<'_, Self>) -> AnyElement {
@@ -426,15 +407,41 @@ impl ConversationView {
                 )
                 .into_any_element()
         } else {
-            div()
+            let view = cx.entity();
+            v_flex()
                 .flex_none()
                 .w_full()
-                .border_t_1()
-                .border_color(cx.theme().border.opacity(0.5))
                 .bg(cx.theme().tokens.background.background.opacity(0.98))
-                .px(px(28.))
-                .pt(px(14.))
-                .pb(px(18.))
+                .items_center()
+                .gap(px(8.))
+                .px(px(20.))
+                .pt(px(8.))
+                .pb(px(14.))
+                .when(self.is_scrolled_up(), |this| {
+                    this.child(
+                        Button::new("jump-to-latest-message")
+                            .ghost()
+                            .small()
+                            .size(px(34.))
+                            .rounded_full()
+                            .border_1()
+                            .border_color(cx.theme().border.opacity(0.72))
+                            .bg(crate::components::visual::surface(
+                                crate::components::visual::SurfaceLevel::Raised,
+                                cx,
+                            ))
+                            .icon(IconName::ArrowDown)
+                            .tooltip("Jump to latest")
+                            .accessibility_id("jump-to-latest-message")
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |conversation, cx| {
+                                    conversation.list_state.set_follow_mode(FollowMode::Tail);
+                                    conversation.list_state.scroll_to_end();
+                                    cx.notify();
+                                });
+                            }),
+                    )
+                })
                 .child(
                     div()
                         .w_full()
@@ -483,7 +490,9 @@ impl Render for ConversationView {
                 .with_sizing_behavior(ListSizingBehavior::Auto)
                 .flex_grow_1()
                 .min_h_0()
-                .w_full(),
+                .w_full()
+                .pt(px(48.))
+                .pb(px(26.)),
             )
             .child(self.render_thread_footer(cx))
             .when_some(self.attachment_preview_overlay(cx), |this, overlay| {

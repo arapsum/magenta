@@ -26,21 +26,33 @@ impl ConversationView {
         Some(
             v_flex()
                 .w_full()
-                .gap(px(10.))
-                .p(px(14.))
-                .rounded(cx.theme().radius_lg)
+                .overflow_hidden()
+                .rounded(px(14.))
                 .border_1()
-                .border_color(cx.theme().primary.opacity(0.34))
-                .bg(cx.theme().primary.opacity(0.045))
+                .border_color(cx.theme().border.opacity(0.68))
+                .bg(crate::components::visual::surface(
+                    crate::components::visual::SurfaceLevel::Raised,
+                    cx,
+                ))
                 .child(
                     h_flex()
+                        .p(px(13.))
                         .items_start()
                         .gap(px(9.))
                         .child(
-                            Icon::empty()
-                                .path("icons/agent-shield-check.svg")
-                                .small()
-                                .text_color(cx.theme().primary),
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .size(px(30.))
+                                .rounded(px(8.))
+                                .bg(cx.theme().accent.opacity(0.5))
+                                .child(
+                                    Icon::empty()
+                                        .path("icons/agent-shield-check.svg")
+                                        .small()
+                                        .text_color(cx.theme().muted_foreground),
+                                ),
                         )
                         .child(
                             v_flex()
@@ -51,13 +63,16 @@ impl ConversationView {
                                         .text_size(px(12.))
                                         .text_color(cx.theme().muted_foreground)
                                         .child(
-                                            "Review the isolated AgentFS changes before applying them to the project.",
+                                            "Review the workspace edits before applying them to the project.",
                                         ),
                                 ),
                         ),
                 )
                 .child(
                     h_flex()
+                        .p(px(10.))
+                        .border_t_1()
+                        .border_color(cx.theme().border.opacity(0.48))
                         .justify_end()
                         .gap(px(6.))
                         .child(
@@ -89,15 +104,6 @@ impl ConversationView {
 
     fn trace_is_active(message: &Message) -> bool {
         message.status == MessageStatus::Streaming
-            || message.assistant_trace.entries.iter().any(|entry| {
-                matches!(
-                    entry.status,
-                    AssistantTraceStatus::Streaming
-                        | AssistantTraceStatus::Requested
-                        | AssistantTraceStatus::Running
-                        | AssistantTraceStatus::AwaitingApproval
-                )
-            })
     }
 
     fn trace_is_final_answer_started(&self, message_id: MessageId) -> bool {
@@ -157,7 +163,7 @@ impl ConversationView {
         cx: &App,
         view: &Entity<Self>,
     ) -> AnyElement {
-        let mut rows = v_flex().w_full().gap_1().flex_col_reverse().py_2().pr_1();
+        let mut rows = v_flex().w_full().gap(px(2.)).flex_col_reverse().py(px(5.));
 
         for entry in trace_entries_for_timeline(message) {
             if entry.kind == AssistantTraceKind::ReasoningSummary {
@@ -218,12 +224,9 @@ impl ConversationView {
             let row = v_flex()
                 .w_full()
                 .flex_none()
-                .pl_3()
-                .border_l_1()
-                .border_color(trace_status_color(entry.status, cx).opacity(0.34))
                 .child(disclosure)
                 .when(open, |this| {
-                    this.child(div().w_full().pl_2().pr_2().pb_2().child(detail))
+                    this.child(div().w_full().pl(px(24.)).pr_2().pb_2().child(detail))
                 });
             rows = rows.child(row);
         }
@@ -237,6 +240,11 @@ impl ConversationView {
         cx: &App,
         view: &Entity<Self>,
     ) -> AnyElement {
+        let active = Self::trace_is_active(message);
+        if message.assistant_trace.entries.is_empty() && !active {
+            return div().into_any_element();
+        }
+
         let message_id = message.id;
         let rows = self.render_trace_rows(message_id, message, cx, view);
 
@@ -251,13 +259,9 @@ impl ConversationView {
         let trace_open = self.trace_is_open(message);
         let mut accordion = Accordion::new(("assistant-trace", message_id.0))
             .multiple(false)
-            .bordered(true)
+            .bordered(false)
             .small()
-            .border_color(cx.theme().border.opacity(0.72))
-            .bg(crate::components::visual::surface(
-                crate::components::visual::SurfaceLevel::Raised,
-                cx,
-            ))
+            .bg(cx.theme().transparent)
             .on_toggle_click(move |open_indices, _, cx| {
                 trace_view.update(cx, |view, cx| {
                     view.set_trace_disclosure_override(message_id, open_indices.contains(&0), cx);
@@ -266,14 +270,8 @@ impl ConversationView {
         accordion = accordion.item(|item| {
             item.open(trace_open)
                 .title(self.render_trace_header(message, cx, view))
-                .hover(|this| this.bg(cx.theme().accent.opacity(0.32)))
-                .child(
-                    div()
-                        .w_full()
-                        .border_t_1()
-                        .border_color(cx.theme().border.opacity(0.56))
-                        .child(trace_viewport),
-                )
+                .hover(|this| this.bg(cx.theme().accent.opacity(0.22)))
+                .child(div().w_full().pl(px(4.)).child(trace_viewport))
         });
 
         accordion.into_any_element()
@@ -286,18 +284,13 @@ impl ConversationView {
         let reasoning_active = active && !final_answer_started;
         let elapsed = self.trace_elapsed(message);
         let stop_view = view.clone();
-        let status = match message.status {
-            MessageStatus::Stopped => "Stopped".to_owned(),
-            MessageStatus::Failed => "Failed".to_owned(),
-            _ if reasoning_active => elapsed.map_or_else(
-                || "In progress".to_owned(),
-                |elapsed| format!("{} elapsed", format_elapsed(elapsed)),
-            ),
-            _ => elapsed.map_or_else(
-                || "Completed".to_owned(),
-                |elapsed| format!("Completed in {}", format_elapsed(elapsed)),
-            ),
-        };
+        let mode = self
+            .conversation
+            .as_ref()
+            .map_or(ConversationMode::Chat, |conversation| {
+                conversation.mode.clone()
+            });
+        let status = trace_header_label(message, reasoning_active, elapsed, &mode);
 
         let status_icon = render_trace_status_icon(message, reasoning_active, cx);
 
@@ -305,41 +298,21 @@ impl ConversationView {
             .flex_1()
             .min_w_0()
             .items_center()
-            .gap_2()
+            .gap(px(7.))
+            .child(status_icon)
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size_7()
-                    .rounded(cx.theme().radius)
-                    .bg(cx.theme().accent.opacity(0.64))
-                    .child(status_icon),
-            )
-            .child(
-                h_flex()
                     .min_w_0()
-                    .items_center()
-                    .gap(px(6.))
-                    .child(div().whitespace_nowrap().font_medium().child("Reasoning"))
-                    .child(
-                        div()
-                            .size(px(3.))
-                            .rounded_full()
-                            .bg(cx.theme().muted_foreground.opacity(0.5)),
-                    )
-                    .child(
-                        div()
-                            .whitespace_nowrap()
-                            .text_size(rems(0.6875))
-                            .font_normal()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(status),
-                    ),
+                    .flex_1()
+                    .text_size(rems(0.8125))
+                    .font_normal()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(status),
             )
             .into_any_element();
 
         let mut header = h_flex()
+            .debug_selector(|| "assistant-trace-header".into())
             .w_full()
             .min_w_0()
             .items_center()
@@ -369,11 +342,8 @@ impl ConversationView {
         h_flex()
             .w_full()
             .items_start()
-            .gap_2()
-            .pl_3()
-            .py_1p5()
-            .border_l_1()
-            .border_color(trace_status_color(entry.status, cx).opacity(0.34))
+            .gap(px(7.))
+            .py(px(4.))
             .child(render_trace_entry_indicator(entry, cx))
             .child(
                 div()
@@ -397,7 +367,8 @@ impl ConversationView {
                     .min_w_0()
                     .flex_1()
                     .text_size(rems(0.8125))
-                    .child(trace_entry_title(entry)),
+                    .text_color(cx.theme().muted_foreground)
+                    .child(trace_entry_activity_label(entry)),
             )
             .when(entry.status != AssistantTraceStatus::Completed, |this| {
                 this.child(
@@ -535,27 +506,128 @@ fn render_trace_status_icon(message: &Message, reasoning_active: bool, cx: &App)
             .xsmall()
             .color(cx.theme().primary)
             .into_any_element()
-    } else {
-        Icon::new(
-            if matches!(
-                message.status,
-                MessageStatus::Failed | MessageStatus::Stopped
-            ) {
-                IconName::CircleX
+    } else if matches!(
+        message.status,
+        MessageStatus::Failed | MessageStatus::Stopped
+    ) {
+        Icon::new(IconName::CircleX)
+            .xsmall()
+            .text_color(if message.status == MessageStatus::Failed {
+                cx.theme().danger
             } else {
-                IconName::CircleCheck
-            },
-        )
-        .xsmall()
-        .text_color(if message.status == MessageStatus::Failed {
-            cx.theme().danger
-        } else if message.status == MessageStatus::Stopped {
-            cx.theme().muted_foreground
-        } else {
-            cx.theme().success
-        })
-        .into_any_element()
+                cx.theme().muted_foreground
+            })
+            .into_any_element()
+    } else {
+        Icon::empty()
+            .path("icons/agent-wrench.svg")
+            .xsmall()
+            .text_color(cx.theme().muted_foreground)
+            .into_any_element()
     }
+}
+
+fn trace_header_label(
+    message: &Message,
+    active: bool,
+    elapsed: Option<Duration>,
+    mode: &ConversationMode,
+) -> String {
+    match message.status {
+        MessageStatus::Stopped => "Work stopped".to_owned(),
+        MessageStatus::Failed => "Work failed".to_owned(),
+        _ if active => trace_activity_summary(message).unwrap_or_else(|| {
+            elapsed.map_or_else(
+                || {
+                    if *mode == ConversationMode::Chat {
+                        "Thinking".to_owned()
+                    } else {
+                        "Working".to_owned()
+                    }
+                },
+                |elapsed| {
+                    if *mode == ConversationMode::Chat {
+                        format!("Thinking for {}", format_elapsed(elapsed))
+                    } else {
+                        format!("Working for {}", format_elapsed(elapsed))
+                    }
+                },
+            )
+        }),
+        _ => elapsed.map_or_else(
+            || {
+                trace_activity_summary(message).unwrap_or_else(|| {
+                    if *mode == ConversationMode::Chat {
+                        "Thought process".to_owned()
+                    } else {
+                        "Work details".to_owned()
+                    }
+                })
+            },
+            |elapsed| {
+                if *mode == ConversationMode::Chat {
+                    format!("Thought for {}", format_elapsed(elapsed))
+                } else {
+                    format!("Worked for {}", format_elapsed(elapsed))
+                }
+            },
+        ),
+    }
+}
+
+fn trace_activity_summary(message: &Message) -> Option<String> {
+    let mut loaded = false;
+    let mut read = false;
+    let mut ran = false;
+    let mut edited = false;
+    let mut viewed = false;
+    let mut delegated = false;
+    let mut used_other = false;
+
+    for entry in &message.assistant_trace.entries {
+        if entry.kind != AssistantTraceKind::Tool {
+            continue;
+        }
+        let name = entry.tool_name.as_deref().unwrap_or(&entry.title);
+        match name {
+            "load_skill" | "read_skill" | "tool_search" => loaded = true,
+            "read_file" | "list_files" | "search_files" | "find_files" => read = true,
+            "run_command" | "exec_command" | "shell" => ran = true,
+            "apply_patch" | "create_file" | "edit_file" | "write_file" => edited = true,
+            "view_image" | "read_image" => viewed = true,
+            "spawn_agent" | "create_agent" => delegated = true,
+            _ => used_other = true,
+        }
+    }
+
+    let mut activities = Vec::new();
+    if loaded {
+        activities.push("loaded tools");
+    }
+    if read {
+        activities.push("read files");
+    }
+    if ran {
+        activities.push("ran commands");
+    }
+    if edited {
+        activities.push("edited files");
+    }
+    if viewed {
+        activities.push("viewed images");
+    }
+    if delegated {
+        activities.push("created agents");
+    }
+    if activities.is_empty() && used_other {
+        activities.push("used tools");
+    }
+    activities.truncate(3);
+
+    let mut summary = activities.join(", ");
+    let first = summary.get_mut(0..1)?;
+    first.make_ascii_uppercase();
+    Some(summary)
 }
 
 fn trace_entries_for_timeline(message: &Message) -> Vec<AssistantTraceEntry> {
@@ -574,6 +646,26 @@ fn trace_entry_title(entry: &AssistantTraceEntry) -> String {
         humanize_tool_name(entry.tool_name.as_deref().unwrap_or(&entry.title))
     } else {
         entry.title.clone()
+    }
+}
+
+fn trace_entry_activity_label(entry: &AssistantTraceEntry) -> String {
+    if entry.kind == AssistantTraceKind::ReasoningSummary {
+        return trace_entry_title(entry);
+    }
+
+    match entry.tool_name.as_deref().unwrap_or(&entry.title) {
+        "load_skill" | "read_skill" => "Read skill".to_owned(),
+        "tool_search" => "Loaded tools".to_owned(),
+        "read_file" => "Read file".to_owned(),
+        "list_files" | "find_files" => "Listed files".to_owned(),
+        "search_files" => "Searched files".to_owned(),
+        "run_command" | "exec_command" | "shell" => "Ran command".to_owned(),
+        "apply_patch" | "edit_file" | "write_file" => "Edited a file".to_owned(),
+        "create_file" => "Created a file".to_owned(),
+        "view_image" | "read_image" => "Viewed an image".to_owned(),
+        "spawn_agent" | "create_agent" => "Created an agent".to_owned(),
+        _ => trace_entry_title(entry),
     }
 }
 
@@ -670,15 +762,13 @@ const fn trace_status_label(status: AssistantTraceStatus) -> &'static str {
 
 fn trace_status_color(status: AssistantTraceStatus, cx: &App) -> gpui_kit::Hsla {
     match status {
-        AssistantTraceStatus::Streaming
-        | AssistantTraceStatus::Running
-        | AssistantTraceStatus::AwaitingApproval => cx.theme().warning,
-        AssistantTraceStatus::Completed => cx.theme().success,
-        AssistantTraceStatus::Rejected | AssistantTraceStatus::Stopped => {
-            cx.theme().muted_foreground
-        }
+        AssistantTraceStatus::Streaming | AssistantTraceStatus::Running => cx.theme().primary,
+        AssistantTraceStatus::AwaitingApproval => cx.theme().warning,
+        AssistantTraceStatus::Completed
+        | AssistantTraceStatus::Rejected
+        | AssistantTraceStatus::Stopped
+        | AssistantTraceStatus::Requested => cx.theme().muted_foreground,
         AssistantTraceStatus::Failed => cx.theme().danger,
-        AssistantTraceStatus::Requested => cx.theme().muted_foreground,
     }
 }
 
