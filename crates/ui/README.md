@@ -27,8 +27,8 @@ the [desktop entry point](../desktop/src/main.rs) shows the complete setup.
 | Accounts and settings | [app/account](src/app/account/mod.rs), [app/settings_window](src/app/settings_window/mod.rs): login, model discovery, separate Settings window |
 | Search and projects | [app/finder](src/app/finder/mod.rs), [app/projects](src/app/projects/mod.rs): search/navigation and workspace selection |
 | Sidebar and landing | [components/sidebar](src/components/sidebar/mod.rs), [workspace.rs](src/components/workspace.rs): navigation, projects, account controls, start screen |
-| Composer | [components/prompt_input](src/components/prompt_input/mod.rs): input, attachments, modes, model/effort controls, inline errors |
-| Conversation | [components/conversation](src/components/conversation/mod.rs): paged rendering, streaming, approvals, activity and failures |
+| Composer | [components/prompt_input](src/components/prompt_input/mod.rs): compact Chat input, Work project rail, attachments, commands, model/effort controls, inline errors |
+| Conversation | [components/conversation](src/components/conversation/mod.rs): paged rendering, streaming, unified Thinking timeline, approvals and failures |
 | Workbench | [components/agent_workbench](src/components/agent_workbench/mod.rs): project tree, file tabs, read-only code/diff review |
 | Rich content | [markdown.rs](src/components/markdown.rs), [inline_code.rs](src/components/inline_code.rs), [math](src/components/math/mod.rs): text and RaTeX rendering |
 | Appearance/errors | [settings.rs](src/settings.rs), [theme.rs](src/theme.rs), [error.rs](src/error.rs): globals, theme mapping and safe error copy |
@@ -46,9 +46,13 @@ the [desktop entry point](../desktop/src/main.rs) shows the complete setup.
   from storage and must not be assembled from that visible slice. Terminal
   saves happen separately from streaming text updates; a failed save retains
   the message and blocks navigation until recovery.
-- Activity sections follow active commands/tool work unless the user explicitly
-  opens or closes them. Manual choices are session state. Approval controls
-  remain accessible even when completed activity is collapsed.
+- The Thinking timeline combines provider reasoning summaries with observable
+  tool work. It opens while work is active, keeps live command details bounded,
+  and collapses after the final answer unless the user explicitly overrides it.
+  Approval controls remain outside the timeline and stay accessible while
+  completed activity is collapsed.
+- Chat uses a compact composer for ordinary questions. Work expands the composer
+  with a project, Files, and Changes rail and keeps its draft separate from Chat.
 - Opening a file creates or focuses its tab. Each tab retains file and diff
   state; a new change for that path can update its preview. Closing the active
   tab selects a neighbor. Changing conversations clears the workbench session.

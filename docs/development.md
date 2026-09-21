@@ -104,8 +104,12 @@ Exercise the states affected by the change, including:
 - File tabs, duplicate filenames, explorer collapse, diff/file switching,
   hunk navigation, file-load failure, and conversation switches.
 - Streaming, Stop, failed response recovery, failed-save retry, and tool
-  approval/denial. Manually opened activity sections should respect the user's
-  choice while automatic sections collapse when inactive.
+  approval/denial. The unified Thinking timeline should show provider summaries
+  and observable tool steps while active, keep command details bounded, and
+  respect manual open/closed choices after completion.
+- Chat should retain its compact composer, while Work should show the project,
+  Files, and Changes rail beside the composer and the code workbench when a
+  project is open.
 - Keyboard navigation, visible focus, light/dark/system themes, and typography.
   Check long text and dense code, not only the empty screen.
 - The separate Settings window: open/close/minimize, reload valid and invalid

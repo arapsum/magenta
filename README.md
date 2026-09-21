@@ -4,7 +4,7 @@ Magenta is an experimental native AI chat and workspace client written in Rust
 with GPUI through [GPUI Kit](https://github.com/longbridge/gpui-kit). The workspace
 currently pins `gpui-kit` to `0.6.1`.
 
-![Magenta conversation with structured Markdown, code, and the Chat composer](assets/magenta-conversation.png)
+![Magenta Chat conversation with structured Markdown, code, and the compact composer](assets/magenta-conversation.png)
 
 It combines streaming conversations, local history, a Git-aware Changes panel,
 and an approval-controlled workspace agent in a native desktop window. Linux is
@@ -23,11 +23,12 @@ cargo run --locked
 ```
 
 Connect your ChatGPT account from the sidebar account menu or Settings. Choose a
-model and its supported effort level in the composer. **Chat** provides a compact
-conversation input; **Work** expands the composer with workspace, Files, and
-Changes controls while preserving a separate draft. For Work mode, add a project
-or choose a workspace directory first. Commands require Bubblewrap and a
-successful isolation probe; file tools remain available without it.
+model and its supported effort level in the composer. **Chat** keeps the input
+compact for explanations and everyday questions; **Work** expands it with a
+project rail, Files, and Changes controls while preserving a separate draft. For
+Work mode, add a project or choose a workspace directory first. Commands require
+Bubblewrap and a successful isolation probe; file tools remain available without
+it.
 
 ## Current features
 
@@ -53,9 +54,9 @@ successful isolation probe; file tools remain available without it.
 - Workspace listing, literal text search, bounded reads, file creation, and
   patch previews. Ordinary file edits can be approved individually or for the
   current run; protected reads and commands still need individual approval.
-- Sandboxed, non-interactive commands with streaming output, timeouts, and
-  explicit exit/failure states. Commands and tool sections open for active work
-  and otherwise collapse automatically unless manually overridden.
+- A unified Thinking timeline for provider reasoning summaries and observable
+  tool work, with compact activity labels, bounded scrolling, live command
+  details, and automatic collapse after the response reaches its final answer.
 - Persistent, categorized response failures with relevant recovery actions,
   preserved partial output, and copyable, allowlisted diagnostic details.
 - Provider-advertised `/plan`, `/review`, and `/explain` commands with a
@@ -69,10 +70,12 @@ The full-height sidebar remains separate from the main panel: **the titlebar
 must not extend over the sidebar**. This layout rule applies to future UI work
 as well as the current design.
 
-Agent mode pairs the conversation with a workspace-aware code workbench, keeping
-tool activity, approvals, files, and diffs in one focused view.
+Chat and Work share the same reading column and composer language. Chat uses a
+compact prompt surface, while Work pairs the conversation with a workspace-aware
+code workbench and keeps activity, approvals, files, and diffs in one focused
+view.
 
-![Magenta Agent mode beside the code workbench](assets/magenta-code-workbench.png)
+![Magenta Work conversation beside the code workbench](assets/magenta-code-workbench.png)
 
 ## Documentation and crate ownership
 
@@ -112,8 +115,9 @@ SQLite. Application code uses ports rather than concrete adapters.
    assistant placeholder before provider work starts.
 3. The UI consumes the returned stream, batches visual updates, and owns its
    cancellation lifetime. Agent runs additionally process tools and approvals.
-4. Completion, cancellation, or failure saves the terminal message. Agent
-   activity is recorded separately; individual text deltas do not write to SQLite.
+4. Completion, cancellation, or failure saves the terminal message. Reasoning
+   summaries and observable tool transitions are grouped into the assistant's
+   Thinking timeline; individual text deltas do not write to SQLite.
 
 Retry appends a new assistant attempt while retaining the failed response and
 excluding its partial text from request context. Regeneration replaces the
@@ -124,7 +128,7 @@ the composer for review; it does not resume or replay tools automatically.
 
 | Data | Location |
 | --- | --- |
-| Conversations, projects, agent activity | `<platform-local-data>/magenta/conversations.sqlite3` |
+| Conversations, projects, assistant traces | `<platform-local-data>/magenta/conversations.sqlite3` |
 | Managed image copies | `<platform-local-data>/magenta/attachments/` |
 | Daily rotating logs | `<platform-local-data>/magenta/logs/` |
 | User preferences | `<platform-config>/magenta/settings.toml` |
@@ -271,11 +275,13 @@ documentation builds, and the manual review checklist.
 ## Current boundaries
 
 Additional providers, non-image attachments, remote image URLs, clipboard image
-capture, and rich reasoning/citation events are not implemented. The workbench
-does not provide direct editing/saving, branch operations or comparison, or
-side-by-side diffs. Repository operations are limited to status, diffs,
-staging/unstaging, and commits. Agent diff state is session-local, and tab
-sessions are not restored after switching conversations or restarting.
+capture, raw/private reasoning, and rich citation events are not implemented.
+The Thinking timeline shows provider-authored reasoning summaries and observable
+execution steps only; it never renders encrypted or private reasoning content.
+The workbench does not provide direct editing/saving, branch operations or
+comparison, or side-by-side diffs. Repository operations are limited to status,
+diffs, staging/unstaging, and commits. Agent diff state is session-local, and
+tab sessions are not restored after switching conversations or restarting.
 
 Context selection uses conservative estimates, not an exact provider tokenizer
 or conversation summarization. Budgeting is applied when preparing a turn or
