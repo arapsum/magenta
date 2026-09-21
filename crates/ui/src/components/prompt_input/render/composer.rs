@@ -3,9 +3,9 @@ use super::*;
 impl PromptComposer {
     pub(super) fn render_input_content(&self, cx: &Context<'_, Self>) -> AnyElement {
         let view = cx.entity();
-        let command_palette_open = self.command_palette_state.is_open();
 
         v_flex()
+            .debug_selector(|| "prompt-input-content".into())
             .flex_1()
             .min_h_0()
             .gap(px(7.))
@@ -54,31 +54,24 @@ impl PromptComposer {
             .when(self.selected_command.is_some(), |this| {
                 this.child(h_flex().w_full().child(self.command_chip(&view, cx)))
             })
-            .when_some(self.command_palette_element(&view, cx), |this, palette| {
-                this.child(palette)
+            .when(!self.attachments.is_empty(), |this| {
+                this.child(self.attachment_strip(cx))
             })
-            .when(
-                !command_palette_open && !self.attachments.is_empty(),
-                |this| this.child(self.attachment_strip(cx)),
-            )
-            .when(
-                !command_palette_open && !self.preview_source.is_empty(),
-                |this| this.child(self.code_preview(cx)),
-            )
-            .when(!command_palette_open, |this| {
-                this.child(
-                    Textarea::new(&self.input)
-                        .appearance(false)
-                        .bordered(false)
-                        .aria_label("Chat message composer")
-                        .w_full()
-                        .flex_1()
-                        .min_h(px(30.))
-                        .p_0()
-                        .text_size(px(15.))
-                        .line_height(px(22.)),
-                )
+            .when(!self.preview_source.is_empty(), |this| {
+                this.child(self.code_preview(cx))
             })
+            .child(
+                Textarea::new(&self.input)
+                    .appearance(false)
+                    .bordered(false)
+                    .aria_label("Chat message composer")
+                    .w_full()
+                    .flex_1()
+                    .min_h(px(30.))
+                    .p_0()
+                    .text_size(px(15.))
+                    .line_height(px(22.)),
+            )
             .into_any_element()
     }
 
@@ -88,7 +81,7 @@ impl PromptComposer {
 
         div()
             .debug_selector(|| "prompt-mode-selector".into())
-            .rounded(px(9.))
+            .rounded_full()
             .border_1()
             .border_color(cx.theme().foreground.opacity(0.07))
             .bg(super::super::super::visual::surface(
@@ -103,15 +96,15 @@ impl PromptComposer {
                     .child(
                         Toggle::new("prompt-mode-chat")
                             .label("Chat")
-                            .w(px(58.))
-                            .h(px(26.))
+                            .w(px(60.))
+                            .h(px(28.))
                             .checked(mode == ConversationMode::Chat),
                     )
                     .child(
                         Toggle::new("prompt-mode-work")
                             .label("Work")
-                            .w(px(58.))
-                            .h(px(26.))
+                            .w(px(60.))
+                            .h(px(28.))
                             .checked(mode == ConversationMode::Agent)
                             .disabled(!agent_available),
                     )
@@ -144,10 +137,7 @@ impl PromptComposer {
             .as_ref()
             .and_then(|path| path.file_name())
             .and_then(|name| name.to_str())
-            .map_or_else(
-                || "Choose workspace".to_owned(),
-                |name| format!("Workspace · {name}"),
-            );
+            .map_or_else(|| "Choose project".to_owned(), ToOwned::to_owned);
         let button = Button::new("prompt-workspace")
             .ghost()
             .compact()
@@ -155,22 +145,19 @@ impl PromptComposer {
             .px(px(8.))
             .rounded(px(8.))
             .border_1()
-            .border_color(cx.theme().foreground.opacity(0.07))
-            .bg(cx.theme().accent.opacity(0.34))
+            .border_color(cx.theme().transparent)
+            .bg(cx.theme().transparent)
+            .icon(IconName::FolderOpen)
             .label(label)
             .tooltip(if self.agent_capability.commands() {
-                "Choose the workspace this agent can access"
+                "Choose the project this agent can access"
             } else {
-                "Choose a workspace. Sandboxed commands are unavailable; file tools still work"
+                "Choose a project. Sandboxed commands are unavailable; file tools still work"
             })
             .on_click(move |_, window, cx| {
                 view.update(cx, |composer, cx| composer.choose_workspace(window, cx));
             });
-        button
-            .when(self.workspace_root.is_none(), |button| {
-                button.text_color(cx.theme().warning)
-            })
-            .into_any_element()
+        button.into_any_element()
     }
 
     fn attachment_strip(&self, cx: &Context<'_, Self>) -> impl IntoElement {
@@ -228,27 +215,5 @@ impl PromptComposer {
                             }),
                     )
             }))
-    }
-
-    pub(crate) fn attachment_button(cx: &Context<'_, Self>) -> Button {
-        let view = cx.entity();
-
-        Button::new("prompt-add-image")
-            .ghost()
-            .accessibility_id("prompt-add-image")
-            .tooltip("Add photos")
-            .size(px(30.))
-            .p_0()
-            .rounded_full()
-            .border_1()
-            .border_color(cx.theme().primary.opacity(0.35))
-            .bg(cx.theme().accent.opacity(0.48))
-            .text_color(cx.theme().primary)
-            .icon(IconName::Plus)
-            .on_click(move |_, window, cx| {
-                view.update(cx, |composer, cx| {
-                    composer.choose_attachments(window, cx);
-                });
-            })
     }
 }

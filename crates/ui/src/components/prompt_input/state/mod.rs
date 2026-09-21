@@ -122,6 +122,45 @@ impl ModelCatalogState {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) enum ComposerThreadState {
+    #[default]
+    New,
+    Active,
+}
+
+impl ComposerThreadState {
+    pub(super) const fn is_active(self) -> bool {
+        matches!(self, Self::Active)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) enum ComposerGenerationState {
+    #[default]
+    Idle,
+    Generating,
+}
+
+impl ComposerGenerationState {
+    pub(super) const fn is_generating(self) -> bool {
+        matches!(self, Self::Generating)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) enum ComposerReadiness {
+    #[default]
+    NotReady,
+    Ready,
+}
+
+impl ComposerReadiness {
+    pub(super) const fn is_ready(self) -> bool {
+        matches!(self, Self::Ready)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct ModeGenerationState {
     pub(super) model: Option<ModelDescriptor>,
@@ -169,11 +208,12 @@ pub struct PromptComposer {
     pub(super) generation_settings: GenerationSettings,
     pub(super) mode: ConversationMode,
     input_mode: ConversationMode,
+    pub(super) thread_state: ComposerThreadState,
     pub(super) workspace_root: Option<PathBuf>,
     pub(super) agent_capability: AgentCapability,
-    pub(super) generating: bool,
-    storage_ready: bool,
-    submission_ready: bool,
+    pub(super) generation_status: ComposerGenerationState,
+    storage_status: ComposerReadiness,
+    submission_status: ComposerReadiness,
     pub(super) attachments: Vec<ReferenceImage>,
     chat_draft: ModeDraft,
     work_draft: ModeDraft,

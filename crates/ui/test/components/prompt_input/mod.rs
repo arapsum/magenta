@@ -351,6 +351,101 @@ fn chat_and_work_segments_switch_in_both_directions(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn chat_add_menu_uses_the_full_composer_surface(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
+
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    let trigger = visual
+        .debug_bounds("prompt-add-menu-trigger")
+        .expect("the add menu trigger should be visible");
+    visual.simulate_click(trigger.center(), gpui_kit::Modifiers::default());
+    visual.run_until_parked();
+
+    let surface = visual
+        .debug_bounds("prompt-add-menu-surface")
+        .expect("chat mode should open the rich add menu");
+    assert!(surface.size.width >= gpui_kit::px(300.));
+}
+
+#[gpui_kit::test]
+fn active_chat_thread_uses_the_reading_column_width(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(960.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
+
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    let new_chat_width = visual
+        .debug_bounds("prompt-composer-surface")
+        .expect("the new-chat composer should be visible")
+        .size
+        .width;
+
+    window
+        .update(cx, |composer, _, cx| composer.set_thread_active(true, cx))
+        .expect("the composer test window should remain open");
+    visual.run_until_parked();
+    let thread_width = visual
+        .debug_bounds("prompt-composer-surface")
+        .expect("the thread composer should be visible")
+        .size
+        .width;
+
+    assert_eq!(new_chat_width, gpui_kit::px(660.));
+    assert_eq!(thread_width, gpui_kit::px(736.));
+}
+
+#[gpui_kit::test]
+fn chat_drafts_move_generation_controls_below_the_text_area(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(
+        size(gpui_kit::px(720.), gpui_kit::px(420.)),
+        PromptComposer::new,
+    );
+
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    let compact_height = visual
+        .debug_bounds("prompt-composer-surface")
+        .expect("the compact composer should be visible")
+        .size
+        .height;
+
+    window
+        .update(cx, |composer, window, cx| {
+            composer.input.update(cx, |input, cx| {
+                input.set_value(
+                    "How does package management work in C programming language?",
+                    window,
+                    cx,
+                );
+            });
+        })
+        .expect("the composer test window should remain open");
+    visual.run_until_parked();
+
+    let expanded = visual
+        .debug_bounds("prompt-composer-surface")
+        .expect("the expanded composer should be visible");
+    let input = visual
+        .debug_bounds("prompt-input-content")
+        .expect("the prompt input should be visible");
+    let selector = visual
+        .debug_bounds("prompt-model-selector")
+        .expect("the model selector should be visible");
+
+    assert!(expanded.size.height > compact_height);
+    assert!(selector.center().y > input.center().y);
+}
+
+#[gpui_kit::test]
 fn composer_requires_content_model_and_effort(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let window = cx.open_window(

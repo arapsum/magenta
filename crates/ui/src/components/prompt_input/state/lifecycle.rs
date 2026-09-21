@@ -42,11 +42,12 @@ impl PromptComposer {
             generation_settings: GenerationSettings::default(),
             mode: ConversationMode::Chat,
             input_mode: ConversationMode::Chat,
+            thread_state: ComposerThreadState::New,
             workspace_root: None,
             agent_capability: AgentCapability::Unavailable,
-            generating: false,
-            storage_ready: true,
-            submission_ready: true,
+            generation_status: ComposerGenerationState::Idle,
+            storage_status: ComposerReadiness::Ready,
+            submission_status: ComposerReadiness::Ready,
             attachments: Vec::new(),
             chat_draft: ModeDraft::default(),
             work_draft: ModeDraft::default(),
@@ -78,10 +79,35 @@ impl PromptComposer {
     }
 
     pub fn set_generating(&mut self, generating: bool, cx: &mut Context<'_, Self>) {
-        if self.generating != generating {
-            self.generating = generating;
+        let next = if generating {
+            ComposerGenerationState::Generating
+        } else {
+            ComposerGenerationState::Idle
+        };
+        if self.generation_status != next {
+            self.generation_status = next;
             cx.notify();
         }
+    }
+
+    pub(crate) fn set_thread_active(&mut self, thread_active: bool, cx: &mut Context<'_, Self>) {
+        let next = if thread_active {
+            ComposerThreadState::Active
+        } else {
+            ComposerThreadState::New
+        };
+        if self.thread_state != next {
+            self.thread_state = next;
+            cx.notify();
+        }
+    }
+
+    pub(crate) const fn is_generating(&self) -> bool {
+        self.generation_status.is_generating()
+    }
+
+    pub(crate) const fn thread_is_active(&self) -> bool {
+        self.thread_state.is_active()
     }
 
     pub(crate) fn set_command_catalog(
@@ -129,13 +155,29 @@ impl PromptComposer {
     }
 
     pub(crate) fn set_storage_ready(&mut self, ready: bool, cx: &mut Context<'_, Self>) {
-        self.storage_ready = ready;
+        self.storage_status = if ready {
+            ComposerReadiness::Ready
+        } else {
+            ComposerReadiness::NotReady
+        };
         cx.notify();
     }
 
     pub(crate) fn set_submission_ready(&mut self, ready: bool, cx: &mut Context<'_, Self>) {
-        self.submission_ready = ready;
+        self.submission_status = if ready {
+            ComposerReadiness::Ready
+        } else {
+            ComposerReadiness::NotReady
+        };
         cx.notify();
+    }
+
+    pub(crate) const fn storage_is_ready(&self) -> bool {
+        self.storage_status.is_ready()
+    }
+
+    pub(crate) const fn submission_is_ready(&self) -> bool {
+        self.submission_status.is_ready()
     }
 
     pub(crate) fn set_account_error(

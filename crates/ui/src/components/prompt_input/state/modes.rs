@@ -1,6 +1,10 @@
 use super::*;
 
 impl PromptComposer {
+    pub(crate) const fn mode(&self) -> &ConversationMode {
+        &self.mode
+    }
+
     fn has_content(&self, cx: &App) -> bool {
         !self.input.read(cx).value().trim().is_empty() || !self.attachments.is_empty()
     }
@@ -16,8 +20,8 @@ impl PromptComposer {
         let content_ready = self.retry_target.is_some() || self.has_content(cx);
         let command_ready = self.command_submission_ready(cx);
 
-        self.storage_ready
-            && self.submission_ready
+        self.storage_is_ready()
+            && self.submission_is_ready()
             && content_ready
             && command_ready
             && self.model.is_some()
@@ -180,7 +184,7 @@ impl PromptComposer {
     }
 
     pub(crate) fn submit(&self, cx: &mut Context<'_, Self>) {
-        if !self.generating
+        if !self.is_generating()
             && let Some(request) = self.request(cx)
         {
             cx.emit(PromptComposerEvent::Submit(request));
@@ -188,7 +192,7 @@ impl PromptComposer {
     }
 
     pub(crate) fn cancel(&self, cx: &mut Context<'_, Self>) {
-        if self.generating {
+        if self.is_generating() {
             cx.emit(PromptComposerEvent::Cancel);
         }
     }

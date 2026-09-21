@@ -221,6 +221,23 @@ impl PromptComposer {
         cx.notify();
     }
 
+    pub(crate) fn select_command_by_id(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(command) = self
+            .command_descriptors()
+            .into_iter()
+            .find(|command| command.id.as_str() == id && command.supports_mode(&self.mode))
+        else {
+            return;
+        };
+
+        self.select_command(command, String::new(), window, cx);
+    }
+
     pub(crate) fn remove_selected_command(
         &mut self,
         window: &mut Window,

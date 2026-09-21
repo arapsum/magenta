@@ -35,11 +35,8 @@ impl PromptComposer {
             .gap(px(7.))
             .rounded(px(9.))
             .border_1()
-            .border_color(cx.theme().foreground.opacity(0.08))
-            .bg(super::super::super::visual::surface(
-                super::super::super::visual::SurfaceLevel::Raised,
-                cx,
-            ))
+            .border_color(cx.theme().transparent)
+            .bg(cx.theme().transparent)
             .child(selected_provider)
             .child(
                 div()
