@@ -140,10 +140,6 @@ impl SidebarView {
             .collect()
     }
 
-    pub(crate) fn recent_conversations(&self) -> Vec<ConversationSummary> {
-        self.conversations.iter().take(3).cloned().collect()
-    }
-
     pub(crate) fn title_for(&self, id: ConversationId) -> Option<String> {
         self.conversations
             .iter()
@@ -165,10 +161,6 @@ impl SidebarView {
             conversation.title = title;
             cx.notify();
         }
-    }
-
-    pub(crate) const fn history_available(&self) -> bool {
-        self.history_status.is_none() && !self.conversations.is_empty()
     }
 
     fn new_chat(cx: &mut Context<'_, Self>) {
@@ -227,26 +219,11 @@ impl SidebarView {
         self.active_project.clone()
     }
 
-    pub(crate) fn active_project_details(&self) -> Option<magenta_core::Project> {
-        let root = self.active_project.as_ref()?;
-        self.projects
-            .iter()
-            .find(|project| &project.root == root)
-            .cloned()
-    }
-
     pub(crate) fn project_for_root(&self, root: &Path) -> Option<magenta_core::Project> {
         self.projects
             .iter()
             .find(|project| project.root == root)
             .cloned()
-    }
-
-    pub(crate) fn project_conversations_for(&self, root: &Path) -> Vec<ConversationSummary> {
-        self.project_conversations(root)
-            .into_iter()
-            .cloned()
-            .collect()
     }
 
     fn start_rename(

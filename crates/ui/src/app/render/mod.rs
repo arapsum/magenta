@@ -53,13 +53,13 @@ impl MainView {
         h_resizable("conversation-workbench")
             .child(
                 resizable_panel()
-                    .size(px(680.))
-                    .size_range(px(600.)..gpui_kit::Pixels::MAX)
+                    .size(px(560.))
+                    .size_range(px(360.)..px(840.))
                     .child(conversation),
             )
             .child(
                 resizable_panel()
-                    .size(px(840.))
+                    .size(px(960.))
                     .size_range(px(480.)..gpui_kit::Pixels::MAX)
                     .child(workbench.clone()),
             )
@@ -252,7 +252,7 @@ impl Render for MainView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let _ = &self.subscriptions;
         let narrow = window.viewport_size().width < px(696.);
-        let compact_workbench = window.viewport_size().width < px(1400.);
+        let compact_workbench = window.viewport_size().width < px(920.);
         let content = self.conversation_content(compact_workbench, cx);
         let sidebar_collapsed = self.sidebar.read(cx).is_collapsed();
         let show_sidebar = !narrow && !sidebar_collapsed;

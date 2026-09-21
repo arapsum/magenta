@@ -82,8 +82,20 @@ impl SidebarView {
 
         for project in &self.projects {
             section = section.child(self.project_row(project, view, cx));
-            if self.expanded_projects.contains(&project.root) {
-                for conversation in self.project_conversations(&project.root) {
+            let conversations = self.project_conversations(&project.root);
+            if conversations.is_empty() {
+                section = section.child(
+                    div()
+                        .h(px(24.))
+                        .pl(px(40.))
+                        .flex()
+                        .items_center()
+                        .text_size(px(12.))
+                        .text_color(cx.theme().muted_foreground.opacity(0.62))
+                        .child("No chats"),
+                );
+            } else if self.expanded_projects.contains(&project.root) {
+                for conversation in conversations {
                     section = section.child(div().pl(px(24.)).child(self.conversation_row(
                         conversation,
                         view.clone(),
