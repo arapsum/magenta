@@ -17,9 +17,9 @@ It constructs and injects:
 | --- | --- |
 | `OpenAiProvider` | Shared chat, agent, authentication and model-catalog ports |
 | `SqliteConversationStore` | Conversation history and project registration |
-| `TomlSettingsStore` | Persistent appearance/typography preferences |
+| `TomlSettingsStore` | Persistent appearance, typography, generation, and onboarding preferences |
 | `LocalWorkspace` | Workspace tools and read-only project browsing |
-| Optional `BubblewrapCommandRunner` | Commands, when discovery and isolation probing succeed |
+| `BubblewrapCommandRunner` readiness probe | Reports local sandbox availability; commands remain disabled in the current desktop build |
 | `SendMessage`, `RegenerateMessage`, `RunWorkspaceAgent`, `ConversationHistory`, `ProjectCatalog` | Workflows passed into the UI |
 
 The startup paths are selected here using platform data/config directories.

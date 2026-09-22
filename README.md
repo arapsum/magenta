@@ -22,13 +22,14 @@ Then run from the repository root:
 cargo run --locked
 ```
 
-Connect your ChatGPT account from the sidebar account menu or Settings. Choose a
-model and its supported effort level in the composer. **Chat** keeps the input
+The first empty conversation includes a compact setup panel for connecting your
+ChatGPT account and confirming a usable model. The same live readiness details
+remain available under **Settings → Setup & readiness**. **Chat** keeps the input
 compact for explanations and everyday questions; **Work** expands it with a
 project rail, Files, and Changes controls while preserving a separate draft. For
-Work mode, add a project or choose a workspace directory first. Commands require
-Bubblewrap and a successful isolation probe; file tools remain available without
-it.
+Work mode, add a project or choose a workspace directory first. The current
+desktop build reports Bubblewrap readiness but keeps commands disabled until the
+reviewed AgentFS overlay can be mounted safely; file tools remain available.
 
 ## Current features
 
@@ -242,8 +243,9 @@ patches only. It expires when the run ends and does not authorize protected
 reads or commands. Every file mutation still goes through a preview and commit
 check, including checking that an existing file has not changed since preview.
 
-On Linux, commands run through Bubblewrap with a writable workspace, read-only
-system/toolchain mounts, an isolated temporary home, no network, and no stdin.
+When command execution is enabled, Linux commands run through Bubblewrap with a
+writable workspace, read-only system/toolchain mounts, an isolated temporary
+home, no network, and no stdin.
 The host home is not mounted wholesale; protected workspace paths and Git
 metadata are masked. Approval is for the displayed command and its arguments,
 not a per-file authorization for everything that command might change.
