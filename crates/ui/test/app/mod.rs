@@ -18,13 +18,16 @@ use magenta_application::{ConversationHistory, ProjectCatalog, RegenerateMessage
 use magenta_core::*;
 
 use super::{
-    MainServices, MainView, OpenConversationFinder, PanelState, StorageState, history::Operation,
+    BubblewrapCapability, MainServices, MainView, OpenConversationFinder, PanelState, StorageState,
+    WorkRuntimeReadiness, history::Operation,
 };
 
 #[derive(Default)]
 struct TestPorts {
     fail_initialize: AtomicBool,
     fail_save: AtomicBool,
+    fail_models: AtomicBool,
+    fail_settings_save: AtomicBool,
     summaries: Mutex<Vec<ConversationSummary>>,
     search_results: Mutex<Option<Vec<ConversationSearchResult>>>,
     loads: Mutex<VecDeque<StorageFuture<ConversationPage>>>,
@@ -32,6 +35,10 @@ struct TestPorts {
     saves: Mutex<Vec<Message>>,
     deleted: Mutex<Vec<ConversationId>>,
     requests: AtomicUsize,
+    account: Mutex<Option<ProviderAccount>>,
+    models: Mutex<Vec<ModelDescriptor>>,
+    settings: Mutex<AppSettings>,
+    saved_settings: Mutex<Vec<AppSettings>>,
 }
 
 fn failure<T: Send + 'static>() -> StorageFuture<T> {
@@ -156,13 +163,24 @@ impl ChatProvider for TestPorts {
 
 impl ModelCatalog for TestPorts {
     fn models(&self) -> ModelCatalogFuture {
-        Box::pin(async { Ok(Vec::new()) })
+        if self.fail_models.load(Ordering::SeqCst) {
+            return Box::pin(async {
+                Err(ProviderError::with_kind(
+                    ProviderId::new("openai"),
+                    ProviderErrorKind::ServiceUnavailable,
+                    std::io::Error::other("model catalog test failure"),
+                ))
+            });
+        }
+        let models = self.models.lock().clone();
+        Box::pin(async move { Ok(models) })
     }
 }
 
 impl ProviderAuthenticator for TestPorts {
     fn restore(&self) -> AuthenticationFuture<Option<ProviderAccount>> {
-        Box::pin(async { Ok(None) })
+        let account = self.account.lock().clone();
+        Box::pin(async move { Ok(account) })
     }
     fn begin_login(&self) -> AuthenticationFuture<AuthorizationSession> {
         Box::pin(std::future::pending())
@@ -174,10 +192,20 @@ impl ProviderAuthenticator for TestPorts {
 
 impl SettingsStore for TestPorts {
     fn load(&self) -> SettingsFuture<AppSettings> {
-        Box::pin(async { Ok(AppSettings::default()) })
+        let settings = self.settings.lock().clone();
+        Box::pin(async move { Ok(settings) })
     }
 
-    fn save(&self, _: AppSettings) -> SettingsFuture<()> {
+    fn save(&self, settings: AppSettings) -> SettingsFuture<()> {
+        if self.fail_settings_save.load(Ordering::SeqCst) {
+            return Box::pin(async {
+                Err(SettingsError::new(std::io::Error::other(
+                    "settings test failure",
+                )))
+            });
+        }
+        *self.settings.lock() = settings.clone();
+        self.saved_settings.lock().push(settings);
         Box::pin(async { Ok(()) })
     }
 
@@ -313,6 +341,19 @@ fn summary(id: u64, title: &str) -> ConversationSummary {
     }
 }
 
+fn model(id: &str) -> ModelDescriptor {
+    ModelDescriptor {
+        provider: ProviderId::new("openai"),
+        id: ModelId::new(id),
+        display_name: id.to_owned(),
+        description: None,
+        priority: 1,
+        default_effort: EffortLevel::Medium,
+        supported_efforts: vec![EffortLevel::Medium, EffortLevel::High],
+        limits: GenerationLimits::default(),
+    }
+}
+
 type TestWindow = (WindowHandle<Root>, Entity<MainView>);
 
 fn setup(cx: &mut TestAppContext, ports: Arc<TestPorts>) -> TestWindow {
@@ -349,6 +390,7 @@ fn setup_with_projects_at(
                     agent: None,
                     projects: Some(project_catalog),
                     repository: Some(ports.clone()),
+                    work_runtime: WorkRuntimeReadiness::new(BubblewrapCapability::Unavailable),
                 },
                 window,
                 cx,
@@ -386,6 +428,7 @@ fn setup_at(
                     agent: None,
                     projects: None,
                     repository: None,
+                    work_runtime: WorkRuntimeReadiness::new(BubblewrapCapability::Unavailable),
                 },
                 window,
                 cx,

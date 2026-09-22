@@ -1,6 +1,142 @@
 use super::*;
 
 #[gpui_kit::test]
+fn first_run_setup_is_visible_until_acknowledged(cx: &mut TestAppContext) {
+    let ports = Arc::new(TestPorts::default());
+    let (window, view) = setup(cx, ports.clone());
+    cx.run_until_parked();
+
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("setup-readiness-panel").is_some());
+
+    window
+        .update(cx, |_, window, cx| {
+            view.update(cx, |main, cx| {
+                main.acknowledge_setup(false, window, cx);
+            });
+        })
+        .unwrap();
+    cx.run_until_parked();
+    visual.run_until_parked();
+
+    assert!(visual.debug_bounds("setup-readiness-panel").is_none());
+    assert!(
+        ports
+            .saved_settings
+            .lock()
+            .last()
+            .is_some_and(|settings| settings.onboarding.is_setup_acknowledged())
+    );
+}
+
+#[gpui_kit::test]
+fn connected_account_and_effective_model_make_chat_ready(cx: &mut TestAppContext) {
+    let ports = Arc::new(TestPorts::default());
+    *ports.account.lock() = Some(ProviderAccount {
+        provider: ProviderId::new("openai"),
+        name: Some("Test User".to_owned()),
+        email: Some("test@example.com".to_owned()),
+        plan: None,
+    });
+    ports.models.lock().push(model("gpt-test"));
+    let (_, view) = setup(cx, ports);
+    cx.run_until_parked();
+
+    view.read_with(cx, |main, cx| {
+        let readiness = main.setup_readiness(cx);
+        assert!(readiness.chat_ready);
+        assert_eq!(
+            readiness.primary_action,
+            crate::app::setup::SetupPrimaryAction::Finish
+        );
+        assert_eq!(
+            readiness.commands.state,
+            crate::app::setup::SetupItemState::Unavailable
+        );
+        assert_eq!(
+            readiness.bubblewrap.state,
+            crate::app::setup::SetupItemState::Unavailable
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn model_catalog_failure_does_not_sign_out_the_connected_account(cx: &mut TestAppContext) {
+    let ports = Arc::new(TestPorts::default());
+    *ports.account.lock() = Some(ProviderAccount {
+        provider: ProviderId::new("openai"),
+        name: Some("Test User".to_owned()),
+        email: Some("test@example.com".to_owned()),
+        plan: None,
+    });
+    ports.fail_models.store(true, Ordering::SeqCst);
+    let (_, view) = setup(cx, ports);
+    cx.run_until_parked();
+
+    view.read_with(cx, |main, cx| {
+        assert!(matches!(
+            main.account_state,
+            super::super::AccountState::Connected(_)
+        ));
+        assert!(matches!(
+            main.model_catalog_state,
+            super::super::ModelCatalogState::Failed(_)
+        ));
+        let readiness = main.setup_readiness(cx);
+        assert_eq!(
+            readiness.primary_action,
+            crate::app::setup::SetupPrimaryAction::ReloadModels
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn acknowledged_setup_stays_out_of_the_new_chat_surface(cx: &mut TestAppContext) {
+    let ports = Arc::new(TestPorts::default());
+    ports
+        .settings
+        .lock()
+        .onboarding
+        .set_setup_acknowledged(true);
+    let (window, _) = setup(cx, ports);
+    cx.run_until_parked();
+
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("setup-readiness-panel").is_none());
+}
+
+#[gpui_kit::test]
+fn failed_acknowledgement_keeps_setup_visible(cx: &mut TestAppContext) {
+    let ports = Arc::new(TestPorts::default());
+    ports.fail_settings_save.store(true, Ordering::SeqCst);
+    let (window, view) = setup(cx, ports);
+    cx.run_until_parked();
+
+    window
+        .update(cx, |_, window, cx| {
+            view.update(cx, |main, cx| {
+                main.acknowledge_setup(false, window, cx);
+            });
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    view.read_with(cx, |main, cx| {
+        let readiness = main.setup_readiness(cx);
+        assert!(!readiness.acknowledged);
+        assert_eq!(
+            readiness.error.map(|error| error.code),
+            Some("MAG-SETUP-SAVE")
+        );
+    });
+    let mut visual = gpui_kit::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("setup-readiness-panel").is_some());
+}
+
+#[gpui_kit::test]
 fn new_chat_layout_keeps_primary_content_visible(cx: &mut TestAppContext) {
     let ports = Arc::new(TestPorts::default());
     ports
