@@ -8,8 +8,8 @@ use std::{
 
 use magenta_core::{
     AppSettings, AppearanceMode, EffortLevel, FontChoice, GenerationPreference, GenerationSettings,
-    MathFontStyle, SETTINGS_VERSION, SettingsError, SettingsFuture, SettingsStore,
-    TypographySettings,
+    MathFontStyle, OnboardingSettings, SETTINGS_VERSION, SettingsError, SettingsFuture,
+    SettingsStore, TypographySettings,
 };
 use parking_lot::Mutex;
 use toml_edit::{DocumentMut, Item, Table, TableLike, value};
@@ -136,10 +136,17 @@ fn read_settings(document: &DocumentMut) -> AppSettings {
             inline_math_size: size_at(document, "inline_math_size", typography.inline_math_size),
             display_math_size: size_at(document, "display_math_size", typography.display_math_size),
         },
-        generation: if version >= SETTINGS_VERSION {
+        generation: if version >= 2 {
             read_generation_settings(document)
         } else {
             GenerationSettings::default()
+        },
+        onboarding: if version >= 3 {
+            OnboardingSettings::new(
+                bool_at(document, &["onboarding", "setup_acknowledged"]).unwrap_or(false),
+            )
+        } else {
+            OnboardingSettings::default()
         },
     }
 }
@@ -163,6 +170,8 @@ fn write_settings(document: &mut DocumentMut, settings: &AppSettings) {
         value(i64::from(settings.typography.display_math_size));
     write_generation(document, "chat", settings.generation.chat.as_ref());
     write_generation(document, "work", settings.generation.work.as_ref());
+    document["onboarding"]["setup_acknowledged"] =
+        value(settings.onboarding.is_setup_acknowledged());
 }
 
 fn read_generation_settings(document: &DocumentMut) -> GenerationSettings {
@@ -374,6 +383,14 @@ fn integer_at(document: &DocumentMut, path: &[&str]) -> Option<i64> {
         item = item.get(segment)?;
     }
     item.as_integer()
+}
+
+fn bool_at(document: &DocumentMut, path: &[&str]) -> Option<bool> {
+    let mut item = document.as_item();
+    for segment in path {
+        item = item.get(segment)?;
+    }
+    item.as_bool()
 }
 
 fn size_at(document: &DocumentMut, key: &str, default: u16) -> u16 {

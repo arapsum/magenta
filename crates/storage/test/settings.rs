@@ -49,8 +49,42 @@ fn version_one_ignores_generation_tables_until_an_explicit_save() {
 
     TomlSettingsStore::save_sync(&path, &loaded).unwrap();
     let saved = fs::read_to_string(path).unwrap();
-    assert!(saved.contains("version = 2"));
+    assert!(saved.contains("version = 3"));
     assert!(!saved.contains("model = \"legacy\""));
+}
+
+#[test]
+fn version_two_preserves_generation_and_requires_setup_acknowledgement() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("settings.toml");
+    fs::write(
+        &path,
+        "version = 2\n\n[generation.chat]\nprovider = \"openai\"\nmodel = \"gpt-5.4\"\neffort = \"high\"\n",
+    )
+    .unwrap();
+
+    let loaded = TomlSettingsStore::load_sync(&path).unwrap();
+    assert_eq!(loaded.version, 2);
+    assert!(loaded.generation.chat.is_some());
+    assert!(!loaded.onboarding.is_setup_acknowledged());
+}
+
+#[test]
+fn onboarding_acknowledgement_round_trips_in_version_three() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("settings.toml");
+    let mut settings = AppSettings::default();
+    settings.onboarding.set_setup_acknowledged(true);
+
+    TomlSettingsStore::save_sync(&path, &settings).unwrap();
+    let loaded = TomlSettingsStore::load_sync(&path).unwrap();
+
+    assert!(loaded.onboarding.is_setup_acknowledged());
+    assert!(
+        fs::read_to_string(path)
+            .unwrap()
+            .contains("setup_acknowledged = true")
+    );
 }
 
 #[test]
