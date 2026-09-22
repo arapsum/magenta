@@ -25,9 +25,14 @@ use magenta_core::{
     WorkspaceSessionAccess,
 };
 use magenta_providers::OpenAiProvider;
-use magenta_workspace::{AgentFsWorkspace, LocalRepository, LocalWorkspace};
+use magenta_workspace::{
+    AgentFsWorkspace, BubblewrapCommandRunner, LocalRepository, LocalWorkspace,
+};
 
-use magenta_ui::{notification_for_error, MagentaError, MainServices, MainView, Result};
+use magenta_ui::{
+    notification_for_error, BubblewrapCapability, MagentaError, MainServices, MainView, Result,
+    WorkRuntimeReadiness,
+};
 
 struct MagentaAssets;
 
@@ -353,6 +358,18 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     let workspace_browser: Arc<dyn magenta_core::WorkspaceBrowser> = local_workspace;
     let repository: Arc<dyn RepositoryAccess> = Arc::new(LocalRepository);
 
+    let bubblewrap = match BubblewrapCommandRunner::new() {
+        Ok(_) => BubblewrapCapability::Available,
+        Err(error) => {
+            tracing::info!(
+                error = ?error,
+                operation = "bubblewrap.probe",
+                "Bubblewrap command isolation is unavailable"
+            );
+            BubblewrapCapability::Unavailable
+        }
+    };
+
     // Commands stay disabled until the AgentFS FUSE mount can be bound into
     // bubblewrap; otherwise a command could bypass the reviewed overlay.
     let command_runner = None;
@@ -386,6 +403,7 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
                     agent: Some(agent),
                     projects: Some(projects),
                     repository: Some(repository),
+                    work_runtime: WorkRuntimeReadiness::new(bubblewrap),
                 },
                 window,
                 cx,
