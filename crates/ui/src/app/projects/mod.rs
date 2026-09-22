@@ -107,6 +107,7 @@ impl MainView {
             .detach();
         }
         self.update_composer_availability(cx);
+        self.sync_settings_setup(cx);
         cx.notify();
     }
 
@@ -125,6 +126,7 @@ impl MainView {
             self.composer.update(cx, |composer, cx| {
                 composer.set_conversation_context(ConversationMode::Chat, None, cx);
             });
+            self.sync_settings_setup(cx);
         }
         let sidebar = self.sidebar.clone();
         cx.spawn_in(window, async move |_, window| {

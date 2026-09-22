@@ -35,11 +35,18 @@ impl MainView {
             .into_any_element()
     }
 
-    fn conversation_content(&self, narrow: bool, cx: &Context<'_, Self>) -> AnyElement {
+    fn conversation_content(
+        &self,
+        narrow: bool,
+        compact_setup: bool,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let conversation = if self.active_conversation.is_some() {
             self.conversation.clone().into_any_element()
         } else {
-            workspace::render(&self.composer, &self.sidebar, cx)
+            let readiness = self.setup_readiness(cx);
+            let setup = (!readiness.acknowledged).then_some(readiness);
+            workspace::render(&self.composer, &self.sidebar, setup, compact_setup, cx)
         };
         let Some(workbench) = self.workbench.as_ref() else {
             return conversation;
@@ -253,7 +260,8 @@ impl Render for MainView {
         let _ = &self.subscriptions;
         let narrow = window.viewport_size().width < px(696.);
         let compact_workbench = window.viewport_size().width < px(920.);
-        let content = self.conversation_content(compact_workbench, cx);
+        let compact_setup = window.viewport_size().height < px(700.);
+        let content = self.conversation_content(compact_workbench, compact_setup, cx);
         let sidebar_collapsed = self.sidebar.read(cx).is_collapsed();
         let show_sidebar = !narrow && !sidebar_collapsed;
         self.render_frame(content, narrow, show_sidebar, cx)

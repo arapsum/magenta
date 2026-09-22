@@ -11,7 +11,7 @@ mod error;
 mod settings;
 pub mod theme;
 
-pub use self::app::{MainServices, MainView};
+pub use self::app::{BubblewrapCapability, MainServices, MainView, WorkRuntimeReadiness};
 pub use self::error::{
     ErrorPresentation, ErrorSeverity, MagentaError, Result, notification_for_error,
     provider_error_presentation,

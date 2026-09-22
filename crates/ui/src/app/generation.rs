@@ -9,6 +9,7 @@ use magenta_core::{ConversationMode, ModelDescriptor};
 
 use crate::components::prompt_input::PromptComposer;
 
+use super::ModelCatalogState;
 use super::{MainView, SettingsWindow};
 
 struct GenerationFallbackNotification;
@@ -21,7 +22,7 @@ impl MainView {
         cx: &mut Context<'_, Self>,
     ) {
         self.models.clone_from(&models);
-        self.model_catalog_loaded = true;
+        self.model_catalog_state = ModelCatalogState::Loaded;
         self.composer.update(cx, |composer, cx| {
             composer.set_models(models.clone(), cx);
         });
@@ -29,18 +30,22 @@ impl MainView {
             settings_view.update(cx, |settings, cx| settings.set_models(models, cx));
         }
         self.apply_generation_defaults(window, cx);
+        self.refresh_composer_blocking_error(cx);
+        self.sync_settings_setup(cx);
         cx.notify();
     }
 
     pub(crate) fn clear_model_catalog(&mut self, cx: &mut Context<'_, Self>) {
         self.models.clear();
-        self.model_catalog_loaded = false;
+        self.model_catalog_state = ModelCatalogState::NotLoaded;
         self.chat_fallback_key = None;
         self.work_fallback_key = None;
         self.composer.update(cx, PromptComposer::clear_models);
         if let Some(settings_view) = self.settings_view.as_ref() {
             settings_view.update(cx, SettingsWindow::clear_models);
         }
+        self.refresh_composer_blocking_error(cx);
+        self.sync_settings_setup(cx);
         cx.notify();
     }
 
@@ -54,7 +59,7 @@ impl MainView {
             composer.set_generation_settings(settings.generation.clone(), cx);
         });
 
-        if !self.model_catalog_loaded {
+        if !self.model_catalog_state.is_loaded() {
             self.chat_fallback_key = None;
             self.work_fallback_key = None;
             return;

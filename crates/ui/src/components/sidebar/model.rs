@@ -54,6 +54,7 @@ pub enum SidebarEvent {
     OpenConversation(ConversationId),
     RenameConversation(ConversationId, String),
     OpenSettings,
+    OpenSetup,
     BeginLogin,
     SignOut,
     ToggleTheme,

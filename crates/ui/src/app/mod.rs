@@ -7,6 +7,7 @@ mod projects;
 mod render;
 mod runs;
 mod settings_window;
+pub(crate) mod setup;
 #[cfg(test)]
 #[path = "../../test/app/mod.rs"]
 mod tests;
@@ -36,7 +37,9 @@ use magenta_core::{
     ModelDescriptor, ProviderAccount, ProviderAuthenticator, RepositoryAccess, SettingsStore,
 };
 
-use self::settings_window::{AccountSettingsState, SettingsWindow, SettingsWindowEvent};
+use self::settings_window::{
+    AccountSettingsState, SettingsDestination, SettingsWindow, SettingsWindowEvent,
+};
 use crate::components::{
     agent_workbench::{AgentWorkbench, AgentWorkbenchEvent, WorkbenchSection},
     conversation::{ConversationView, ConversationViewEvent},
@@ -91,12 +94,13 @@ pub struct MainView {
     authenticator: Arc<dyn ProviderAuthenticator>,
     model_catalog: Arc<dyn ModelCatalog>,
     models: Vec<ModelDescriptor>,
-    model_catalog_loaded: bool,
+    model_catalog_state: ModelCatalogState,
     chat_fallback_key: Option<String>,
     work_fallback_key: Option<String>,
     response_runs: runs::ResponseRunCoordinator,
     history: ConversationHistory,
     projects: Option<ProjectCatalog>,
+    work_runtime: WorkRuntimeReadiness,
     storage_ready: StorageState,
     history_error: Option<crate::ErrorPresentation>,
     operation: history::Operation,
@@ -126,6 +130,8 @@ pub struct MainView {
     model_task: Option<Task<()>>,
     settings_store: Arc<dyn SettingsStore>,
     settings_load_task: Option<Task<()>>,
+    setup_save_task: Option<Task<()>>,
+    setup_error: Option<crate::ErrorPresentation>,
     settings_window: Option<WindowHandle<gpui_kit::component::Root>>,
     settings_view: Option<Entity<SettingsWindow>>,
     settings_subscription: Option<Subscription>,
@@ -146,6 +152,30 @@ pub struct MainServices {
     pub agent: Option<RunWorkspaceAgent>,
     pub projects: Option<ProjectCatalog>,
     pub repository: Option<Arc<dyn RepositoryAccess>>,
+    pub work_runtime: WorkRuntimeReadiness,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BubblewrapCapability {
+    Available,
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WorkRuntimeReadiness {
+    bubblewrap: BubblewrapCapability,
+}
+
+impl WorkRuntimeReadiness {
+    #[must_use]
+    pub const fn new(bubblewrap: BubblewrapCapability) -> Self {
+        Self { bubblewrap }
+    }
+
+    #[must_use]
+    pub const fn bubblewrap(self) -> BubblewrapCapability {
+        self.bubblewrap
+    }
 }
 
 fn configure_agent_composer(
@@ -192,6 +222,21 @@ enum AccountState {
     WaitingForBrowser,
     Connected(ProviderAccount),
     Failed(crate::ErrorPresentation),
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum ModelCatalogState {
+    #[default]
+    NotLoaded,
+    Loading,
+    Loaded,
+    Failed(crate::ErrorPresentation),
+}
+
+impl ModelCatalogState {
+    const fn is_loaded(self) -> bool {
+        matches!(self, Self::Loaded)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -295,12 +340,13 @@ impl MainView {
             authenticator: services.authenticator,
             model_catalog: services.model_catalog,
             models: Vec::new(),
-            model_catalog_loaded: false,
+            model_catalog_state: ModelCatalogState::NotLoaded,
             chat_fallback_key: None,
             work_fallback_key: None,
             history,
             response_runs: runs::ResponseRunCoordinator::default(),
             projects: services.projects,
+            work_runtime: services.work_runtime,
             storage_ready: StorageState::Loading,
             history_error: None,
             operation: history::Operation::Idle,
@@ -330,6 +376,8 @@ impl MainView {
             model_task: None,
             settings_store: services.settings_store,
             settings_load_task: None,
+            setup_save_task: None,
+            setup_error: None,
             settings_window: None,
             settings_view: None,
             settings_subscription: None,
@@ -379,6 +427,7 @@ impl MainView {
                     PromptComposerEvent::ModeChanged => cx.notify(),
                     PromptComposerEvent::WorkspaceSelected(root) => {
                         main.register_project(root.clone(), window, cx);
+                        main.sync_settings_setup(cx);
                     }
                     PromptComposerEvent::OpenWorkspacePanel(panel) => {
                         let section = match panel {
@@ -435,6 +484,10 @@ impl MainView {
                     SidebarEvent::OpenSettings => {
                         tracing::info!(operation = "sidebar.open_settings", "settings requested");
                         main.open_settings(window, cx);
+                    }
+                    SidebarEvent::OpenSetup => {
+                        tracing::info!(operation = "sidebar.open_setup", "setup requested");
+                        main.open_setup(window, cx);
                     }
                     SidebarEvent::BeginLogin => {
                         tracing::info!(operation = "sidebar.begin_login", "login requested");

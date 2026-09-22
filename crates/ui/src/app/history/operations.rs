@@ -114,6 +114,7 @@ impl MainView {
                 );
                 composer.set_configuration(&conversation.generation, cx);
             });
+            self.sync_settings_setup(cx);
             self.sync_run(assistant_id, cx);
         }
         self.operation = Operation::Idle;
@@ -145,6 +146,7 @@ impl MainView {
                 );
                 composer.set_configuration(&conversation.generation, cx);
             });
+            self.sync_settings_setup(cx);
             self.sync_run(assistant_id, cx);
         }
         self.operation = Operation::Idle;

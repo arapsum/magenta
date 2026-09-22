@@ -170,6 +170,7 @@ impl MainView {
                 });
             }
             self.update_composer_availability(cx);
+            self.sync_settings_setup(cx);
             cx.notify();
             return;
         }
@@ -214,6 +215,7 @@ impl MainView {
                             );
                             composer.set_configuration(&loaded.conversation.generation, cx);
                         });
+                        main.sync_settings_setup(cx);
                         main.conversation
                             .update(cx, |view, cx| view.load_page(loaded, cx));
                         if let Some(run) = main

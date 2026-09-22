@@ -241,6 +241,27 @@ impl SidebarView {
             .w_full()
             .py(px(4.))
             .child(settings)
+            .child({
+                let setup_view = view.clone();
+                let setup_popover = popover.clone();
+                Self::account_menu_button(
+                    "account-setup-readiness",
+                    "Setup & readiness",
+                    IconName::CircleCheck,
+                    None,
+                    false,
+                    cx,
+                )
+                .on_click(move |_, window, cx| {
+                    Self::emit_account_event(
+                        &setup_view,
+                        &setup_popover,
+                        SidebarEvent::OpenSetup,
+                        window,
+                        cx,
+                    );
+                })
+            })
             .child(appearance)
             .child(Self::account_menu_button(
                 "account-keyboard-shortcuts",

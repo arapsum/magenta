@@ -1,6 +1,7 @@
 mod appearance;
 mod configuration;
 mod models;
+mod setup;
 
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
@@ -8,7 +9,7 @@ use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
     button::Button,
     h_flex,
-    setting::{SettingGroup, SettingItem, SettingPage, Settings},
+    setting::{SelectIndex, SettingGroup, SettingItem, SettingPage, Settings},
     v_flex,
 };
 use gpui_kit::{
@@ -22,19 +23,31 @@ use self::{
     appearance::{installed_font_options, mathematics_group, theme_group, typography_group},
     configuration::configuration_group,
     models::models_page,
+    setup::setup_page,
 };
+use super::setup::SetupReadiness;
 use crate::{
     ErrorPresentation,
     components::{provider_icon, titlebar},
     settings,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum SettingsWindowEvent {
     BeginLogin,
     SignOut,
     TypographyChanged,
     GenerationDefaultsChanged,
+    ReloadModels,
+    ChooseWorkspace,
+    ShowSetupOnNewChat,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SettingsDestination {
+    Setup,
+    #[default]
+    Appearance,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -49,6 +62,8 @@ pub struct SettingsWindow {
     account: AccountSettingsState,
     models: Vec<ModelDescriptor>,
     model_catalog_loaded: bool,
+    setup: SetupReadiness,
+    destination: SettingsDestination,
     save_task: Option<Task<()>>,
     feedback: Option<SettingsFeedback>,
 }
@@ -74,6 +89,8 @@ impl SettingsWindow {
         account: AccountSettingsState,
         models: Vec<ModelDescriptor>,
         model_catalog_loaded: bool,
+        setup: SetupReadiness,
+        destination: SettingsDestination,
         cx: &mut App,
     ) -> anyhow::Result<(WindowHandle<gpui_kit::component::Root>, Entity<Self>)> {
         let slot = Rc::new(RefCell::new(None));
@@ -84,6 +101,8 @@ impl SettingsWindow {
                 account,
                 models,
                 model_catalog_loaded,
+                setup,
+                destination,
                 save_task: None,
                 feedback: None,
             });
@@ -111,6 +130,20 @@ impl SettingsWindow {
     pub fn clear_models(&mut self, cx: &mut Context<'_, Self>) {
         self.models.clear();
         self.model_catalog_loaded = false;
+        cx.notify();
+    }
+
+    pub fn set_setup(&mut self, setup: SetupReadiness, cx: &mut Context<'_, Self>) {
+        self.setup = setup;
+        cx.notify();
+    }
+
+    pub fn set_destination(
+        &mut self,
+        destination: SettingsDestination,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.destination = destination;
         cx.notify();
     }
 
@@ -225,6 +258,7 @@ impl SettingsWindow {
     fn settings_pages(&self, _: &mut Window, cx: &Context<'_, Self>) -> Vec<SettingPage> {
         let view = cx.entity();
         vec![
+            setup_page(&view, &self.setup, cx),
             Self::appearance_page(&view, cx),
             models_page(&view, &self.models, self.model_catalog_loaded, cx),
             self.providers_page(&view),
@@ -287,7 +321,7 @@ impl SettingsWindow {
                         let label = action;
                         let detail = detail.clone();
                         let event_view = event_view.clone();
-                        let event = event.clone();
+                        let event = event;
                         h_flex()
                             .w_full()
                             .items_center()
@@ -312,7 +346,7 @@ impl SettingsWindow {
                                     .label(label)
                                     .on_click(move |_, _, cx| {
                                         event_view.update(cx, |_, cx| {
-                                            cx.emit(event.clone());
+                                            cx.emit(event);
                                         });
                                     }),
                             )
@@ -327,6 +361,10 @@ impl SettingsWindow {
 impl Render for SettingsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let pages = self.settings_pages(window, cx);
+        let settings_id = match self.destination {
+            SettingsDestination::Setup => "magenta-settings-setup",
+            SettingsDestination::Appearance => "magenta-settings-appearance",
+        };
         v_flex()
             .relative()
             .size_full()
@@ -369,9 +407,16 @@ impl Render for SettingsWindow {
             })
             .child(
                 div().flex().flex_1().min_h_0().child(
-                    Settings::new("magenta-settings")
+                    Settings::new(settings_id)
                         .sidebar_width(px(220.))
                         .sidebar_size_range(px(220.)..px(220.))
+                        .default_selected_index(SelectIndex {
+                            page_ix: match self.destination {
+                                SettingsDestination::Setup => 0,
+                                SettingsDestination::Appearance => 1,
+                            },
+                            group_ix: None,
+                        })
                         .pages(pages),
                 ),
             )

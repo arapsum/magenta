@@ -1,6 +1,28 @@
 use super::*;
 
 impl MainView {
+    pub(crate) fn refresh_composer_blocking_error(&mut self, cx: &mut Context<'_, Self>) {
+        let error = match &self.account_state {
+            AccountState::Failed(error) => Some(*error),
+            AccountState::SignedOut => Some(crate::ErrorPresentation {
+                code: "MAG-ACCOUNT-SIGNED-OUT",
+                severity: crate::ErrorSeverity::Warning,
+                title: "Connect a provider account",
+                message: "Connect ChatGPT to load models and send a response.",
+            }),
+            AccountState::Connected(_) => match self.model_catalog_state {
+                ModelCatalogState::Failed(error) => Some(error),
+                ModelCatalogState::NotLoaded
+                | ModelCatalogState::Loading
+                | ModelCatalogState::Loaded => None,
+            },
+            AccountState::Restoring | AccountState::WaitingForBrowser => None,
+        };
+        self.composer.update(cx, |composer, cx| {
+            composer.set_account_error(error, cx);
+        });
+    }
+
     pub(crate) fn restore_account(&mut self, window: &Window, cx: &Context<'_, Self>) {
         let authenticator = Arc::clone(&self.authenticator);
         self.account_task = Some(cx.spawn_in(window, async move |view, window| {
@@ -32,8 +54,11 @@ impl MainView {
         }));
     }
 
-    fn load_models(&mut self, window: &Window, cx: &Context<'_, Self>) {
+    pub(crate) fn load_models(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
         self.model_task.take();
+        self.model_catalog_state = ModelCatalogState::Loading;
+        self.refresh_composer_blocking_error(cx);
+        self.sync_settings_setup(cx);
         let catalog = Arc::clone(&self.model_catalog);
         self.model_task = Some(cx.spawn_in(window, async move |view, window| {
             let result = catalog.models().await;
@@ -49,10 +74,11 @@ impl MainView {
                             operation = "models.load",
                             "could not load OpenAI models"
                         );
-                        main.set_account_state(
-                            AccountState::Failed(crate::provider_error_presentation(error.kind)),
-                            cx,
+                        main.model_catalog_state = ModelCatalogState::Failed(
+                            crate::provider_error_presentation(error.kind),
                         );
+                        main.refresh_composer_blocking_error(cx);
+                        main.sync_settings_setup(cx);
                     }
                 }
                 cx.notify();
@@ -133,21 +159,6 @@ impl MainView {
     }
 
     fn set_account_state(&mut self, state: AccountState, cx: &mut Context<'_, Self>) {
-        let composer_error = match &state {
-            AccountState::Failed(error) => Some(*error),
-            AccountState::SignedOut => Some(crate::ErrorPresentation {
-                code: "MAG-ACCOUNT-SIGNED-OUT",
-                severity: crate::ErrorSeverity::Warning,
-                title: "Connect a provider account",
-                message: "Open provider settings to load models and send a response.",
-            }),
-            AccountState::Restoring
-            | AccountState::WaitingForBrowser
-            | AccountState::Connected(_) => None,
-        };
-        self.composer.update(cx, |composer, cx| {
-            composer.set_account_error(composer_error, cx);
-        });
         let account = match &state {
             AccountState::Connected(account) => Some(account.clone()),
             AccountState::Restoring
@@ -156,6 +167,7 @@ impl MainView {
             | AccountState::Failed(_) => None,
         };
         self.account_state = state;
+        self.refresh_composer_blocking_error(cx);
         self.sidebar.update(cx, |sidebar, cx| {
             sidebar.set_account(account, cx);
         });
@@ -163,6 +175,7 @@ impl MainView {
             let state = self.account_settings_state();
             settings_view.update(cx, |settings, cx| settings.set_account(state, cx));
         }
+        self.sync_settings_setup(cx);
     }
 
     fn account_settings_state(&self) -> AccountSettingsState {
@@ -200,15 +213,34 @@ impl MainView {
                     }
                 }
                 main.apply_generation_defaults(window, cx);
+                main.sync_settings_setup(cx);
                 cx.notify();
             });
         }));
     }
 
     pub(crate) fn open_settings(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
+        self.open_settings_destination(SettingsDestination::Appearance, window, cx);
+    }
+
+    pub(crate) fn open_setup(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
+        self.open_settings_destination(SettingsDestination::Setup, window, cx);
+    }
+
+    fn open_settings_destination(
+        &mut self,
+        destination: SettingsDestination,
+        window: &Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         if let Some(handle) = self.settings_window
             && handle.is_active(cx).is_some()
         {
+            if let Some(settings_view) = self.settings_view.as_ref() {
+                settings_view.update(cx, |settings, cx| {
+                    settings.set_destination(destination, cx);
+                });
+            }
             _ = handle.update(cx, |_, settings_window, _| {
                 settings_window.activate_window();
             });
@@ -216,11 +248,14 @@ impl MainView {
         }
 
         let account = self.account_settings_state();
+        let setup = self.setup_readiness(cx);
         match SettingsWindow::open(
             Arc::clone(&self.settings_store),
             account,
             self.models.clone(),
-            self.model_catalog_loaded,
+            self.model_catalog_state.is_loaded(),
+            setup,
+            destination,
             cx,
         ) {
             Ok((handle, settings_view)) => {
@@ -237,6 +272,14 @@ impl MainView {
                         }
                         SettingsWindowEvent::GenerationDefaultsChanged => {
                             main.apply_generation_defaults(window, cx);
+                            main.sync_settings_setup(cx);
+                        }
+                        SettingsWindowEvent::ReloadModels => main.load_models(window, cx),
+                        SettingsWindowEvent::ChooseWorkspace => {
+                            main.choose_setup_workspace(window, cx);
+                        }
+                        SettingsWindowEvent::ShowSetupOnNewChat => {
+                            main.show_setup_on_new_chat(window, cx);
                         }
                     },
                 );

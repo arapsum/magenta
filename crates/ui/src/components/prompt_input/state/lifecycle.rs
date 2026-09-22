@@ -131,6 +131,14 @@ impl PromptComposer {
         cx.notify();
     }
 
+    pub(crate) const fn agent_capability(&self) -> AgentCapability {
+        self.agent_capability
+    }
+
+    pub(crate) fn workspace_root(&self) -> Option<PathBuf> {
+        self.workspace_root.clone()
+    }
+
     pub(crate) fn set_conversation_context(
         &mut self,
         mode: ConversationMode,
