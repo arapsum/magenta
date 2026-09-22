@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{ConversationMode, EffortLevel, ModelId, ProviderId};
 
 /// The persisted settings format supported by this version of Magenta.
-pub const SETTINGS_VERSION: u32 = 2;
+pub const SETTINGS_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -145,6 +145,27 @@ pub struct GenerationSettings {
     pub work: Option<GenerationPreference>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OnboardingSettings {
+    setup_acknowledged: bool,
+}
+
+impl OnboardingSettings {
+    #[must_use]
+    pub const fn new(setup_acknowledged: bool) -> Self {
+        Self { setup_acknowledged }
+    }
+
+    #[must_use]
+    pub const fn is_setup_acknowledged(&self) -> bool {
+        self.setup_acknowledged
+    }
+
+    pub fn set_setup_acknowledged(&mut self, acknowledged: bool) {
+        self.setup_acknowledged = acknowledged;
+    }
+}
+
 impl GenerationSettings {
     #[must_use]
     #[allow(clippy::needless_pass_by_value)]
@@ -162,6 +183,7 @@ pub struct AppSettings {
     pub appearance: AppearanceMode,
     pub typography: TypographySettings,
     pub generation: GenerationSettings,
+    pub onboarding: OnboardingSettings,
 }
 
 impl Default for AppSettings {
@@ -171,6 +193,7 @@ impl Default for AppSettings {
             appearance: AppearanceMode::default(),
             typography: TypographySettings::default(),
             generation: GenerationSettings::default(),
+            onboarding: OnboardingSettings::default(),
         }
     }
 }
