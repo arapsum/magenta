@@ -44,7 +44,10 @@ fn delete_removes_conversation_messages_and_attachment_records() {
         store.delete(id).await.unwrap();
         assert!(!imported.path.exists());
         assert!(source.exists());
-        assert!(store.summaries().await.unwrap().is_empty());
+        assert_eq!(
+            store.summaries().await.unwrap(),
+            Vec::<magenta_core::ConversationSummary>::new()
+        );
         assert_eq!(
             store.load(id).await.unwrap_err().kind,
             StorageErrorKind::NotFound

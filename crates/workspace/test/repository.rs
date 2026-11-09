@@ -80,13 +80,13 @@ fn repository_round_trip_stages_diffs_and_commits() {
             .await
             .unwrap();
         assert_eq!(committed.summary, "Add greeting");
-        assert!(
+        assert_eq!(
             access
                 .status(directory.path().to_path_buf())
                 .await
                 .unwrap()
-                .changes
-                .is_empty()
+                .changes,
+            Vec::<magenta_core::RepositoryChange>::new()
         );
     });
 }

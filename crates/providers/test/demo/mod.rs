@@ -31,7 +31,7 @@ fn user_message(content: &str) -> Message {
         attachments: Vec::new(),
         generation_outcome: None,
         failure: None,
-        assistant_trace: Default::default(),
+        assistant_trace: magenta_core::AssistantTrace::default(),
     }
 }
 

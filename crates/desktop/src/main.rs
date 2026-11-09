@@ -9,10 +9,10 @@ mod diagnostics;
 
 use std::{borrow::Cow, cell::Cell, process::ExitCode, rc::Rc, sync::Arc};
 
-use gpui_kit::component::Root;
+use gpui_kit::component::{Root, WindowExt as _};
 use gpui_kit::{
-    px, size, App, AppContext, Application, AssetSource, Bounds, Result as GpuiResult,
-    SharedString, WindowBounds, WindowHandle, WindowOptions,
+    App, AppContext, Application, AssetSource, Bounds, Result as GpuiResult, SharedString,
+    WindowBounds, WindowHandle, WindowOptions, px, size,
 };
 #[cfg(target_os = "linux")]
 use gpui_kit::{WindowBackgroundAppearance, WindowDecorations};
@@ -30,8 +30,8 @@ use magenta_workspace::{
 };
 
 use magenta_ui::{
-    notification_for_error, BubblewrapCapability, MagentaError, MainServices, MainView, Result,
-    WorkRuntimeReadiness,
+    BubblewrapCapability, MagentaError, MainServices, MainView, Result, WorkRuntimeReadiness,
+    notification_for_error,
 };
 
 struct MagentaAssets;
@@ -358,17 +358,7 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     let workspace_browser: Arc<dyn magenta_core::WorkspaceBrowser> = local_workspace;
     let repository: Arc<dyn RepositoryAccess> = Arc::new(LocalRepository);
 
-    let bubblewrap = match BubblewrapCommandRunner::new() {
-        Ok(_) => BubblewrapCapability::Available,
-        Err(error) => {
-            tracing::info!(
-                error = ?error,
-                operation = "bubblewrap.probe",
-                "Bubblewrap command isolation is unavailable"
-            );
-            BubblewrapCapability::Unavailable
-        }
-    };
+    let bubblewrap = probe_bubblewrap();
 
     // Commands stay disabled until the AgentFS FUSE mount can be bound into
     // bubblewrap; otherwise a command could bypass the reviewed overlay.
@@ -414,6 +404,20 @@ fn open_main_window(cx: &mut App) -> Result<WindowHandle<Root>> {
     .map_err(|source| MagentaError::WindowOpen { source })
 }
 
+fn probe_bubblewrap() -> BubblewrapCapability {
+    match BubblewrapCommandRunner::new() {
+        Ok(_) => BubblewrapCapability::Available,
+        Err(error) => {
+            tracing::info!(
+                error = ?error,
+                operation = "bubblewrap.probe",
+                "Bubblewrap command isolation is unavailable"
+            );
+            BubblewrapCapability::Unavailable
+        }
+    }
+}
+
 fn main_window_options(cx: &App) -> WindowOptions {
     let bounds = Bounds::centered(None, size(px(1180.), px(760.)), cx);
     let mut window_options = gpui_kit::component::TitleBar::window_options();
@@ -451,11 +455,14 @@ fn present_startup_warnings(
         return;
     }
 
-    if let Err(error) = window_handle.update(cx, move |root, window, cx| {
-        for warning in &warnings {
-            root.push_notification(notification_for_error(warning), window, cx);
-        }
-    }) {
+    // Notifications read Root plugins, so update the window without leasing Root.
+    if let Err(error) =
+        gpui_kit::AnyWindowHandle::from(window_handle).update(cx, move |_, window, cx| {
+            for warning in &warnings {
+                window.push_notification(notification_for_error(warning), cx);
+            }
+        })
+    {
         tracing::error!(
             error = ?error,
             operation = "startup-warning.present",

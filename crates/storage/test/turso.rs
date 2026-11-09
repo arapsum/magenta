@@ -16,6 +16,21 @@ fn generation() -> GenerationConfig {
     )
 }
 
+#[cfg(unix)]
+#[test]
+fn project_database_address_preserves_existing_sha256_directory_names() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = TursoAgentDatabase::new(directory.path().to_path_buf());
+
+    assert_eq!(
+        store.database_path(std::path::Path::new("project")),
+        directory
+            .path()
+            .join("244210e48437b6556980a70249a99369934a352429034cef9d7bd253b3bf2c01")
+            .join("agent.db")
+    );
+}
+
 #[test]
 fn local_turso_app_store_persists_conversations_and_projects() {
     smol::block_on(async {
@@ -206,12 +221,12 @@ fn project_database_separates_memory_code_and_sessions_by_root() {
             1
         );
 
-        assert!(
+        assert_eq!(
             database
                 .recall(second, "hexagonal storage".into(), Some(vec![1.0, 0.0]), 8)
                 .await
-                .unwrap()
-                .is_empty()
+                .unwrap(),
+            Vec::<magenta_core::MemoryMatch>::new()
         );
 
         database

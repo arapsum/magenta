@@ -27,7 +27,7 @@ fn finds_inline_and_display_formulas() {
 
 #[test]
 fn ignores_unclosed_formulas_and_code() {
-    assert!(formulas("`$x$` and $unfinished").is_empty());
+    assert_eq!(formulas("`$x$` and $unfinished"), Vec::<FormulaKey>::new());
 }
 
 #[test]

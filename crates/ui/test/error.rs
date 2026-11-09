@@ -1,6 +1,6 @@
 use std::error::Error as _;
 
-use gpui_kit::component::Root;
+use gpui_kit::component::{Root, WindowExt as _};
 use gpui_kit::{
     AppContext as _, Context, IntoElement, Render, TestAppContext, Window, div, px, size,
 };
@@ -104,16 +104,16 @@ fn repeated_errors_replace_their_existing_notification(cx: &mut TestAppContext) 
         Root::new(view, window, cx)
     });
 
-    window_handle
-        .update(cx, |root, window, cx| {
+    gpui_kit::AnyWindowHandle::from(window_handle)
+        .update(cx, |_, window, cx| {
             for _ in 0..2 {
                 let error = MagentaError::ThemeNotFound {
                     name: "Missing".to_owned(),
                 };
-                root.push_notification(notification_for_error(&error), window, cx);
+                window.push_notification(notification_for_error(&error), cx);
             }
 
-            assert_eq!(root.notification.read(cx).notifications().len(), 1);
+            assert_eq!(window.notifications(cx).len(), 1);
         })
         .expect("the test window should remain open");
 }

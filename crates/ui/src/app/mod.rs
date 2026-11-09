@@ -7,7 +7,7 @@ mod projects;
 mod render;
 mod runs;
 mod settings_window;
-pub(crate) mod setup;
+pub mod setup;
 #[cfg(test)]
 #[path = "../../test/app/mod.rs"]
 mod tests;

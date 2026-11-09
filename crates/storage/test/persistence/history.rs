@@ -189,7 +189,10 @@ fn full_text_search_tracks_titles_message_updates_renames_and_deletes() {
         assert_eq!(body_match[0].message_id, Some(pending.user_message.id));
         assert_eq!(body_match[0].message_sequence.unwrap().0, 0);
         assert!(body_match[0].snippet.contains("main"));
-        assert!(!body_match[0].snippet_highlights.is_empty());
+        assert_ne!(
+            body_match[0].snippet_highlights,
+            Vec::<std::ops::Range<usize>>::new()
+        );
 
         let mut assistant = pending.assistant_message;
         assistant.content = "A distinctly searchable phosphorescent answer".into();
@@ -199,20 +202,23 @@ fn full_text_search_tracks_titles_message_updates_renames_and_deletes() {
         assert_eq!(finalized[0].message_id, Some(assistant.id));
 
         store.rename(id, "Retitled archive".into()).await.unwrap();
-        assert!(store.search("unicode".into(), 10).await.unwrap().is_empty());
+        assert_eq!(
+            store.search("unicode".into(), 10).await.unwrap(),
+            Vec::<magenta_core::ConversationSearchResult>::new()
+        );
         assert_eq!(
             store.search("retit".into(), 10).await.unwrap()[0].conversation_id,
             id
         );
 
         store.delete(id).await.unwrap();
-        assert!(
-            store
-                .search("phosphor".into(), 10)
-                .await
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            store.search("phosphor".into(), 10).await.unwrap(),
+            Vec::<magenta_core::ConversationSearchResult>::new()
         );
-        assert!(store.search("   ".into(), 10).await.unwrap().is_empty());
+        assert_eq!(
+            store.search("   ".into(), 10).await.unwrap(),
+            Vec::<magenta_core::ConversationSearchResult>::new()
+        );
     });
 }

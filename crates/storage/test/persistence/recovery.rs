@@ -116,7 +116,10 @@ fn failed_turn_rolls_back_and_newer_schema_is_preserved() {
             )
             .unwrap();
         assert!(store.begin_turn(input(None)).await.is_err());
-        assert!(store.summaries().await.unwrap().is_empty());
+        assert_eq!(
+            store.summaries().await.unwrap(),
+            Vec::<magenta_core::ConversationSummary>::new()
+        );
         connection
             .execute_batch("DROP TRIGGER reject_assistant; PRAGMA user_version = 99;")
             .unwrap();

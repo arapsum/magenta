@@ -2,8 +2,8 @@
 
 The executable and composition root for Magenta. The Cargo package is
 `magenta-desktop`; its binary is **`magenta`**. It is the workspace's default
-member. This package currently uses edition 2021, while library crates inherit
-edition 2024. [Workspace overview](../../README.md).
+member. Every package inherits edition 2024, Rust 1.99.1, and the
+`0.1.0-alpha.1` candidate version. [Workspace overview](../../README.md).
 
 ## Startup and service wiring
 

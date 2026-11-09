@@ -37,7 +37,10 @@ fn oversized_newest_turn_rolls_back_the_entire_transaction() {
 
         let error = store.begin_turn(oversized).await.err().unwrap();
         assert_eq!(error.kind, StorageErrorKind::ContextTooLarge);
-        assert!(store.summaries().await.unwrap().is_empty());
+        assert_eq!(
+            store.summaries().await.unwrap(),
+            Vec::<magenta_core::ConversationSummary>::new()
+        );
     });
 }
 
@@ -115,7 +118,7 @@ fn message_pages_move_in_both_directions() {
         assert!(!oldest.has_older);
         assert!(oldest.has_newer);
         let newer = store.later(id, oldest.newer_cursor.unwrap()).await.unwrap();
-        assert!(!newer.messages.is_empty());
+        assert_ne!(newer.messages, Vec::<magenta_core::StoredMessage>::new());
         assert!(newer.has_older);
         assert!(newer.has_newer);
         let newest = store.later(id, newer.newer_cursor.unwrap()).await.unwrap();

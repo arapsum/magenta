@@ -122,7 +122,7 @@ fn scan(root: &Path) -> Result<Vec<SourceFile>, StorageError> {
             .to_string_lossy()
             .replace('\\', "/");
 
-        let hash = format!("{:x}", Sha256::digest(content.as_bytes()));
+        let hash = hex::encode(Sha256::digest(content.as_bytes()));
 
         result.push(SourceFile {
             path: relative,

@@ -1,7 +1,16 @@
 [package]
 name = "magenta-desktop"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Magenta, an experimental native AI chat and workspace client"
+readme = "README.md"
+categories = ["gui"]
+keywords = ["ai", "chat", "desktop", "gpui"]
 
 [[bin]]
 name = "magenta"

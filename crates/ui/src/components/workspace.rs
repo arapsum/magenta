@@ -53,32 +53,23 @@ fn render_landing_content(
                 .child(landing_heading(mode)),
         )
         .when_some(setup, |this, setup| {
-            this.child(render_setup_panel(setup, compact_setup, cx))
+            this.child(render_setup_panel(&setup, compact_setup, cx))
         })
         .child(div().w_full().child(composer))
         .into_any_element()
 }
 
 fn render_setup_panel(
-    setup: SetupReadiness,
+    setup: &SetupReadiness,
     compact: bool,
     cx: &Context<'_, MainView>,
 ) -> AnyElement {
-    let view = cx.entity();
     let ready = setup.chat_ready;
     let saving = setup.saving;
-    let primary = primary_setup_action(&setup, cx);
-    let dismiss_view = view.clone();
-    let workspace_view = view.clone();
-    let compact_work = SetupItem {
-        title: "Work · optional",
-        detail: if setup.file_tools.state == SetupItemState::Ready {
-            "File tools are ready; commands are unavailable in this build.".to_owned()
-        } else {
-            "Work tools are unavailable in this build.".to_owned()
-        },
-        state: setup.file_tools.state,
-    };
+    let primary = primary_setup_action(setup, cx);
+    let dismiss_view = cx.entity();
+    let workspace_view = dismiss_view.clone();
+    let compact_work = compact_work_item(&setup.file_tools);
 
     v_flex()
         .id("setup-readiness-panel")
@@ -166,26 +157,41 @@ fn render_setup_panel(
                     .child(format!("{} Reference: {}", error.message, error.code)),
             )
         })
+        .child(render_setup_actions(saving, primary, dismiss_view))
+        .into_any_element()
+}
+
+fn compact_work_item(file_tools: &SetupItem) -> SetupItem {
+    SetupItem {
+        title: "Work · optional",
+        detail: if file_tools.state == SetupItemState::Ready {
+            "File tools are ready; commands are unavailable in this build.".to_owned()
+        } else {
+            "Work tools are unavailable in this build.".to_owned()
+        },
+        state: file_tools.state,
+    }
+}
+
+fn render_setup_actions(saving: bool, primary: AnyElement, view: Entity<MainView>) -> AnyElement {
+    h_flex()
+        .w_full()
+        .items_center()
+        .justify_between()
+        .gap(px(8.))
         .child(
-            h_flex()
-                .w_full()
-                .items_center()
-                .justify_between()
-                .gap(px(8.))
-                .child(
-                    Button::new("setup-not-now")
-                        .ghost()
-                        .small()
-                        .label("Not now")
-                        .disabled(saving)
-                        .on_click(move |_, window, cx| {
-                            dismiss_view.update(cx, |main, cx| {
-                                main.acknowledge_setup(true, window, cx);
-                            });
-                        }),
-                )
-                .child(primary),
+            Button::new("setup-not-now")
+                .ghost()
+                .small()
+                .label("Not now")
+                .disabled(saving)
+                .on_click(move |_, window, cx| {
+                    view.update(cx, |main, cx| {
+                        main.acknowledge_setup(true, window, cx);
+                    });
+                }),
         )
+        .child(primary)
         .into_any_element()
 }
 
@@ -255,7 +261,7 @@ fn render_setup_item(
                         .child(item.detail.clone()),
                 ),
         )
-        .when_some(action, |this, action| this.child(action))
+        .when_some(action, gpui_kit::ParentElement::child)
         .into_any_element()
 }
 

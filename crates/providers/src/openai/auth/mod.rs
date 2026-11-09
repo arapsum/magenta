@@ -19,7 +19,7 @@ use magenta_core::{
     AuthenticationFuture, AuthorizationSession, ProviderAccount, ProviderAuthenticator,
     ProviderError, ProviderErrorKind, ProviderId,
 };
-use rand::RngCore as _;
+use rand::Rng as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use url::Url;

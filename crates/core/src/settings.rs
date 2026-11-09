@@ -161,7 +161,7 @@ impl OnboardingSettings {
         self.setup_acknowledged
     }
 
-    pub fn set_setup_acknowledged(&mut self, acknowledged: bool) {
+    pub const fn set_setup_acknowledged(&mut self, acknowledged: bool) {
         self.setup_acknowledged = acknowledged;
     }
 }

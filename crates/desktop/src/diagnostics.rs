@@ -8,7 +8,7 @@ use tracing_appender::{
     non_blocking::{NonBlocking, WorkerGuard},
     rolling::{RollingFileAppender, Rotation},
 };
-use tracing_subscriber::{fmt, layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 const DEFAULT_FILTER: &str = concat!(
     "magenta=info,",

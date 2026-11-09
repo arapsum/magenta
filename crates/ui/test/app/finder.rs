@@ -155,7 +155,7 @@ fn finder_result_list_scrolls_when_history_exceeds_the_dialog(cx: &mut TestAppCo
         .expect("the first conversation should be rendered")
         .top();
 
-    visual.simulate_event(gpui_kit::ScrollWheelEvent {
+    visual.simulate_event(gpui_kit::ScrollEvent {
         position: gpui_kit::point(list.center().x, list.top() + px(150.)),
         delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(-240.))),
         ..Default::default()

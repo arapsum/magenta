@@ -101,12 +101,12 @@ impl TursoAppStore {
     }
 
     async fn connect_path(path: &std::path::Path) -> Result<Connection> {
-        let database = turso::Builder::new_local(&path.to_string_lossy())
+        let connection = turso::Builder::new_local(&path.to_string_lossy())
             .build()
             .await
+            .map_err(db)?
+            .connect()
             .map_err(db)?;
-
-        let connection = database.connect().map_err(db)?;
 
         connection.busy_timeout(BUSY_TIMEOUT).map_err(db)?;
 

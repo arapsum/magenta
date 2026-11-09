@@ -383,6 +383,8 @@ fn expanded_trace_viewport_keeps_its_content_visible(cx: &mut TestAppContext) {
                 },
                 cx,
             );
+            view.trace_disclosure_overrides
+                .insert(MessageId::new(2), TraceDisclosureOverride::Open);
         })
         .expect("the conversation test window should remain open");
     cx.run_until_parked();

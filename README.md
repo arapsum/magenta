@@ -2,7 +2,7 @@
 
 Magenta is an experimental native AI chat and workspace client written in Rust
 with GPUI through [GPUI Kit](https://github.com/longbridge/gpui-kit). The workspace
-currently pins `gpui-kit` to `0.6.1`.
+currently pins `gpui-kit` to `0.9.0`.
 
 ![Magenta Chat conversation with structured Markdown, code, and the compact composer](assets/magenta-conversation.png)
 
@@ -14,7 +14,8 @@ additional integrations.
 
 ## Start here
 
-Use Rust **1.98.0**, the version used by [CI](.github/workflows/ci.yml), and install
+Use Rust **1.99.1**, selected by [rust-toolchain.toml](rust-toolchain.toml) and
+used by [CI](.github/workflows/ci.yml), and install
 the native Linux dependencies in the [development guide](docs/development.md).
 Then run from the repository root:
 

@@ -513,7 +513,7 @@ impl MainView {
             .id("conversation-finder-overlay")
             .absolute()
             .inset_0()
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .absolute()

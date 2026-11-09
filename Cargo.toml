@@ -12,38 +12,44 @@ members = [
 default-members = ["crates/desktop"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2024"
+rust-version = "1.99.1"
+authors = ["Kibet arap Sum"]
+license = "MIT"
+repository = "https://github.com/arapsum/magenta"
+publish = false
 
 [workspace.dependencies]
-anyhow = "1"
+anyhow = "1.0.104"
 agentfs-sdk = "=0.6.4"
-async-process = "2"
-async-lock = "3"
-async-net = "2"
-async-stream = "0.3"
-async-channel = "2"
-ignore = "0.4"
-globset = "0.4"
-base64 = "0.22"
-dirs = "6"
-futures-core = "0.3"
-futures-channel = "0.3"
-futures-util = { version = "0.3", features = ["io"] }
-fastembed = { version = "=6.1.0", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries-rustls-tls"] }
-http_client = { package = "gpui-pre-http-client", version = "0.3.1" }
-keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service"] }
+async-process = "2.5.0"
+async-lock = "3.5.0"
+async-net = "2.0.0"
+async-stream = "0.3.6"
+async-channel = "2.5.0"
+ignore = "0.4.34"
+globset = "0.4.21"
+hex = "0.4.3"
+base64 = "0.23.1"
+dirs = "7.0.0"
+futures-core = "0.3.34"
+futures-channel = "0.3.34"
+futures-util = { version = "0.3.34", features = ["io"] }
+fastembed = { version = "=7.6.1", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries-rustls-tls"] }
+http_client = { package = "gpui-pre-http-client", version = "=0.3.11" }
+keyring = "4.2.0"
 magenta-application = { path = "crates/application" }
 magenta-core = { path = "crates/core" }
 magenta-providers = { path = "crates/providers" }
 magenta-storage = { path = "crates/storage" }
 magenta-workspace = { path = "crates/workspace" }
-rusqlite = { version = "0.37", features = ["bundled"] }
-chrono = "0.4"
-tempfile = "3"
+rusqlite = { version = "0.41.1", features = ["bundled", "fallible_uint"] }
+chrono = "0.4.45"
+tempfile = "3.27.0"
 magenta-ui = { path = "crates/ui" }
-parking_lot = "0.12"
-gpui-kit = { version = "=0.6.1", features = [
+parking_lot = "0.13.0"
+gpui-kit = { version = "=0.9.0", features = [
     "tree-sitter-bash",
     "tree-sitter-c",
     "tree-sitter-cmake",
@@ -59,21 +65,23 @@ gpui-kit = { version = "=0.6.1", features = [
     "tree-sitter-typescript",
     "tree-sitter-yaml",
 ] }
-reqwest_client = { package = "gpui-pre-reqwest-client", version = "0.3.1" }
-rand = "0.9"
-ratex-layout = "0.1.14"
-ratex-parser = "0.1.14"
-ratex-svg = { version = "0.1.14", default-features = false, features = ["embed-fonts", "standalone"] }
-ratex-types = "0.1.14"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.10"
-smol = "2"
-thiserror = "2"
-toml_edit = "0.22"
-tokio = { version = "1", features = ["rt-multi-thread"] }
-tracing = "0.1"
+reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.11" }
+rand = "0.10.3"
+ratex-layout = "0.1.15"
+ratex-parser = "0.1.15"
+ratex-svg = { version = "0.1.15", default-features = false, features = ["embed-fonts", "standalone"] }
+ratex-types = "0.1.15"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+smol = "2.0.2"
+thiserror = "2.0.21"
+toml_edit = "0.25.19"
+tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
+tracing = "0.1.44"
 tracing-appender = "0.2.5"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# AgentFS SDK 0.6.4 requires this engine. Linking a second Turso version in the
+# desktop binary causes duplicate native symbols; upgrade both together.
 turso = { version = "=0.4.4", default-features = false }
-url = "2"
+url = "2.5.8"

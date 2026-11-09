@@ -1,6 +1,8 @@
 use super::*;
 
 impl MainView {
+    // Entity::update requires mutable context access across its callback.
+    #[allow(clippy::needless_pass_by_ref_mut)]
     pub(crate) fn refresh_composer_blocking_error(&mut self, cx: &mut Context<'_, Self>) {
         let error = match &self.account_state {
             AccountState::Failed(error) => Some(*error),

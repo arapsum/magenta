@@ -2,11 +2,19 @@
 name = "magenta-application"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Headless conversation and workspace-agent workflows for Magenta"
+readme = "README.md"
 
 [dependencies]
 async-channel.workspace = true
 async-stream.workspace = true
 futures-util.workspace = true
+hex.workspace = true
 magenta-core.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

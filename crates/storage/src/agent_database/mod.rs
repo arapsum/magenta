@@ -108,7 +108,7 @@ impl TursoAgentDatabase {
         let mut digest = Sha256::new();
         digest.update(super::records::encode_path(project_root));
 
-        let key = format!("{:x}", digest.finalize());
+        let key = hex::encode(digest.finalize());
         self.projects_directory.join(key).join("agent.db")
     }
 
@@ -121,12 +121,12 @@ impl TursoAgentDatabase {
 
         let path = path.to_string_lossy().into_owned();
 
-        let database = turso::Builder::new_local(&path)
+        let connection = turso::Builder::new_local(&path)
             .build()
             .await
+            .map_err(database_error)?
+            .connect()
             .map_err(database_error)?;
-
-        let connection = database.connect().map_err(database_error)?;
 
         connection
             .execute("PRAGMA foreign_keys = ON", ())

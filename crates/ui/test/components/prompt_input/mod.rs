@@ -535,7 +535,7 @@ fn request_trims_prompt_and_preserves_configuration(cx: &mut TestAppContext) {
                 magenta_core::ModelId::new("gpt-5.4")
             );
             assert_eq!(request.generation.effort, EffortLevel::High);
-            assert!(request.attachments.is_empty());
+            assert_eq!(request.attachments, Vec::<std::path::PathBuf>::new());
         })
         .expect("the composer test window should remain open");
 }

@@ -23,7 +23,10 @@ fn projects_persist_and_forgetting_one_does_not_delete_conversations() {
         assert_eq!(store.projects().await.unwrap()[0].root, project_root);
 
         store.remove_project(project_root).await.unwrap();
-        assert!(store.projects().await.unwrap().is_empty());
+        assert_eq!(
+            store.projects().await.unwrap(),
+            Vec::<magenta_core::Project>::new()
+        );
         assert_eq!(store.summaries().await.unwrap().len(), 1);
         assert_eq!(
             store

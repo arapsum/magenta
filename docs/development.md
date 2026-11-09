@@ -5,10 +5,19 @@ current product behavior, start with the [project README](../README.md).
 
 ## Toolchain and Linux dependencies
 
-[CI](../.github/workflows/ci.yml) uses Rust **1.98.0** on Ubuntu 24.04. This is the
-tested toolchain, not a separately maintained minimum supported Rust version.
-Most crates use edition 2024; the desktop package uses edition 2021. Keep
+[CI](../.github/workflows/ci.yml) uses Rust **1.99.1** on Ubuntu 24.04, matching
+[`rust-toolchain.toml`](../rust-toolchain.toml) and the workspace Rust requirement.
+All crates use edition 2024. Keep
 `Cargo.lock` and use `--locked` to reproduce the dependency graph.
+
+Direct dependencies track current stable releases, with one compatibility
+exception: **Turso remains pinned to 0.4.4**. The latest published AgentFS SDK,
+0.6.4, still requires that engine, including in its
+[upstream manifest](https://github.com/tursodatabase/agentfs/blob/main/sdk/rust/Cargo.toml).
+Turso 0.8.3 and 0.4.4 export colliding native symbols and cannot link into the
+desktop binary together. Upgrade the application store and SDK together when
+a compatible stable SDK is available; do not bypass duplicate-symbol errors.
+GPUI Kit 0.9.0 and its `gpui-pre-*` HTTP adapters are kept on matching versions.
 
 GPUI Kit is pinned in the [workspace manifest](../Cargo.toml). Its native
 graphics stack requires system development libraries. The Ubuntu packages used

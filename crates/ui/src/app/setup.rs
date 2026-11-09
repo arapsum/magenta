@@ -5,7 +5,7 @@ use magenta_core::ConversationMode;
 use super::{AccountState, AgentCapability, BubblewrapCapability, MainView, ModelCatalogState};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum SetupItemState {
+pub enum SetupItemState {
     Loading,
     Ready,
     Attention,
@@ -13,7 +13,7 @@ pub(crate) enum SetupItemState {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum SetupPrimaryAction {
+pub enum SetupPrimaryAction {
     Connect,
     ReloadModels,
     Finish,
@@ -22,14 +22,14 @@ pub(crate) enum SetupPrimaryAction {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct SetupItem {
+pub struct SetupItem {
     pub(crate) title: &'static str,
     pub(crate) detail: String,
     pub(crate) state: SetupItemState,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct SetupReadiness {
+pub struct SetupReadiness {
     pub(crate) acknowledged: bool,
     pub(crate) chat_ready: bool,
     pub(crate) primary_action: SetupPrimaryAction,
@@ -145,6 +145,8 @@ impl MainView {
         }
     }
 
+    // The entity-update callback needs the mutable window for composer actions.
+    #[allow(clippy::needless_pass_by_ref_mut)]
     pub(crate) fn choose_setup_workspace(
         &mut self,
         window: &mut Window,
@@ -167,17 +169,13 @@ impl MainView {
     pub(crate) fn acknowledge_setup(
         &mut self,
         focus_composer: bool,
-        window: &mut Window,
+        window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
         self.persist_setup_acknowledgement(true, focus_composer, window, cx);
     }
 
-    pub(crate) fn show_setup_on_new_chat(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
+    pub(crate) fn show_setup_on_new_chat(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
         self.persist_setup_acknowledgement(false, false, window, cx);
     }
 
@@ -185,7 +183,7 @@ impl MainView {
         &mut self,
         acknowledged: bool,
         focus_composer: bool,
-        window: &mut Window,
+        window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
         if self.setup_save_task.is_some() {

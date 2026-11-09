@@ -516,7 +516,7 @@ pub fn display_diff(path: &str, before: &str, after: &str) -> String {
 pub fn digest(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 fn invalid(message: &str) -> io::Error {

@@ -5,7 +5,7 @@ fn response_chunks_preserve_markdown_and_unicode() {
     let response = "A calm café with **bold** detail.";
     let chunks = response_chunks(response);
 
-    assert!(!chunks.is_empty());
+    assert_ne!(chunks, Vec::<String>::new());
     assert_eq!(chunks.concat(), response);
 }
 

@@ -180,8 +180,11 @@ fn hunk_detection_handles_crlf_empty_and_malformed_diffs() {
         ),
         vec![1, 4]
     );
-    assert!(parse_hunk_lines("").is_empty());
-    assert!(parse_hunk_lines("not a unified diff\n+still content").is_empty());
+    assert_eq!(parse_hunk_lines(""), Vec::<usize>::new());
+    assert_eq!(
+        parse_hunk_lines("not a unified diff\n+still content"),
+        Vec::<usize>::new()
+    );
     assert_eq!(parse_hunk_lines("@@ malformed\ncontent"), vec![0]);
 }
 

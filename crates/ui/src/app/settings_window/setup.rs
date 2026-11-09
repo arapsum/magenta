@@ -162,7 +162,7 @@ fn status_setting(
                             .child(item.detail.clone()),
                     ),
             )
-            .when_some(action, |this, action| this.child(action))
+            .when_some(action, gpui_kit::ParentElement::child)
             .into_any_element()
     })
 }

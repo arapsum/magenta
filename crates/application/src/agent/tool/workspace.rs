@@ -125,7 +125,7 @@ async fn apply_content_cache(context: &AgentStreamContext, prepared: &mut Prepar
         return;
     };
 
-    let content_hash = format!("{:x}", Sha256::digest(prepared.preview.output.as_bytes()));
+    let content_hash = hex::encode(Sha256::digest(prepared.preview.output.as_bytes()));
 
     if let Ok(Some(cached)) = services
         .cache

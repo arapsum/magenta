@@ -9,7 +9,7 @@ pub mod managed;
 
 use image::{AnimationDecoder as _, ImageFormat};
 use magenta_core::{Attachment, AttachmentDraft, StorageErrorKind};
-use rand::RngCore as _;
+use rand::Rng as _;
 use rusqlite::Connection;
 
 use crate::{Result, database_error, failure, unavailable};
