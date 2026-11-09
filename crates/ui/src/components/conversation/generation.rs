@@ -19,7 +19,7 @@ impl ConversationView {
             provider_id.clone(),
             self.origins.get(&assistant_id).cloned(),
         ));
-        self.start_generation_clock(generation, assistant_id, window, cx);
+        self.start_generation_clock(generation, assistant_id, cx);
         self.generation_task = Some(cx.spawn_in(window, async move |view, window| {
             let mut completed = None;
             let mut stream = stream;
@@ -106,25 +106,23 @@ impl ConversationView {
         &mut self,
         generation: u64,
         assistant_id: MessageId,
-        window: &Window,
         cx: &Context<'_, Self>,
     ) {
         self.generation_clock_task.take();
-        self.generation_clock_task = Some(cx.spawn_in(window, async move |view, window| {
+        self.generation_clock_task = Some(cx.spawn(async move |view, cx| {
             loop {
-                window
-                    .background_executor()
+                cx.background_executor()
                     .timer(GENERATION_CLOCK_INTERVAL)
                     .await;
 
-                match view.update_in(window, |view, _, cx| {
+                match view.update(cx, |view, cx| {
                     let active = view.generation == generation
                         && view.streaming_message == Some(assistant_id)
-                        && view
-                            .generation_progress
-                            .as_ref()
-                            .is_some_and(|progress| progress.message_id == assistant_id);
+                        && view.generation_progress.as_ref().is_some_and(|progress| {
+                            progress.message_id == assistant_id && !progress.final_answer_started
+                        });
                     if active {
+                        view.remeasure_message(assistant_id);
                         cx.notify();
                     }
                     active

@@ -14,6 +14,7 @@ impl ConversationView {
         self.live_commands.clear();
         self.trace_disclosure_overrides.clear();
         self.trace_entry_overrides.clear();
+        self.trace_tab_selections.clear();
         self.conversation = Some(loaded.conversation);
         self.composer
             .update(cx, |composer, cx| composer.set_thread_active(true, cx));
@@ -64,7 +65,8 @@ impl ConversationView {
         }
 
         let old_count = self.messages.len();
-        let was_streaming = self.streaming_message.is_some();
+        let previous_streaming = self.streaming_message;
+        let was_streaming = previous_streaming.is_some();
         let mut changed_indices = Vec::new();
 
         self.conversation = Some(snapshot.conversation);
@@ -110,7 +112,19 @@ impl ConversationView {
 
         self.streaming_message = snapshot.streaming_message;
         self.generation_progress = snapshot.generation_progress;
-        self.generation_clock_task.take();
+        let clock_message = self.streaming_message.filter(|id| {
+            self.generation_progress.as_ref().is_some_and(|progress| {
+                progress.message_id == *id && !progress.final_answer_started
+            })
+        });
+        if previous_streaming != clock_message || clock_message.is_none() {
+            self.generation_clock_task.take();
+        }
+        if self.generation_clock_task.is_none()
+            && let Some(message_id) = clock_message
+        {
+            self.start_generation_clock(self.generation, message_id, cx);
+        }
         self.agent_controller = snapshot.agent_controller;
         self.pending_agent_approval = snapshot.pending_agent_approval;
         self.live_commands = snapshot.live_commands;
@@ -296,6 +310,7 @@ impl ConversationView {
             live_commands: HashMap::new(),
             trace_disclosure_overrides: HashMap::new(),
             trace_entry_overrides: HashMap::new(),
+            trace_tab_selections: HashMap::new(),
             older_cursor: None,
             has_older: false,
             page_load: PageLoadState::Idle,
@@ -315,6 +330,7 @@ impl ConversationView {
         self.live_commands.clear();
         self.trace_disclosure_overrides.clear();
         self.trace_entry_overrides.clear();
+        self.trace_tab_selections.clear();
         self.older_cursor = None;
         self.has_older = false;
         self.page_load = PageLoadState::Idle;
@@ -342,6 +358,7 @@ impl ConversationView {
         self.live_commands.clear();
         self.trace_disclosure_overrides.clear();
         self.trace_entry_overrides.clear();
+        self.trace_tab_selections.clear();
         self.conversation = None;
         self.messages.clear();
         self.origins.clear();
@@ -588,6 +605,11 @@ impl ConversationView {
                 .any(|message| message.message.id == *message_id)
         });
         self.trace_disclosure_overrides.retain(|message_id, _| {
+            self.messages
+                .iter()
+                .any(|message| message.message.id == *message_id)
+        });
+        self.trace_tab_selections.retain(|message_id, _| {
             self.messages
                 .iter()
                 .any(|message| message.message.id == *message_id)

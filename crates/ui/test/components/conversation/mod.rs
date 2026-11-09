@@ -1,3 +1,4 @@
+mod activity;
 mod streaming;
 
 use std::{

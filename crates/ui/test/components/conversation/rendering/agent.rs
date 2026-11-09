@@ -42,7 +42,7 @@ fn message(trace: AssistantTrace) -> Message {
 }
 
 #[test]
-fn trace_entries_render_newest_first_for_reverse_timeline() {
+fn trace_entries_render_in_chronological_order() {
     let trace = AssistantTrace {
         entries: vec![
             trace_entry(
@@ -66,8 +66,8 @@ fn trace_entries_render_newest_first_for_reverse_timeline() {
     };
     let message = message(trace);
     let entries = trace_entries_for_timeline(&message);
-    assert_eq!(entries[0].key, "tool:command-1");
-    assert_eq!(entries[1].key, "reasoning:item-1:0");
+    assert_eq!(entries[0].key, "reasoning:item-1:0");
+    assert_eq!(entries[1].key, "tool:command-1");
 }
 
 #[test]

@@ -213,6 +213,28 @@ pub struct LiveRunSnapshot {
     pub(crate) live_commands: HashMap<(MessageId, String), LiveCommand>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TraceTab {
+    #[default]
+    Steps,
+    Reasoning,
+    Search,
+    Tools,
+}
+
+impl TraceTab {
+    const ALL: [Self; 4] = [Self::Steps, Self::Reasoning, Self::Search, Self::Tools];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Steps => "Steps",
+            Self::Reasoning => "Reasoning",
+            Self::Search => "Search",
+            Self::Tools => "Tools",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TraceDisclosureOverride {
     Open,
@@ -258,6 +280,7 @@ pub struct ConversationView {
     live_commands: HashMap<(MessageId, String), LiveCommand>,
     trace_disclosure_overrides: HashMap<MessageId, TraceDisclosureOverride>,
     trace_entry_overrides: HashMap<(MessageId, String), bool>,
+    trace_tab_selections: HashMap<MessageId, TraceTab>,
     older_cursor: Option<magenta_core::MessageSequence>,
     has_older: bool,
     page_load: PageLoadState,

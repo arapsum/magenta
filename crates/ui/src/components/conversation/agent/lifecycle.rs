@@ -194,7 +194,7 @@ impl ConversationView {
             self.origins.get(&assistant_id).cloned(),
         ));
 
-        self.start_generation_clock(generation, assistant_id, window, cx);
+        self.start_generation_clock(generation, assistant_id, cx);
         self.generation_task = Some(cx.spawn_in(window, async move |view, window| {
             let mut completed = None;
             let mut stream = stream;

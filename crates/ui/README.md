@@ -48,11 +48,17 @@ default `Assets` and the desktop assets when embedding `MainView` elsewhere.
   from storage and must not be assembled from that visible slice. Terminal
   saves happen separately from streaming text updates; a failed save retains
   the message and blocks navigation until recovery.
-- The Thinking timeline combines provider reasoning summaries with observable
-  tool work. It opens while work is active, keeps live command details bounded,
-  and collapses after the final answer unless the user explicitly overrides it.
-  Approval controls remain outside the timeline and stay accessible while
-  completed activity is collapsed.
+- The activity header uses an animated nine-pixel grid and a tenths-of-a-second
+  elapsed timer. The animation follows GPUI's reduced-motion preference.
+- The expandable activity rail has Steps, Reasoning, Search, and Tools views.
+  Steps follow recorded execution order; Reasoning shows provider summaries;
+  Search shows project queries and file matches; Tools shows file and command
+  targets, completed patch counts, and expandable input/output. These views use
+  observed events, without synthesizing steps or exposing private reasoning.
+- Activity opens while work is active and collapses when the final answer starts,
+  unless the user explicitly overrides it. Tab choices and detail disclosures
+  survive live updates. Approval controls remain outside the rail and stay
+  accessible while completed activity is collapsed.
 - Chat uses a compact composer for ordinary questions. Work expands the composer
   with a project, Files, and Changes rail and keeps its draft separate from Chat.
 - At widths below 520 px, the composer places its controls below the input.
