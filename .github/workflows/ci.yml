@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out the repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install the Rust toolchain
         run: |
@@ -42,7 +42,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out the repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install the Rust toolchain
         run: |
@@ -73,25 +73,33 @@ jobs:
             pkg-config
 
       - name: Cache Rust dependencies and build artifacts
-        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v1-magenta-ubuntu-24.04
           cache-targets: "true"
 
+      - name: Check all workspace targets
+        run: cargo check --workspace --locked --all-targets --all-features
+
       - name: Run strict Clippy
         run: >-
-          cargo clippy --locked --all-targets --all-features --
+          cargo clippy --workspace --locked --all-targets --all-features --
           -D warnings
           -W clippy::pedantic
           -W clippy::nursery
           -W rust-2018-idioms
+
+      - name: Build warning-free Rust documentation
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --locked --all-features --no-deps
 
   test:
     name: Test
     runs-on: ubuntu-24.04
     steps:
       - name: Check out the repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install the Rust toolchain
         run: |
@@ -122,7 +130,7 @@ jobs:
             pkg-config
 
       - name: Cache Rust dependencies and build artifacts
-        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v1-magenta-ubuntu-24.04
           cache-targets: "true"

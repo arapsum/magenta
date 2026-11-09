@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    # AgentFS SDK 0.6.4 must share the application's Turso 0.4 engine.
+    ignore:
+      - dependency-name: turso
+        versions:
+          - ">=0.5.0"
+    groups:
+      rust-dependencies:
+        patterns:
+          - "*"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

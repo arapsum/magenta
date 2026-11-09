@@ -71,6 +71,7 @@ default package; use the commands below for workspace-wide verification.
 
 ```bash
 cargo fmt --all -- --check
+bash scripts/check-rust-module-lines.sh
 cargo check --workspace --locked --all-targets --all-features
 cargo test --workspace --locked --all-features
 cargo clippy --workspace --locked --all-targets --all-features -- \
@@ -80,8 +81,8 @@ cargo clippy --workspace --locked --all-targets --all-features -- \
 `default-members = ["crates/desktop"]` means an unqualified `cargo test`, even
 with `--all-targets`, selects the desktop package's tests. Use `--workspace` for
 all packages, or `-p magenta-storage` (for example) for a focused check. CI runs
-workspace tests; its Clippy command uses default package selection. The command
-above explicitly lints all workspace targets, including library test targets.
+workspace tests, checks, Clippy, and warning-free documentation. The commands
+above explicitly include all workspace targets, including library test targets.
 
 The crate READMEs list focused tests. GPUI tests use the kit's test-support
 feature. Real command-isolation tests in `magenta-workspace` return early when
