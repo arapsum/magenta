@@ -26,12 +26,12 @@ crate supplies the production locations listed in the
 
 ## Turso and agent data
 
-[turso_app.rs](src/turso_app.rs) implements primary conversation/project
-persistence with local Turso and `_magenta_schema` versioning. Immediate
-transactions retain the existing atomic turn lifecycle. Search uses a portable
-`LIKE` fallback while Turso's FTS support is experimental.
+[turso_app](src/turso_app/mod.rs) implements primary conversation/project
+persistence with local Turso and `_magenta_schema` version **3**. Immediate
+transactions retain the existing atomic turn lifecycle. Search currently uses
+portable `LIKE` queries; FTS is not enabled in the application adapter.
 
-[agent_database.rs](src/agent_database.rs) creates `agent.db` beneath
+[agent_database](src/agent_database/mod.rs) creates `agent.db` beneath
 `projects/<root-hash>/`. It stores reviewed/candidate memories, hybrid lexical
 and cosine retrieval data, incremental code chunks, bounded content-cache
 versions, and AgentFS session state. Cache retention is three versions per path
@@ -68,23 +68,24 @@ prevents a generated title from replacing a concurrent manual rename.
 
 ## Schema and attachments
 
-[schema.sql](src/schema.sql) defines schema version **7**.
-[migrations](src/migrations/mod.rs) upgrade versions 1–6 transactionally:
+[schema.sql](src/schema.sql) defines legacy SQLite schema version **9**.
+[migrations](src/migrations/mod.rs) upgrade versions 1–8 transactionally:
 managed-attachment metadata (v2), agent runs/activity (v3), projects (v4), FTS
-search (v5), omitted-context counts (v6), and structured response failures (v7).
+search (v5), omitted-context counts (v6), structured response failures (v7),
+unified assistant traces and thinking duration (v8), and typed commands (v9).
 Unknown schema versions are rejected. Update both fresh schema and migrations
 when changing persisted fields.
 
 Initialization marks unfinished messages and agent runs stopped. Text deltas
 are not persisted continuously, so a crash can lose text since turn creation.
 
-[attachments.rs](src/attachments.rs) validates PNG, JPEG, WebP, and non-animated
+[attachments](src/attachments/mod.rs) validates PNG, JPEG, WebP, and non-animated
 GIF images, with limits of four images per turn and 10 MiB per image. Imported
 files get opaque names in the database's sibling `attachments/` directory.
 Failed imports/turns clean up their managed copies; reconciliation handles
 orphaned files. Deletion removes managed copies without deleting original
 sources. Path encoding and managed-file checks also live in
-[records.rs](src/records.rs) and [managed_attachments.rs](src/managed_attachments.rs).
+[records.rs](src/records.rs) and [managed attachments](src/attachments/managed.rs).
 
 ## Settings behavior
 
@@ -104,9 +105,9 @@ cargo test --locked -p magenta-storage
 cargo doc --locked -p magenta-storage --no-deps
 ```
 
-[Persistence tests](tests/persistence.rs) cover schema/history behavior and retry;
-[context and paging tests](tests/context_and_paging.rs) cover bounds and
-context selection; [attachment tests](tests/attachments.rs) cover ownership and
+[Persistence tests](test/persistence/mod.rs) cover schema/history behavior and retry;
+[context and paging tests](test/context_and_paging.rs) cover bounds and
+context selection; [attachment tests](test/attachments.rs) cover ownership and
 cleanup. Settings have unit tests alongside their implementation. Use temporary
 directories in tests, not the user's database. See
 [error handling](../../docs/error-handling.md) for save and migration failures.

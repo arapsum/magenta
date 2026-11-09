@@ -1,0 +1,31 @@
+name: Crash or startup failure
+description: Report a crash, freeze, or failure to open Magenta.
+title: "[Crash]: "
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Magenta version and installation source
+      placeholder: 0.1.0-alpha.1, built from commit …
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Linux distribution, desktop, and Wayland or X11
+      placeholder: Ubuntu 24.04, GNOME, Wayland
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps, expected behavior, and what happened
+      description: Include whether this affects a fresh launch or existing local data.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Inspect excerpts first. Remove tokens, private prompts, protected file contents, and personal paths. Never attach your database or keyring.
+      render: text

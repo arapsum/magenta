@@ -9,6 +9,23 @@ The Alpha is intended to turn the current prototype into an installable,
 recoverable, and testable release without prematurely expanding provider or
 platform support.
 
+## Implementation status — November 8, 2026
+
+- Milestone 1 now has the Alpha candidate version, shared package metadata,
+  contribution guide, changelog, issue forms, and [support/privacy contract](docs/alpha.md).
+  Rust and direct dependencies have been updated to the current stable baseline,
+  with the [documented Turso/AgentFS compatibility pin](docs/development.md#toolchain-and-linux-dependencies).
+- Milestones 2 and 3 have implementations and behavioral tests for per-mode
+  defaults and typed provider commands. Full Alpha qualification remains gated
+  on the exit criteria below.
+- Milestone 4 has setup/readiness guidance and onboarding persistence. About
+  and diagnostics, provider retry guidance, and remaining recovery validation
+  are the next product work.
+- Milestones 5–7 remain release work: security and migration safeguards,
+  performance/accessibility evidence, packaging, and release/rollback automation.
+
+These are implementation notes, not a declaration that the Alpha is ready to ship.
+
 ## Milestone 1: Define the Alpha contract
 
 - Establish `0.1.0-alpha.1` as the first Alpha version.

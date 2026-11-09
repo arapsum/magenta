@@ -1,0 +1,29 @@
+name: Workspace agent behavior
+description: Report tool, approval, review, or workspace problems.
+title: "[Agent]: "
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Magenta version, Linux distribution, and model
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal project and reproduction steps
+      description: Use a disposable project. Include the prompt, tool names, expected result, and actual result without private code.
+    validations:
+      required: true
+  - type: textarea
+    id: approvals
+    attributes:
+      label: Approvals, review state, and host-file changes
+      description: State which operations you approved, whether Apply or Discard was used, and whether host files changed unexpectedly.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized trace or error details
+      description: Remove credentials, protected-file contents, private source code, and personal paths before sharing.

@@ -16,9 +16,10 @@ It constructs and injects:
 | Adapter/workflow | Used for |
 | --- | --- |
 | `OpenAiProvider` | Shared chat, agent, authentication and model-catalog ports |
-| `SqliteConversationStore` | Conversation history and project registration |
+| `TursoAppStore` | Conversation history, assistant traces, and project registration |
+| `TursoAgentDatabase`, `LocalEmbeddingProvider` | Project memory, indexed code, content cache, sessions, and local embeddings |
 | `TomlSettingsStore` | Persistent appearance, typography, generation, and onboarding preferences |
-| `LocalWorkspace` | Workspace tools and read-only project browsing |
+| `LocalWorkspace`, `AgentFsWorkspace`, `WorkspaceCodeIndexer` | Read-only browsing, staged workspace tools, final review, and code indexing |
 | `BubblewrapCommandRunner` readiness probe | Reports local sandbox availability; commands remain disabled in the current desktop build |
 | `SendMessage`, `RegenerateMessage`, `RunWorkspaceAgent`, `ConversationHistory`, `ProjectCatalog` | Workflows passed into the UI |
 

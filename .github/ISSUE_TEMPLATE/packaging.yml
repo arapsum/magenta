@@ -1,0 +1,30 @@
+name: Build, install, upgrade, or rollback
+description: Report source-build or release-package problems.
+title: "[Packaging]: "
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Magenta version or commit and installation method
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Linux distribution, architecture, and Rust version
+      description: For source builds, include rustc --version and whether the pinned toolchain was used.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Commands, expected behavior, and actual result
+      description: State whether this is a clean install, upgrade, uninstall, or rollback and whether local data was preserved.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized build or package-manager output
+      description: Remove credentials and private paths before sharing.
+      render: text

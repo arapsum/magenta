@@ -1,0 +1,30 @@
+name: Sign-in or provider failure
+description: Report account, model discovery, or generation problems.
+title: "[Provider]: "
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Magenta version, Linux distribution, and Wayland or X11
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Provider, model, effort, and Chat or Work
+      description: Include the response reference code when one is shown.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps, expected behavior, and what happened
+      description: Use a minimal non-private prompt. State whether sign-in, reconnect, or catalog reload changes the result.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized error details
+      description: Share the response reference code and allowlisted details. Omit tokens, callback URLs, account identifiers, and private prompts.
+      render: text

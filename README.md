@@ -4,6 +4,11 @@ Magenta is an experimental native AI chat and workspace client written in Rust
 with GPUI through [GPUI Kit](https://github.com/longbridge/gpui-kit). The workspace
 currently pins `gpui-kit` to `0.9.0`.
 
+The first Alpha candidate is **`0.1.0-alpha.1`** and is not yet released. Its
+support target is Ubuntu 24.04 on Wayland and X11. Read
+[Alpha limitations and privacy](docs/alpha.md), [release notes](CHANGELOG.md),
+and [contribution guidance](CONTRIBUTING.md) alongside the [roadmap](ROADMAP.md).
+
 ![Magenta Chat conversation with structured Markdown, code, and the compact composer](assets/magenta-conversation.png)
 
 It combines streaming conversations, local history, a Git-aware Changes panel,
@@ -38,8 +43,8 @@ reviewed AgentFS overlay can be mounted safely; file tools remain available.
   code, copy actions, and inline/display math rendered with RaTeX.
 - Up to four local image attachments per Chat message, with validation and
   managed copies so moving the original file does not break history.
-- SQLite history with pins, rename, confirmed deletion, generated titles,
-  full-text search, and navigation to matched messages. Pages contain up to
+- Local Turso history with pins, rename, confirmed deletion, generated titles,
+  text search, and navigation to matched messages. Pages contain up to
   50 messages; the conversation view retains at most 150 rendered messages.
 - Model-aware context budgeting that selects recent whole turns independently
   of the visible page and indicates when older context was omitted.
@@ -53,9 +58,10 @@ reviewed AgentFS overlay can be mounted safely; file tools remain available.
   remain in the conversation.
 - A Git-aware Changes panel with repository status, staged and unstaged groups,
   file diffs, per-file and bulk stage/unstage actions, and confirmed commits.
-- Workspace listing, literal text search, bounded reads, file creation, and
-  patch previews. Ordinary file edits can be approved individually or for the
-  current run; protected reads and commands still need individual approval.
+- Workspace listing, literal/semantic search, bounded reads, file and directory
+  creation, and patch previews. Approved edits are staged in AgentFS for a final
+  Apply or Discard decision. Ordinary edits can be approved individually or for
+  the current run; protected reads still need individual approval.
 - A unified Thinking timeline for provider reasoning summaries and observable
   tool work, with compact activity labels, bounded scrolling, live command
   details, and automatic collapse after the response reaches its final answer.
@@ -90,8 +96,8 @@ verification commands. The package names below are also the names accepted by
 | [magenta-core](crates/core/README.md) | Domain values, ports, stream contracts, context budgeting | None |
 | [magenta-application](crates/application/README.md) | Sending, regeneration, retry, agent orchestration, history and project workflows | core |
 | [magenta-providers](crates/providers/README.md) | OpenAI authentication, model discovery, streaming; deterministic demo provider | core |
-| [magenta-storage](crates/storage/README.md) | SQLite history/projects, migrations, attachments, TOML settings | core |
-| [magenta-workspace](crates/workspace/README.md) | Workspace file access, repository status/diffs/staging/commits, Bubblewrap commands | core |
+| [magenta-storage](crates/storage/README.md) | Turso history and agent data, legacy SQLite, embeddings, attachments, TOML settings | core |
+| [magenta-workspace](crates/workspace/README.md) | Workspace access, AgentFS review, code indexing, repository operations, Bubblewrap commands | core |
 | [magenta-ui](crates/ui/README.md) | GPUI conversations, Chat/Work composers, workbench, Changes panel, themes and settings | application, core |
 | [magenta-desktop](crates/desktop/README.md) | `magenta` executable, adapter wiring, assets, windows and diagnostics | All six library crates |
 
@@ -130,8 +136,11 @@ the composer for review; it does not resume or replay tools automatically.
 
 | Data | Location |
 | --- | --- |
-| Conversations, projects, assistant traces | `<platform-local-data>/magenta/conversations.sqlite3` |
+| Conversations, projects, assistant traces | `<platform-local-data>/magenta/magenta.db` |
 | Managed image copies | `<platform-local-data>/magenta/attachments/` |
+| Project memory, code index, cache and session records | `<platform-local-data>/magenta/projects/<root-hash>/agent.db` |
+| AgentFS review overlays | `<platform-local-data>/magenta/agentfs/` |
+| Cached embedding models | `<platform-local-data>/magenta/models/` |
 | Daily rotating logs | `<platform-local-data>/magenta/logs/` |
 | User preferences | `<platform-config>/magenta/settings.toml` |
 | Provider credentials | Operating system keyring |
@@ -142,8 +151,10 @@ attachments, and activity records are local and unencrypted. Selected message
 context, attached images, and agent tool results are sent to the connected
 provider to perform the requested work. Diagnostics have no built-in upload.
 
-SQLite uses WAL mode, foreign keys, a five-second busy timeout, and transactional
-migrations. On normal close, Magenta waits for a pending response save. On
+The application store enables foreign keys and a five-second busy timeout.
+Legacy SQLite history is retained separately and is not automatically imported.
+See the [Alpha data and backup contract](docs/alpha.md#local-data). On normal
+close, Magenta waits for a pending response save. On
 restart after an abrupt exit, streaming placeholders and running agent records
 recover as stopped; unsaved streamed text may be lost. A failed terminal save
 keeps the visible response and defers navigation until retry succeeds.
@@ -156,7 +167,7 @@ Settings apply across Magenta windows and persist without blocking the UI. A
 complete schema example is:
 
 ```toml
-version = 2
+version = 3
 
 [appearance]
 theme = "dark"
@@ -179,6 +190,9 @@ effort = "medium"
 provider = "openai"
 model = "gpt-5.6-codex"
 effort = "high"
+
+[onboarding]
+setup_acknowledged = false
 ```
 
 The `generation.chat` and `generation.work` tables are optional. Omitting either
@@ -193,8 +207,11 @@ If a configured model, provider, or effort is unavailable, Magenta keeps the TOM
 value unchanged, uses the best live fallback, and shows one deduplicated warning
 notice until the requested or effective value changes. An incomplete generation
 table is treated as Automatic, retained in the source file, and reported to
-diagnostics. Version-1 settings load with both generation preferences unset and
-are upgraded to version 2 only when a subsequent explicit save occurs.
+diagnostics. Version-1 settings load with both generation preferences unset;
+version-2 settings retain those preferences. Both load with setup unacknowledged
+and are upgraded to version 3 only on a subsequent explicit save. The
+`onboarding.setup_acknowledged` preference records dismissal or completion of
+first-run setup; live readiness remains available in Settings.
 
 Appearance accepts `system`, `light`, or `dark`; math styles accept `default`,
 `roman`, `sans-serif`, or `typewriter`. The UI labels those math choices as KaTeX
@@ -220,8 +237,10 @@ Type `/` at the start of the composer to search the provider's command catalog.
 command with Enter, Tab, or the mouse, then type its subject. `/review` may be
 submitted without a subject and uses the provider's “review the current
 workspace changes” fallback. `/plan` and `/explain` require a subject; in Chat,
-an attached image counts as `/explain`'s subject. Unknown slash-prefixed text,
-including `/remember …`, remains a normal prompt.
+an attached image counts as `/explain`'s subject. Unknown slash-prefixed text
+remains a normal prompt. In Work, a prompt beginning with `/remember ` also
+stores the following text as an active project memory; it is not a command
+palette entry.
 
 Commands apply to one submission. The selected command is saved on the user
 message, while assistant messages remain unchanged; retries and regenerations

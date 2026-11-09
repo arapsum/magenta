@@ -38,9 +38,11 @@ the desktop Secret Service through `keyring`; a working, unlocked service is
 needed for sign-in persistence.
 
 Bubblewrap is optional for building and chatting. Install `bubblewrap` and
-enable the necessary user namespaces to exercise Agent commands. The startup
-probe decides whether commands are available; the app can run with file tools
-only. See [workspace documentation](../crates/workspace/README.md).
+enable the necessary user namespaces to exercise the sandbox adapter's tests.
+Desktop startup reports probe readiness, but commands remain disabled until
+the reviewed AgentFS overlay can be mounted inside the sandbox. The app runs
+Work with file tools. See [workspace documentation](../crates/workspace/README.md)
+and the [Alpha contract](alpha.md).
 
 ## Run and inspect
 
