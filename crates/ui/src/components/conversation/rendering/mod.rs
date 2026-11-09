@@ -1,6 +1,7 @@
 mod agent;
 mod agent_cards;
 mod assistant;
+mod workspace_review;
 
 use chrono::Datelike as _;
 
