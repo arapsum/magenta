@@ -1,5 +1,7 @@
 //! Opt-in renders of the real application with isolated, in-memory fixtures.
 //! Run with `cargo test -p magenta-ui export_design_previews -- --ignored`.
+mod activity;
+
 use super::*;
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AssetSource, HeadlessAppContext, SharedString};
@@ -55,7 +57,10 @@ fn preview(
         email: Some("alex@example.com".to_owned()),
         plan: Some("plus".to_owned()),
     });
-    ports.models.lock().push(model("GPT-5.6"));
+    ports.models.lock().push(ModelDescriptor {
+        display_name: "GPT-6.1-Terra".to_owned(),
+        ..model("gpt-6.1-terra")
+    });
     let now = chrono::Utc::now().timestamp_millis();
     for (index, title) in [
         "A calmer way to work",
@@ -130,7 +135,7 @@ fn populate_conversation(cx: &mut HeadlessAppContext, view: &Entity<MainView>) {
     use crate::components::conversation::ConversationThread;
     let generation = GenerationConfig::new(
         ProviderId::new("openai"),
-        ModelId::new("GPT-5.6"),
+        ModelId::new("gpt-6.1-terra"),
         EffortLevel::Medium,
     );
     let messages = [

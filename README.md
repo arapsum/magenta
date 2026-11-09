@@ -67,9 +67,9 @@ panes so the input stays readable alongside the workbench.
   creation, and patch previews. Approved edits are staged in AgentFS for a final
   Apply or Discard decision. Ordinary edits can be approved individually or for
   the current run; protected reads still need individual approval.
-- A unified Thinking timeline for provider reasoning summaries and observable
-  tool work, with compact activity labels, bounded scrolling, live command
-  details, and automatic collapse after the response reaches its final answer.
+- An animated pixel-grid loader and an expandable activity rail with Steps,
+  Reasoning, Search, and Tools views, bounded details, real project search
+  matches, and automatic collapse when the response reaches its final answer.
 - Persistent, categorized response failures with relevant recovery actions,
   preserved partial output, and copyable, allowlisted diagnostic details.
 - Provider-advertised `/plan`, `/review`, and `/explain` commands with a
@@ -89,7 +89,8 @@ code workbench and keeps activity, approvals, files, and diffs in one focused
 view.
 
 [Dark start screen](assets/magenta-start-dark.png) ·
-[Light start screen](assets/magenta-start-light.png)
+[Light start screen](assets/magenta-start-light.png) ·
+[Activity timeline](assets/magenta-activity.png)
 
 ![Magenta conversation beside the code workbench](assets/magenta-code-workbench.png)
 

@@ -105,10 +105,13 @@ and GPUI's offscreen GPU renderer:
 
 ```bash
 cargo test --locked -p magenta-ui export_design_previews -- --ignored --nocapture
+cargo test --locked -p magenta-ui export_activity_previews -- --ignored --nocapture
 ```
 
 The opt-in exporter writes light/dark Chat and Work landing screens,
 conversations, compact setup, and a split workbench to `target/design-preview/`.
+The activity exporter adds loading and all four detail views in dark, light,
+and compact layouts. Its visual reference is [Beautiful UI](https://www.beautifului.dev/).
 Set `MAGENTA_PREVIEW_DIR` to choose another output directory. It uses example
 account data and requires a working Metal or Vulkan renderer. It does not use
 the user's database, keyring, network account, or project files. Native window
