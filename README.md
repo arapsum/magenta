@@ -88,7 +88,13 @@ compact prompt surface, while Work pairs the conversation with a workspace-aware
 code workbench and keeps activity, approvals, files, and diffs in one focused
 view.
 
-![Magenta Work conversation beside the code workbench](assets/magenta-code-workbench.png)
+[Dark start screen](assets/magenta-start-dark.png) ·
+[Light start screen](assets/magenta-start-light.png)
+
+![Magenta conversation beside the code workbench](assets/magenta-code-workbench.png)
+
+These interface previews use in-memory example conversations and account data.
+See the [preview instructions](crates/ui/README.md#interface-previews) to regenerate them.
 
 ## Documentation and crate ownership
 

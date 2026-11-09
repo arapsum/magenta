@@ -92,6 +92,22 @@ helpers live in [visual.rs](src/components/visual.rs); the small native mark is
 bundled by the desktop asset source. Keep corner radii and spacing consistent
 between the start screen, conversation, and workbench.
 
+## Interface previews
+
+Render the real views with isolated in-memory fixtures, native text shaping,
+and GPUI's offscreen GPU renderer:
+
+```bash
+cargo test --locked -p magenta-ui export_design_previews -- --ignored --nocapture
+```
+
+The opt-in exporter writes light/dark Chat and Work landing screens,
+conversations, compact setup, and a split workbench to `target/design-preview/`.
+Set `MAGENTA_PREVIEW_DIR` to choose another output directory. It uses example
+account data and requires a working Metal or Vulkan renderer. It does not use
+the user's database, keyring, network account, or project files. Native window
+decorations and desktop focus behavior still need a real-window review.
+
 ## Verify
 
 From the repository root:

@@ -23,6 +23,7 @@ automation, and the remaining Alpha exit checks are tracked in [ROADMAP.md](ROAD
 - Refine the interface with graphite and ivory themes, a custom Magenta mark,
   quieter navigation, clearer conversation typography, and consistent surfaces.
 - Add draft-only Chat/Work starting points and adapt the composer to narrow panes.
+  Provide an opt-in native renderer for reproducible interface previews.
 - Establish `0.1.0-alpha.1` across all workspace packages, with shared MIT
   licensing, repository metadata, Rust requirements, and disabled crates.io publication.
 - Pin the development toolchain to Rust 1.99.1 and update direct dependencies

@@ -108,6 +108,9 @@ to the source rather than listing planned features as implemented.
 
 ## Manual UI review
 
+The [UI preview exporter](../crates/ui/README.md#interface-previews) renders
+isolated example screens in both themes before a real-window review.
+
 Exercise the states affected by the change, including:
 
 - New Chat, a project landing page, and long conversations with paged history.

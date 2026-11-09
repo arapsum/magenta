@@ -13,6 +13,8 @@ use gpui_kit::component::Root;
 use gpui_kit::{AppContext as _, Entity, TestAppContext, WindowHandle, px, size};
 
 mod behavior;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod design_preview;
 mod finder;
 use magenta_application::{ConversationHistory, ProjectCatalog, RegenerateMessage, SendMessage};
 use magenta_core::*;
