@@ -13,10 +13,10 @@ pub struct ProfileDetails {
 pub fn profile_details(account: Option<&ProviderAccount>) -> ProfileDetails {
     let Some(account) = account else {
         return ProfileDetails {
-            name: "Adleio".to_owned(),
-            detail: "Local profile".to_owned(),
-            initial: "A".to_owned(),
-            tooltip: "Local profile and settings".to_owned(),
+            name: "Your account".to_owned(),
+            detail: "Not connected".to_owned(),
+            initial: "M".to_owned(),
+            tooltip: "Account and settings".to_owned(),
             email: None,
             plan: None,
         };

@@ -20,8 +20,8 @@ impl AgentWorkbench {
                         .justify_center()
                         .size(px(42.))
                         .rounded(px(13.))
-                        .bg(cx.theme().accent.opacity(0.68))
-                        .text_color(cx.theme().primary)
+                        .bg(cx.theme().secondary)
+                        .text_color(cx.theme().muted_foreground)
                         .child(Icon::empty().path("icons/code.svg").size(px(20.))),
                 )
                 .child(
@@ -162,12 +162,12 @@ impl AgentWorkbench {
     ) -> AnyElement {
         h_flex()
             .flex_none()
-            .h(px(38.))
+            .h(px(44.))
             .items_center()
-            .gap(px(7.))
-            .px(px(9.))
+            .gap(px(10.))
+            .px(px(12.))
             .border_b_1()
-            .border_color(cx.theme().foreground.opacity(0.07))
+            .border_color(cx.theme().border)
             .bg(crate::components::visual::surface(
                 crate::components::visual::SurfaceLevel::Raised,
                 cx,
@@ -196,9 +196,9 @@ impl AgentWorkbench {
                     .items_center()
                     .justify_center()
                     .size(px(24.))
-                    .rounded_full()
-                    .bg(cx.theme().primary.opacity(0.16))
-                    .text_color(cx.theme().primary)
+                    .rounded(px(7.))
+                    .bg(cx.theme().accent)
+                    .text_color(cx.theme().magenta)
                     .child(Icon::empty().path("icons/code.svg").xsmall()),
             )
             .child(

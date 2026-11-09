@@ -29,6 +29,7 @@ impl PromptComposer {
         )];
 
         Self {
+            narrow_layout: false,
             input,
             preview,
             preview_source: String::new(),

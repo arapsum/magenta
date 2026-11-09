@@ -38,7 +38,11 @@ struct MagentaAssets;
 
 impl AssetSource for MagentaAssets {
     fn load(&self, path: &str) -> GpuiResult<Option<Cow<'static, [u8]>>> {
+        if let Some(icon) = magenta_ui::UiIcons.load(path)? {
+            return Ok(Some(icon));
+        }
         let asset = match path {
+            "icons/magenta.svg" => Some(include_bytes!("../assets/icons/magenta.svg").as_slice()),
             "icons/conversation-pin.svg" => {
                 Some(include_bytes!("../assets/icons/conversation-pin.svg").as_slice())
             }
@@ -138,8 +142,10 @@ impl AssetSource for MagentaAssets {
 
     fn list(&self, path: &str) -> GpuiResult<Vec<SharedString>> {
         let mut assets = gpui_kit::assets::Assets.list(path)?;
+        assets.extend(magenta_ui::UiIcons.list(path)?);
         if path.is_empty() || path == "icons" {
             assets.extend([
+                "icons/magenta.svg".into(),
                 "icons/conversation-pin.svg".into(),
                 "icons/conversation-rename.svg".into(),
                 "icons/conversation-delete.svg".into(),

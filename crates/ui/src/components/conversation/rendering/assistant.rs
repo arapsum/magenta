@@ -41,12 +41,28 @@ impl ConversationView {
 
         v_flex()
             .w_full()
-            .gap(px(13.))
+            .gap(px(16.))
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(crate::components::visual::brand_mark(24., cx))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .font_medium()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Magenta"),
+                    ),
+            )
             .when_some(
                 Self::render_context_notice(rendered),
                 gpui_kit::ParentElement::child,
             )
-            .child(self.render_assistant_trace(message, cx, view))
+            .when(
+                !message.assistant_trace.entries.is_empty() || streaming,
+                |this| this.child(self.render_assistant_trace(message, cx, view)),
+            )
             .when_some(
                 self.render_agent_approval(message.id, cx, view),
                 gpui_kit::ParentElement::child,
@@ -88,7 +104,7 @@ impl ConversationView {
                         .style(style)
                         .w_full()
                         .text_size(px(16.))
-                        .line_height(px(25.))
+                        .line_height(px(26.))
                         .code_block_actions(move |code_block, _window, _cx| {
                             let code_id = code_block
                                 .span

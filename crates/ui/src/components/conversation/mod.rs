@@ -413,10 +413,10 @@ impl ConversationView {
                 .w_full()
                 .bg(cx.theme().tokens.background.background.opacity(0.98))
                 .items_center()
-                .gap(px(8.))
+                .gap(px(10.))
                 .px(px(20.))
-                .pt(px(8.))
-                .pb(px(14.))
+                .pt(px(12.))
+                .pb(px(20.))
                 .when(self.is_scrolled_up(), |this| {
                     this.child(
                         Button::new("jump-to-latest-message")
@@ -491,7 +491,7 @@ impl Render for ConversationView {
                 .flex_grow_1()
                 .min_h_0()
                 .w_full()
-                .pt(px(48.))
+                .pt(px(24.))
                 .pb(px(26.)),
             )
             .child(self.render_thread_footer(cx))

@@ -19,7 +19,7 @@ use crate::{app::OpenConversationFinder, components::sidebar::state::DisclosureS
 use gpui_kit::base::{Align, Placement, PopoverState, Positioner, actions::Cancel};
 use gpui_kit::component::{
     ActiveTheme as _, Collapsible, Disableable as _, ElementExt as _, Icon, IconName,
-    Selectable as _, Sizable as _, StyledExt as _, ThemeStyled as _, box_shadow,
+    Selectable as _, Sizable as _, StyledExt as _, ThemeStyled as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -43,9 +43,9 @@ pub(super) use profile::{ProfileDetails, profile_details};
 use self::model::title_matches;
 
 const EXPANDED_WIDTH: gpui_kit::Pixels = px(280.);
-const ROW_HEIGHT: gpui_kit::Pixels = px(34.);
-const ROW_RADIUS: gpui_kit::Pixels = px(7.);
-const SECTION_LABEL_HEIGHT: gpui_kit::Pixels = px(28.);
+const ROW_HEIGHT: gpui_kit::Pixels = px(36.);
+const ROW_RADIUS: gpui_kit::Pixels = px(8.);
+const SECTION_LABEL_HEIGHT: gpui_kit::Pixels = px(30.);
 const INITIAL_RECENCY_LIMIT: usize = 6;
 const RECENCY_PAGE_SIZE: usize = 6;
 const ACCOUNT_MENU_WIDTH: gpui_kit::Pixels = px(248.);

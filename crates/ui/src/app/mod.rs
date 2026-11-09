@@ -407,6 +407,11 @@ impl MainView {
         cx: &mut Context<'_, Self>,
     ) -> Vec<Subscription> {
         let mut subscriptions = vec![
+            cx.observe(composer, |main, _, cx| {
+                if main.active_conversation.is_none() {
+                    cx.notify();
+                }
+            }),
             cx.subscribe_in(
                 composer,
                 window,

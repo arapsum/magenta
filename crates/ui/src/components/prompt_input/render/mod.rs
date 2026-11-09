@@ -1,5 +1,6 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
+    ActiveTheme as _, Disableable as _, ElementExt as _, Icon, IconName, Sizable as _,
+    StyledExt as _,
     button::{Button, ButtonVariants, Toggle, ToggleGroup},
     clipboard::Clipboard,
     h_flex,
@@ -42,7 +43,9 @@ impl Render for PromptComposer {
             || !self.attachments.is_empty()
             || !self.preview_source.is_empty();
         let has_chat_draft = !is_work && !self.input.read(cx).value().is_empty();
-        let expanded_chat = rich_chat || has_chat_draft;
+        let narrow_layout = self.narrow_layout;
+        let layout_view = cx.entity();
+        let expanded_chat = rich_chat || has_chat_draft || narrow_layout;
         let max_width = if is_work {
             px(760.)
         } else if self.thread_is_active() {
@@ -50,20 +53,16 @@ impl Render for PromptComposer {
         } else {
             px(660.)
         };
-        let surface_radius = if is_work || expanded_chat {
-            px(18.)
-        } else {
-            px(24.)
-        };
+        let surface_radius = px(18.);
         let surface_padding = if is_work || expanded_chat {
-            px(12.)
+            px(14.)
         } else {
-            px(7.)
+            px(10.)
         };
         let border_color = if focused && !generating {
-            cx.theme().ring.opacity(0.38)
+            cx.theme().ring.opacity(0.65)
         } else {
-            cx.theme().border.opacity(0.72)
+            cx.theme().input.opacity(0.72)
         };
         let palette = self.command_palette_element(&submit_view, cx);
 
@@ -76,6 +75,15 @@ impl Render for PromptComposer {
                 v_flex()
                     .id("prompt-composer-surface")
                     .debug_selector(|| "prompt-composer-surface".into())
+                    .on_prepaint(move |bounds, _, cx| {
+                        let narrow = bounds.size.width < px(520.);
+                        if narrow != narrow_layout {
+                            layout_view.update(cx, |composer, cx| {
+                                composer.narrow_layout = narrow;
+                                cx.notify();
+                            });
+                        }
+                    })
                     .relative()
                     .w_full()
                     .p(surface_padding)
@@ -100,7 +108,7 @@ impl Render for PromptComposer {
                         this.child(
                             v_flex()
                                 .w_full()
-                                .min_h(if is_work { px(88.) } else { px(64.) })
+                                .min_h(if is_work { px(96.) } else { px(80.) })
                                 .gap(px(12.))
                                 .justify_between()
                                 .child(self.render_input_content(cx))

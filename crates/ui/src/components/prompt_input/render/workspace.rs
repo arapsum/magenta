@@ -108,19 +108,12 @@ impl PromptComposer {
         h_flex()
             .w_full()
             .min_w_0()
-            .min_h(px(40.))
+            .min_h(px(38.))
             .items_center()
             .justify_between()
             .gap(px(8.))
             .px(px(10.))
-            .mt(px(5.))
-            .rounded(px(13.))
-            .border_1()
-            .border_color(cx.theme().foreground.opacity(0.065))
-            .bg(super::super::super::visual::surface(
-                super::super::super::visual::SurfaceLevel::Raised,
-                cx,
-            ))
+            .mt(px(7.))
             .child(self.workspace_controls(view, cx))
             .into_any_element()
     }
@@ -204,10 +197,10 @@ impl PromptComposer {
             .tooltip("Add context or choose a command")
             .size(px(32.))
             .p_0()
-            .rounded_full()
+            .rounded(px(9.))
             .border_1()
-            .border_color(cx.theme().foreground.opacity(0.08))
-            .bg(cx.theme().accent.opacity(0.38))
+            .border_color(cx.theme().border.opacity(0.8))
+            .bg(cx.theme().secondary)
             .icon(IconName::Plus);
 
         Popover::new(popover_id)

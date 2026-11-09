@@ -150,23 +150,23 @@ impl AgentWorkbench {
         cx: &App,
     ) -> AnyElement {
         let Some(path) = self.active_path.as_deref() else {
-            return div().h(px(28.)).flex_none().into_any_element();
+            return div().h(px(34.)).flex_none().into_any_element();
         };
         let Some(index) = self.tab_index(path) else {
-            return div().h(px(28.)).flex_none().into_any_element();
+            return div().h(px(34.)).flex_none().into_any_element();
         };
         let tab = &self.tabs[index];
         let narrow = window.viewport_size().width < px(696.);
         let has_diff = tab.diff.as_ref().is_some_and(WorkbenchDiff::has_content);
         let mode = tab.mode;
         let mut bar = h_flex()
-            .h(px(30.))
+            .h(px(34.))
             .flex_none()
             .min_w_0()
-            .gap(px(5.))
-            .px(px(10.))
+            .gap(px(8.))
+            .px(px(12.))
             .border_b_1()
-            .border_color(cx.theme().foreground.opacity(0.055))
+            .border_color(cx.theme().border.opacity(0.65))
             .bg(crate::components::visual::surface(
                 crate::components::visual::SurfaceLevel::Raised,
                 cx,

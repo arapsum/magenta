@@ -17,6 +17,8 @@ The public [theme module](src/theme.rs) registers bundled themes and provides
 allows desktop startup to report a theme failure while using a default theme.
 Initialize GPUI Kit and settings globals before constructing the main view;
 the [desktop entry point](../desktop/src/main.rs) shows the complete setup.
+`UiIcons` is the small additional icon asset source; compose it with GPUI Kit's
+default `Assets` and the desktop assets when embedding `MainView` elsewhere.
 
 ## Source map
 
@@ -53,6 +55,9 @@ the [desktop entry point](../desktop/src/main.rs) shows the complete setup.
   completed activity is collapsed.
 - Chat uses a compact composer for ordinary questions. Work expands the composer
   with a project, Files, and Changes rail and keeps its draft separate from Chat.
+- At widths below 520 px, the composer places its controls below the input.
+  Start-screen suggestions populate an empty draft and focus it; they never
+  submit a message or replace an existing draft.
 - Opening a file creates or focuses its tab. Each tab retains file and diff
   state; a new change for that path can update its preview. Closing the active
   tab selects a neighbor. Changing conversations clears the workbench session.
@@ -80,6 +85,12 @@ status colors. Settings choose installed UI/mono font families and sizes; they
 do not download fonts, and explicit component sizes remain part of typography.
 Math has separate style and size settings. See the
 [root settings reference](../../README.md#local-data-and-settings).
+
+Use neutral surfaces to separate navigation, content, and floating controls.
+Keep magenta for selection, branding, and primary actions. Surface and shadow
+helpers live in [visual.rs](src/components/visual.rs); the small native mark is
+bundled by the desktop asset source. Keep corner radii and spacing consistent
+between the start screen, conversation, and workbench.
 
 ## Verify
 

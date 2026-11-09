@@ -15,12 +15,17 @@ impl MainView {
         } else {
             "Hide sidebar"
         };
+        let title = self
+            .active_conversation
+            .and_then(|id| self.sidebar.read(cx).title_for(id))
+            .unwrap_or_else(|| "New conversation".to_owned());
 
         h_flex()
             .id("titlebar-controls")
             .h_full()
             .items_center()
-            .px(px(4.))
+            .gap(px(10.))
+            .px(px(8.))
             .child(
                 Button::new("titlebar-sidebar-toggle")
                     .ghost()
@@ -31,6 +36,18 @@ impl MainView {
                     .on_click(move |_, _, cx| {
                         sidebar_view.update(cx, SidebarView::toggle_collapsed);
                     }),
+            )
+            .child(div().h(px(12.)).w(px(1.)).bg(cx.theme().border))
+            .child(
+                div()
+                    .min_w_0()
+                    .max_w(px(260.))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .text_size(px(11.))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(title),
             )
             .into_any_element()
     }
@@ -260,7 +277,7 @@ impl Render for MainView {
         let _ = &self.subscriptions;
         let narrow = window.viewport_size().width < px(696.);
         let compact_workbench = window.viewport_size().width < px(920.);
-        let compact_setup = window.viewport_size().height < px(700.);
+        let compact_setup = window.viewport_size().height < px(800.);
         let content = self.conversation_content(compact_workbench, compact_setup, cx);
         let sidebar_collapsed = self.sidebar.read(cx).is_collapsed();
         let show_sidebar = !narrow && !sidebar_collapsed;

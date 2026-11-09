@@ -75,7 +75,7 @@ impl SidebarView {
                         .text_size(px(12.))
                         .line_height(px(16.))
                         .text_color(cx.theme().muted_foreground)
-                        .child("Add a workspace for agent conversations."),
+                        .child("Add a project to work with files."),
                 )
                 .into_any_element();
         }

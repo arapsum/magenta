@@ -119,7 +119,8 @@ Exercise the states affected by the change, including:
   approval/denial. The unified Thinking timeline should show provider summaries
   and observable tool steps while active, keep command details bounded, and
   respect manual open/closed choices after completion.
-- Chat should retain its compact composer, while Work should show the project,
+- Chat should retain its compact composer at comfortable widths and move its
+  controls below the input in narrow panes. Work should show the project,
   Files, and Changes rail beside the composer and the code workbench when a
   project is open.
 - Keyboard navigation, visible focus, light/dark/system themes, and typography.

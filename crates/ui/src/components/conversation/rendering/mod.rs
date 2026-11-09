@@ -28,7 +28,7 @@ impl ConversationView {
         div()
             .w_full()
             .px(px(24.))
-            .py(px(13.))
+            .py(px(18.))
             .child(
                 v_flex()
                     .w_full()
@@ -40,8 +40,8 @@ impl ConversationView {
                             div()
                                 .w_full()
                                 .text_center()
-                                .text_size(px(12.))
-                                .text_color(cx.theme().muted_foreground.opacity(0.82))
+                                .text_size(px(11.))
+                                .text_color(cx.theme().muted_foreground)
                                 .child(label),
                         )
                     })
@@ -140,11 +140,11 @@ impl ConversationView {
                 this.child(
                     div()
                         .max_w(USER_MESSAGE_MAX_WIDTH)
-                        .px(px(16.))
-                        .py(px(11.))
-                        .rounded(px(17.))
+                        .px(px(18.))
+                        .py(px(13.))
+                        .rounded(px(16.))
                         .border_1()
-                        .border_color(cx.theme().border.opacity(0.38))
+                        .border_color(cx.theme().border.opacity(0.6))
                         .bg(crate::components::visual::surface(
                             crate::components::visual::SurfaceLevel::Raised,
                             cx,

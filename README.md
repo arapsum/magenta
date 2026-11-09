@@ -37,6 +37,11 @@ Work mode, add a project or choose a workspace directory first. The current
 desktop build reports Bubblewrap readiness but keeps commands disabled until the
 reviewed AgentFS overlay can be mounted safely; file tools remain available.
 
+The start screen offers prompts for exploring an idea, learning, or planning;
+Work offers project-oriented starting points. Selecting one fills the draft
+without sending it. The composer puts its controls below the text in narrow
+panes so the input stays readable alongside the workbench.
+
 ## Current features
 
 - Streaming chat with cancellation, Markdown, syntax-highlighted code, inline
@@ -70,9 +75,9 @@ reviewed AgentFS overlay can be mounted safely; file tools remain available.
 - Provider-advertised `/plan`, `/review`, and `/explain` commands with a
   searchable, keyboard-accessible palette, one-turn command persistence, and
   read-only Work tools for planning and review.
-- Warm light/dark themes, a layered dark surface system, a subtle animated fluid
-  field, and separate UI, code, and math typography preferences in a TOML-backed
-  settings window.
+- Graphite dark and warm ivory light themes, restrained magenta accents, and
+  separate UI, code, and math typography preferences in a TOML-backed settings
+  window.
 
 The full-height sidebar remains separate from the main panel: **the titlebar
 must not extend over the sidebar**. This layout rule applies to future UI work

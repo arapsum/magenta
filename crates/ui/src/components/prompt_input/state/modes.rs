@@ -9,6 +9,10 @@ impl PromptComposer {
         !self.input.read(cx).value().trim().is_empty() || !self.attachments.is_empty()
     }
 
+    pub(crate) fn has_draft(&self, cx: &App) -> bool {
+        self.has_content(cx) || self.selected_command.is_some() || self.retry_target.is_some()
+    }
+
     pub(crate) fn is_ready(&self, cx: &App) -> bool {
         let workspace_ready = self.mode == ConversationMode::Chat
             || (self.agent_capability.available()

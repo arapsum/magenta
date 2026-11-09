@@ -195,6 +195,7 @@ impl AgentCapability {
 }
 
 pub struct PromptComposer {
+    pub(super) narrow_layout: bool,
     pub(super) input: Entity<TextareaState>,
     pub(super) preview: Entity<TextViewState>,
     pub(super) preview_source: String,

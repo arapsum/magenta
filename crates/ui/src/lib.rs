@@ -11,6 +11,9 @@ mod error;
 mod settings;
 pub mod theme;
 
+// Keep the extra interface icons explicit so the full Lucide catalog is not embedded.
+gpui_kit::assets::icon_assets!(pub UiIcons, [GitBranch, Lightbulb, ListTodo, MessageCircle]);
+
 pub use self::app::{BubblewrapCapability, MainServices, MainView, WorkRuntimeReadiness};
 pub use self::error::{
     ErrorPresentation, ErrorSeverity, MagentaError, Result, notification_for_error,

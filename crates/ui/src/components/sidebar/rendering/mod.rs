@@ -1,56 +1,21 @@
 use super::*;
 use crate::components::provider_icon;
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::{linear_color_stop, linear_gradient};
 
 impl SidebarView {
     fn brand_header(cx: &App) -> AnyElement {
-        let mark = linear_gradient(
-            135.,
-            linear_color_stop(cx.theme().primary, 0.),
-            linear_color_stop(cx.theme().red.opacity(0.82), 1.),
-        );
-
         h_flex()
-            .h(px(48.))
+            .h(px(58.))
             .items_center()
             .gap(px(10.))
             .px(px(7.))
+            .child(crate::components::visual::brand_mark(30., cx))
             .child(
                 div()
-                    .relative()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(px(32.))
-                    .rounded(px(9.))
-                    .bg(mark)
-                    .border_1()
-                    .border_color(cx.theme().primary.opacity(0.42))
-                    .text_color(cx.theme().primary_foreground)
-                    .child(
-                        div()
-                            .absolute()
-                            .top(px(1.))
-                            .left(px(5.))
-                            .right(px(5.))
-                            .h(px(1.))
-                            .bg(cx.theme().primary_foreground.opacity(0.42)),
-                    )
-                    .child(Icon::new(IconName::Bot).xsmall()),
-            )
-            .child(
-                div()
-                    .text_size(px(16.))
+                    .text_size(px(15.))
                     .font_semibold()
                     .text_color(cx.theme().foreground)
                     .child("Magenta"),
-            )
-            .child(
-                div()
-                    .size(px(5.))
-                    .rounded_full()
-                    .bg(cx.theme().primary.opacity(0.86)),
             )
             .into_any_element()
     }
@@ -60,13 +25,13 @@ impl SidebarView {
             .ghost()
             .accessibility_id("new-chat")
             .w_full()
-            .h(px(34.))
-            .px(px(8.))
-            .rounded(px(8.))
+            .h(px(38.))
+            .px(px(12.))
+            .rounded(px(10.))
             .border_1()
-            .border_color(cx.theme().foreground.opacity(0.035))
-            .bg(cx.theme().sidebar_accent.opacity(0.68))
-            .text_color(cx.theme().sidebar_foreground)
+            .border_color(cx.theme().border)
+            .bg(cx.theme().popover)
+            .text_color(cx.theme().foreground)
             .icon(IconName::Plus)
             .label("New chat")
             .on_click(move |_, _window, cx| {
@@ -103,7 +68,7 @@ impl SidebarView {
             .rounded(ROW_RADIUS)
             .border_1()
             .border_color(if selected {
-                cx.theme().primary.opacity(0.3)
+                cx.theme().foreground.opacity(0.035)
             } else {
                 cx.theme().transparent
             })
@@ -119,9 +84,9 @@ impl SidebarView {
                         .left(px(0.))
                         .top(px(8.))
                         .bottom(px(8.))
-                        .w(px(2.))
+                        .w(px(3.))
                         .rounded_full()
-                        .bg(cx.theme().primary),
+                        .bg(cx.theme().magenta),
                 )
             })
             .child(rename.map_or_else(
@@ -183,7 +148,7 @@ impl SidebarView {
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .text_ellipsis()
-                            .text_size(px(13.5))
+                            .text_size(px(13.))
                             .line_height(px(18.))
                             .when(selected, gpui_kit::component::StyledExt::font_medium)
                             .child(conversation.title.clone()),
@@ -267,7 +232,7 @@ impl SidebarView {
                         .justify_center()
                         .font_family(cx.theme().mono_font_family.clone())
                         .text_size(px(10.))
-                        .text_color(cx.theme().muted_foreground.opacity(0.8))
+                        .text_color(cx.theme().muted_foreground)
                         .when(selected, gpui_kit::Styled::invisible)
                         .group_hover(group_name.clone(), gpui_kit::Styled::invisible)
                         .child(updated),
@@ -353,7 +318,7 @@ impl SidebarView {
                     .text_size(px(11.))
                     .line_height(px(16.))
                     .font_medium()
-                    .text_color(cx.theme().muted_foreground.opacity(0.78))
+                    .text_color(cx.theme().muted_foreground)
                     .child(title)
                     .into_any_element()
             },
@@ -452,11 +417,11 @@ impl SidebarView {
             .track_focus(&self.finder_launcher_focus)
             .accessibility_label("Search chats")
             .w_full()
-            .h_8()
+            .h(px(34.))
             .rounded(px(8.))
             .border_1()
-            .border_color(cx.theme().input.opacity(0.72))
-            .bg(cx.theme().popover.opacity(0.62))
+            .border_color(cx.theme().transparent)
+            .bg(cx.theme().transparent)
             .text_color(cx.theme().muted_foreground)
             .child(
                 h_flex()
@@ -483,9 +448,9 @@ impl SidebarView {
                             .px(px(5.))
                             .rounded(px(5.))
                             .border_1()
-                            .border_color(cx.theme().border)
+                            .border_color(cx.theme().sidebar_border)
                             .bg(cx.theme().sidebar)
-                            .text_size(px(10.))
+                            .text_size(px(9.5))
                             .text_color(cx.theme().muted_foreground)
                             .child(finder_shortcut),
                     ),
@@ -500,7 +465,7 @@ impl SidebarView {
     pub(super) fn render_content(&self, view: Entity<Self>, cx: &App) -> AnyElement {
         let controls = v_flex()
             .w_full()
-            .gap(px(10.))
+            .gap(px(8.))
             .child(Self::brand_header(cx))
             .child(Self::new_chat_button(view.clone(), cx))
             .child(self.search_button(cx));

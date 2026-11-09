@@ -81,9 +81,9 @@ impl PromptComposer {
 
         div()
             .debug_selector(|| "prompt-mode-selector".into())
-            .rounded_full()
+            .rounded(px(10.))
             .border_1()
-            .border_color(cx.theme().foreground.opacity(0.07))
+            .border_color(cx.theme().border.opacity(0.7))
             .bg(super::super::super::visual::surface(
                 super::super::super::visual::SurfaceLevel::Recessed,
                 cx,
@@ -95,15 +95,21 @@ impl PromptComposer {
                     .with_size(gpui_kit::component::Size::Small)
                     .child(
                         Toggle::new("prompt-mode-chat")
+                            .icon(gpui_kit::assets::IconName::MessageCircle)
                             .label("Chat")
-                            .w(px(60.))
+                            .gap(px(6.))
+                            .rounded(px(7.))
+                            .w(px(80.))
                             .h(px(28.))
                             .checked(mode == ConversationMode::Chat),
                     )
                     .child(
                         Toggle::new("prompt-mode-work")
+                            .icon(IconName::FolderOpen)
                             .label("Work")
-                            .w(px(60.))
+                            .gap(px(6.))
+                            .rounded(px(7.))
+                            .w(px(80.))
                             .h(px(28.))
                             .checked(mode == ConversationMode::Agent)
                             .disabled(!agent_available),

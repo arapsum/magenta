@@ -53,14 +53,14 @@ fn account_dropdown_opens_and_dismisses_from_an_outside_click(cx: &mut TestAppCo
 }
 
 #[test]
-fn signed_out_profile_keeps_the_local_fallback() {
+fn signed_out_profile_invites_account_connection() {
     assert_eq!(
         profile_details(None),
         ProfileDetails {
-            name: "Adleio".to_owned(),
-            detail: "Local profile".to_owned(),
-            initial: "A".to_owned(),
-            tooltip: "Local profile and settings".to_owned(),
+            name: "Your account".to_owned(),
+            detail: "Not connected".to_owned(),
+            initial: "M".to_owned(),
+            tooltip: "Account and settings".to_owned(),
             email: None,
             plan: None,
         }
