@@ -427,8 +427,8 @@ impl ConversationView {
                 call_id: result.call_id.clone(),
                 tool_name,
                 status,
-                input: Some(output),
-                output: None,
+                input: None,
+                output: Some(output),
             },
             cx,
         );

@@ -10,6 +10,10 @@ use super::super::{ResponseRun, ResponseRunCoordinator};
 use super::{RunEventResult, now};
 use crate::components::conversation::{GenerationPhase, LiveCommand};
 
+#[cfg(test)]
+#[path = "../../../../test/app/runs/stream_events.rs"]
+mod tests;
+
 impl ResponseRunCoordinator {
     pub(crate) fn apply_generation_event(
         &mut self,
@@ -313,8 +317,8 @@ fn apply_tool_result(run: &mut ResponseRun, result: &AgentToolOutput) {
         &result.call_id,
         &tool_name,
         status,
-        Some(bound_text(&output)),
         None,
+        Some(bound_text(&output)),
     );
 }
 
