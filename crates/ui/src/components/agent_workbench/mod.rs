@@ -350,6 +350,7 @@ fn language_for_path(path: &str) -> String {
         (_, "ts") => "typescript",
         (_, "tsx") => "tsx",
         (_, "py") => "python",
+        (_, "zig") => "zig",
         _ => "text",
     }
     .to_owned()

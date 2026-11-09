@@ -64,6 +64,7 @@ gpui-kit = { version = "=0.9.0", features = [
     "tree-sitter-tsx",
     "tree-sitter-typescript",
     "tree-sitter-yaml",
+    "tree-sitter-zig",
 ] }
 reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.11" }
 rand = "0.10.3"

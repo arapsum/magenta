@@ -89,6 +89,7 @@ Light/dark surface and syntax colors live in
 [themes/magenta.json](../../themes/magenta.json). Use theme tokens and semantic
 status colors. Settings choose installed UI/mono font families and sizes; they
 do not download fonts, and explicit component sizes remain part of typography.
+Zig code fences and `.zig` workbench files use the bundled Tree-sitter Zig grammar.
 Math has separate style and size settings. See the
 [root settings reference](../../README.md#local-data-and-settings).
 

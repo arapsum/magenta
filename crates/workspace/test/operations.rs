@@ -72,5 +72,14 @@ fn browser_lists_direct_children_and_reads_supported_documents() {
             .expect("source should be readable");
         assert_eq!(document.language, "rust");
         assert_eq!(document.content, "fn main() {}\n");
+
+        let zig = "pub fn main() void {}\n";
+        fs::write(directory.path().join("src/main.zig"), zig).unwrap();
+        let document = workspace
+            .read_document(directory.path().to_path_buf(), "src/main.zig".to_owned())
+            .await
+            .expect("Zig source should be readable");
+        assert_eq!(document.language, "zig");
+        assert_eq!(document.content, zig);
     });
 }

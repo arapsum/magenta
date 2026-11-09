@@ -150,6 +150,7 @@ fn language_for(path: &str) -> &'static str {
         (_, "ts") => "typescript",
         (_, "tsx") => "tsx",
         (_, "py") => "python",
+        (_, "zig") => "zig",
         _ => "text",
     }
 }

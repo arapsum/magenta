@@ -44,6 +44,45 @@ fn fenced_markdown_uses_a_marker_longer_than_the_code() {
 }
 
 #[test]
+fn zig_tokens_are_highlighted_in_code_and_markdown_with_both_themes() {
+    use gpui_kit::component::{
+        Rope,
+        highlighter::{HighlightTheme, SyntaxHighlighter},
+    };
+
+    let code = "const std = @import(\"std\");\npub fn main() void {\n    std.debug.print(\"Hello, Zig!\\n\", .{});\n}\n";
+    for (language, source) in [
+        ("zig", code.to_owned()),
+        ("markdown", fenced_markdown("zig", code)),
+    ] {
+        let mut highlighter = SyntaxHighlighter::new(language);
+        assert!(highlighter.update(None, &Rope::from(source.as_str()), None));
+        assert!(
+            !highlighter
+                .tree()
+                .expect("the grammar must parse the code")
+                .root_node()
+                .has_error()
+        );
+        for theme in [
+            HighlightTheme::default_dark(),
+            HighlightTheme::default_light(),
+        ] {
+            let styles = highlighter.styles(&(0..source.len()), theme.as_ref());
+            for token in ["const", "fn", "@import", "\"std\""] {
+                assert!(
+                    styles
+                        .iter()
+                        .any(|(range, style)| source.get(range.clone()) == Some(token)
+                            && style.color.is_some()),
+                    "{language} must assign a syntax color to {token}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn conversation_tables_use_adaptive_horizontal_layout() {
     assert_eq!(
         adaptive_table_style().overflow.x,
