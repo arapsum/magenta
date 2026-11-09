@@ -12,6 +12,8 @@ use magenta_core::{
 
 use super::{AgentCapability, PromptComposer, PromptComposerEvent, is_supported_image};
 
+mod model_picker;
+
 struct ModeSelectorHarness {
     composer: Entity<PromptComposer>,
 }

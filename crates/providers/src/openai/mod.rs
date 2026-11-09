@@ -40,8 +40,9 @@ use self::{
 const CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 // The Codex catalog filters models by its own client compatibility version;
 // Magenta's package version is intentionally independent from that contract.
-// Keep this in sync with the known-good Codex wire version used by oh-my-pi.
-const CLIENT_VERSION: &str = "0.153.0";
+// Verified against Codex CLI 0.167.0. GPT-6.1 Terra requires at least 0.159.0:
+// https://learn.chatgpt.com/docs/models#choose-a-model
+const CLIENT_VERSION: &str = "0.167.0";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const STREAM_TIMEOUT: Duration = Duration::from_mins(30);
 const MAX_ERROR_BODY: usize = 128 * 1024;

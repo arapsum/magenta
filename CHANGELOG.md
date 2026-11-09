@@ -20,6 +20,8 @@ automation, and the remaining Alpha exit checks are tracked in [ROADMAP.md](ROAD
 
 ### Changed
 
+- Refresh Codex catalog compatibility to expose current account models,
+  including GPT-6.1, and keep long model lists scrollable in the picker.
 - Refine the interface with graphite and ivory themes, a custom Magenta mark,
   quieter navigation, clearer conversation typography, and consistent surfaces.
 - Add draft-only Chat/Work starting points and adapt the composer to narrow panes.

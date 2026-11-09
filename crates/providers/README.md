@@ -22,6 +22,15 @@ configured in [openai/mod.rs](src/openai/mod.rs). It is not an API-key-configure
 adapter for the public OpenAI API. Other provider logos in the application are
 assets, not implemented adapters.
 
+Model choices come from the signed-in account's live catalog; Magenta does not
+maintain a fixed list of GPT generations. The Codex compatibility version is
+`0.167.0`, independent of Magenta's package version. Older compatibility values
+can hide new models: GPT-6.1 Terra requires `0.159.0` or later, as described in
+the [current model documentation](https://learn.chatgpt.com/docs/models#choose-a-model).
+This baseline exposes GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Sol, and GPT-6 Luna when
+the account advertises them. The picker scrolls to keep longer catalogs
+reachable. Restart Magenta after upgrading to refresh the model list.
+
 ## Source map
 
 | Module | Responsibility |

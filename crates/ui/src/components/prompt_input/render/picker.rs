@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::component::scroll::ScrollableElement as _;
 
 impl PromptComposer {
     pub(crate) fn model_selector(&self, view: Entity<Self>, cx: &App) -> AnyElement {
@@ -141,8 +142,12 @@ impl PromptComposer {
             .shadow(super::super::super::visual::floating_shadow(cx))
             .child(
                 v_flex()
+                    .id("prompt-model-list")
+                    .debug_selector(|| "prompt-model-list".into())
                     .w(px(256.))
                     .min_h(px(150.))
+                    .max_h(px(418.))
+                    .overflow_y_scrollbar()
                     .p(px(8.))
                     .gap(px(3.))
                     .child(picker_heading("Models", cx))
@@ -163,6 +168,8 @@ impl PromptComposer {
                 v_flex()
                     .flex_1()
                     .min_h(px(150.))
+                    .max_h(px(418.))
+                    .overflow_y_scrollbar()
                     .border_l_1()
                     .border_color(cx.theme().foreground.opacity(0.07))
                     .p(px(8.))
@@ -190,7 +197,12 @@ impl PromptComposer {
             model.provider.0, model.id.0
         )))
         .ghost()
+        .debug_selector({
+            let id = format!("model-{}-{}", model.provider.0, model.id.0);
+            move || id
+        })
         .w_full()
+        .flex_none()
         .h(px(44.))
         .px(px(9.))
         .rounded(px(9.))

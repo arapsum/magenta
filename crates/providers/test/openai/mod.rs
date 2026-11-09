@@ -1,6 +1,8 @@
 use super::*;
 use magenta_core::FinishReason;
 
+mod catalog;
+
 #[test]
 fn stream_events_keep_text_and_completion_order() {
     let delta: StreamEvent = serde_json::from_value(serde_json::json!({
